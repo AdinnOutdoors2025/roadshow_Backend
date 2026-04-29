@@ -8,23 +8,23 @@ const PORT = 3001;
 
 // Routes
 const authRoutes = require("./Routes/Userroutes/authroutes");
-const vehicleRoutes = require("../BackendRoadshow/Routes/Vehicleroutes/vehicleroutes");
+const vehicleRoutes = require("./Routes/Vehicleroutes/vehicleroutes");
 const entryVehicleRoutes = require("./Routes/EntryVehiclesRoutes/entryVehicles");
-const vehiclesAvailabilityRoutes = require("../BackendRoadshow/Routes/VehiclesAvailabilityRoutes/vehiclesavailability");
-const vehicleModelRoutes = require("../BackendRoadshow/Routes/VehicleModelRoutes/vehiclemodel");
-const vehicleModelElectionRoutes = require("../BackendRoadshow/Routes/VehicleModelElectionRoutes/vehicleModelElection");
-const vehiclesAvailabilityElectionRoutes = require("../BackendRoadshow/Routes/VehiclesAvailabilityElectionRoutes/vehiclesAvailabilityElection");
-const newVehicleRoutes = require("../BackendRoadshow/Routes/vehicleDetailsRoutes/vehicleDetails");
-const cartRoutes = require("../BackendRoadshow/Routes/cartRoutes/cart");
-const orderRoutes = require("../BackendRoadshow/Routes/OrderRoutes/orderRoutes");
-const adminAuthRoutes = require('../BackendRoadshow/Routes/Adminauthroutes/adminroutes');
+const vehiclesAvailabilityRoutes = require("./Routes/VehiclesAvailabilityRoutes/vehiclesavailability");
+const vehicleModelRoutes = require("./Routes/VehicleModelRoutes/vehiclemodel");
+const vehicleModelElectionRoutes = require("./Routes/VehicleModelElectionRoutes/vehicleModelElection");
+const vehiclesAvailabilityElectionRoutes = require("./Routes/VehiclesAvailabilityElectionRoutes/vehiclesAvailabilityElection");
+const newVehicleRoutes = require("./Routes/vehicleDetailsRoutes/vehicleDetails");
+const cartRoutes = require("./Routes/cartRoutes/cart");
+const orderRoutes = require("./Routes/OrderRoutes/orderRoutes");
+const adminAuthRoutes = require('./Routes/Adminauthroutes/adminroutes');
 const employeeAuthRoutes = require('./Routes/Employeeauthroutes/employeeauthroutes');
 const vehicleOfferRoutes = require('./Routes/vehicleOfferRoutes/vehicleOffer');
 const EnquiryRoutes = require("./Routes/EnquiryRoutes/Enquiry");
 const dashboardRoutes = require("./Routes/Dashboard/dashboard");
 const productenquiry = require("./Routes/Productenquiry/productenquiry");
 const ContactEnquiryRoutes = require("./Routes/ContactEnquiryRoute/ContactEnquiryRoute");
-
+const packageRoutes = require('./Routes/PackageManagementRoutes/packagemanagement');
 
 //Image upload requirements
 const multer = require("multer");
@@ -170,6 +170,7 @@ app.use(EnquiryRoutes);
 app.use(dashboardRoutes);
 app.use('/productenquiry', productenquiry);
 app.use(ContactEnquiryRoutes);
+app.use('/packages', packageRoutes);
 
 
 // VEHICLE DETAILS STORED WITH CRUD OPERATIONS
