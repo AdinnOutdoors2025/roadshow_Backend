@@ -13,12 +13,12 @@ const packageSchema = new mongoose.Schema({
   perDayRentalCost: { type: Number, required: true },
   dailyKmLimit: { type: Number, required: true },
   additionalHourCharges: { type: Number, required: true },
-  endUserCustomizationPermission: { type: Boolean, default: false },
+  endUserCustomizationPermission: { type: Boolean, default: false},
   promoterAvailable: { type: Boolean, default: false },
   promoterChargePerDay: { type: Number, default: 0 },
   driverCharges: { type: Number, required: true },
-  rtoCharges: { type: Number, default: 0 },
-  isActive: { type: Boolean, default: true }, 
+  rtoCharges: { type: Number,required: true },
+  isActive: { type: Boolean, default: true}, 
 }, { timestamps: true });
 
 module.exports = mongoose.model('Package', packageSchema);
