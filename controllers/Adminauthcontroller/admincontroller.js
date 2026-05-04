@@ -28,14 +28,14 @@ const registerAdmin = async (req, res) => {
         }
 
         // 2. Validate registration secret
-        if (secretCode !== ADMIN_SECRET) {
-            return res.status(401).json({
-                success: false,
-                message: 'INVALID_ADMIN_SECRET_CODE',
-            });
-        }
+        // if (secretCode !== ADMIN_SECRET) {
+        //     return res.status(401).json({
+        //         success: false,
+        //         message: 'INVALID_ADMIN_SECRET_CODE',
+        //     });
+        // }
 
-        // 3. Username format
+    
         if (!/^[a-zA-Z0-9]{4,20}$/.test(username)) {
             return res.status(400).json({
                 success: false,
@@ -43,7 +43,7 @@ const registerAdmin = async (req, res) => {
             });
         }
 
-        // 4. Password length
+    
         if (password.length < 6) {
             return res.status(400).json({
                 success: false,
@@ -51,7 +51,6 @@ const registerAdmin = async (req, res) => {
             });
         }
 
-        // 5. Unique username check
         const existing = await AdminUser.findOne({ username: username.trim() });
         if (existing) {
             return res.status(409).json({
@@ -60,7 +59,7 @@ const registerAdmin = async (req, res) => {
             });
         }
 
-        // 6. Save — pre-save hook hashes password & secretCode
+       
         const admin = new AdminUser({
             username: username.trim(),
             password,
@@ -69,7 +68,7 @@ const registerAdmin = async (req, res) => {
         });
         await admin.save();
 
-        // 7. Issue JWT
+  
         const token = generateToken(admin);
 
         return res.status(201).json({
@@ -88,14 +87,14 @@ const registerAdmin = async (req, res) => {
     }
 };
 
-// ─── LOGIN ADMIN ──────────────────────────────────────────────────────────────
 
-// Body: { username, password }  OR  { username, secretCode }
+
+
 const loginAdmin = async (req, res) => {
     const { username, password, secretCode } = req.body;
 
     try {
-        // 1. Required fields
+     
         if (!username) {
             return res.status(400).json({ success: false, message: 'Username is required' });
         }
@@ -106,13 +105,13 @@ const loginAdmin = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Provide either password or secretCode — not both' });
         }
 
-        // 2. Find admin
+    
         const admin = await AdminUser.findOne({ username: username.trim(), role: 'admin' });
         if (!admin) {
             return res.status(401).json({ success: false, message: 'ADMIN_NOT_FOUND' });
         }
 
-        // 3. Verify credential with bcrypt
+     
         let isAuthenticated = false;
         if (password) {
             isAuthenticated = await admin.comparePassword(password);
@@ -126,7 +125,7 @@ const loginAdmin = async (req, res) => {
             }
         }
 
-        // 4. Issue JWT
+      
         const token = generateToken(admin);
 
         return res.status(200).json({
@@ -145,7 +144,7 @@ const loginAdmin = async (req, res) => {
 // ─── GET ADMIN PROFILE (protected) ───────────────────────────────────────────
 
 const getAdminProfile = (req, res) => {
-    // req.admin attached by verifyAdminExists middleware
+   
     return res.status(200).json({
         success: true,
         user: {
