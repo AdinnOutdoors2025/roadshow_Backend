@@ -10,7 +10,7 @@ const userSchema = new mongoose.Schema(
     email: {
       type: String,
       unique: true,
-      sparse: true,           // email optional — multiple nulls allowed
+      sparse: true,          
       lowercase: true,
       trim: true,
       match: [/^\S+@\S+\.\S+$/, "Please enter a valid email address"],
@@ -22,13 +22,17 @@ const userSchema = new mongoose.Schema(
       trim: true,
       match: [/^[0-9]{10,15}$/, "Please enter a valid phone number (10–15 digits)"],
     },
+      address: {
+      type: String,
+      trim: true,
+    },
     isVerified: {
   type: Boolean,
   default: false
 },
   },
   {
-    timestamps: true,         // createdAt, updatedAt auto added
+    timestamps: true,        
   }
 );
 

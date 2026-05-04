@@ -3,8 +3,9 @@ const Order = require("../../Models/orderModel");
 const Cart = require("../../Models/Cartmodel/cart");
 const vehicleDetails = require("../../Models/vehicleDetails");
 require('dotenv').config();
-const { calculateOfferDetails } = require("../../ReusableComponents/reusableOfferLogic"); // correct path போடு
-
+const { calculateOfferDetails } = require("../../ReusableComponents/reusableOfferLogic"); 
+const packagemanagement = require("../../Models/PackageManagementModel/packagemanagement");
+const Users = require("../../Models/User/user");
 
 
 exports.createOrder = async (req, res) => {
@@ -213,6 +214,7 @@ exports.createOrder = async (req, res) => {
 // All users data 
 
 exports.getOrders = async (req, res) => {
+
   try {
     const orders = await Order.find().sort({ createdAt: -1 });
 
@@ -252,30 +254,7 @@ exports.updateOrderPipeline = async (req, res) => {
       movedAt: new Date(),
     });
 
-    // ── Negotiation logic ──
-    // if (pipelineStatus === "negotiation") {
-    //   const discountPercent = NEGOTIATION_DISCOUNT / 100;
-
-    //   // Find last negotiation log amount (if any)
-    //   const prevNegLogs = order.negotiationLogs || [];
-    //   const lastNegAmount =
-    //     prevNegLogs.length > 0
-    //       ? prevNegLogs[prevNegLogs.length - 1].amount
-    //       : null;
-
-    //   const baseAmount = lastNegAmount !== null ? lastNegAmount : order.grandTotal;
-    //   const negotiatedAmount = Math.round(baseAmount * (1 - discountPercent));
-
-    //   order.negotiationLogs.push({
-    //     fromStage: oldStage,
-    //     toStage: pipelineStatus,
-    //     movedBy: movedBy || "Admin",
-    //     movedAt: new Date(),
-    //     amount: negotiatedAmount,
-    //   });
-
-    //   order.grandNegotiationTotal = negotiatedAmount;
-    // }
+   
 
     if (pipelineStatus === "negotiation") {
       const discountPercent = NEGOTIATION_DISCOUNT / 100;
