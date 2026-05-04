@@ -13,6 +13,7 @@ const generateToken = (admin) =>
         { expiresIn: JWT_EXPIRES_IN }
     );
 
+
 // ─── REGISTER ADMIN ───────────────────────────────────────────────────────────
 
 const registerAdmin = async (req, res) => {
@@ -94,54 +95,76 @@ const loginAdmin = async (req, res) => {
     const { username, password, secretCode } = req.body;
 
     try {
-     
         if (!username) {
-            return res.status(400).json({ success: false, message: 'Username is required' });
+            return res.status(400).json({
+                success: false,
+                message: 'Username is required',
+            });
         }
+
         if (!password && !secretCode) {
-            return res.status(400).json({ success: false, message: 'Provide either password or secretCode' });
-        }
-        if (password && secretCode) {
-            return res.status(400).json({ success: false, message: 'Provide either password or secretCode — not both' });
+            return res.status(400).json({
+                success: false,
+                message: 'Password or Secret Code required',
+            });
         }
 
-    
-        const admin = await AdminUser.findOne({ username: username.trim(), role: 'admin' });
+        const admin = await AdminUser.findOne({
+            username: username.trim(),
+            role: 'admin',
+        });
+
         if (!admin) {
-            return res.status(401).json({ success: false, message: 'ADMIN_NOT_FOUND' });
+            return res.status(401).json({
+                success: false,
+                message: 'ADMIN_NOT_FOUND',
+            });
         }
 
-     
         let isAuthenticated = false;
+
+      
         if (password) {
             isAuthenticated = await admin.comparePassword(password);
+
             if (!isAuthenticated) {
-                return res.status(401).json({ success: false, message: 'INVALID_PASSWORD' });
-            }
-        } else {
-            isAuthenticated = await admin.compareSecretCode(secretCode);
-            if (!isAuthenticated) {
-                return res.status(401).json({ success: false, message: 'INVALID_SECRET_CODE' });
+                return res.status(401).json({
+                    success: false,
+                    message: 'INVALID_PASSWORD',
+                });
             }
         }
 
       
+        else if (secretCode) {
+            isAuthenticated = await admin.compareSecretCode(secretCode);
+
+            if (!isAuthenticated) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'INVALID_SECRET_CODE',
+                });
+            }
+        }
+
         const token = generateToken(admin);
 
         return res.status(200).json({
             success: true,
             message: 'Login successful',
             token,
-            user: { id: admin._id, username: admin.username, role: admin.role },
+            user: admin,
         });
 
     } catch (err) {
-        console.error('Login error:', err.message);
-        return res.status(500).json({ success: false, message: 'Server error during login' });
+        console.error(err);
+        return res.status(500).json({
+            success: false,
+            message: 'Server error',
+        });
     }
 };
 
-// ─── GET ADMIN PROFILE (protected) ───────────────────────────────────────────
 
 const getAdminProfile = (req, res) => {
    

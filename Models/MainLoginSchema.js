@@ -2,70 +2,69 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const adminUserSchema = new mongoose.Schema(
-    {
-        username: {
-            type: String,
-            required: [true, 'Username is required'],
-            unique: true,
-            trim: true,
-            minlength: [4, 'Username must be at least 4 characters'],
-            maxlength: [20, 'Username cannot exceed 20 characters'],
-            match: [/^[a-zA-Z0-9]+$/, 'Username can only contain letters and numbers'],
-        },
-        password: {
-            type: String,
-            required: [true, 'Password is required'],
-            minlength: [6, 'Password must be at least 6 characters'],
-        },
-        secretCode: {
-            type: String,
-            required: [true, 'Secret code is required'],
-        },
-        isAdmin: {
-            type: Number,
-            default: 1,
-        },
-        isStaffAdmin: {
-            type: Number,
-            default: 0,
-        },
-        role: {
-            type: String,
-            enum: ['user', 'admin'],
-            default: 'admin',
-        },
+{
+    username: {
+        type: String,
+        required: [true, 'Username is required'],
+        unique: true,
+        trim: true,
+        minlength: 4,
+        maxlength: 20,
+        match: [/^[a-zA-Z0-9]+$/, 'Only letters & numbers'],
     },
-    { timestamps: true }
+    password: {
+        type: String,
+        required: true,
+        minlength: 6,
+    },
+    secretCode: {
+        type: String,
+        required: true,
+    },
+    isAdmin: {
+        type: Number,
+        default: 1,
+    },
+    isStaffAdmin: {
+        type: Number,
+        default: 0,
+    },
+    role: {
+        type: String,
+        enum: ['user', 'admin'],
+        default: 'admin',
+    },
+},
+{ timestamps: true }
 );
 
-// Hash password & secretCode before saving
+
 adminUserSchema.pre('save', async function (next) {
     try {
         if (this.isModified('password')) {
-            const salt = await bcrypt.genSalt(10);
-            this.password = await bcrypt.hash(this.password, salt);
+            this.password = await bcrypt.hash(this.password, 10);
         }
+
         if (this.isModified('secretCode')) {
-            const salt = await bcrypt.genSalt(10);
-            this.secretCode = await bcrypt.hash(this.secretCode, salt);
+            this.secretCode = await bcrypt.hash(this.secretCode, 10);
         }
+
         next();
     } catch (err) {
         next(err);
     }
 });
 
-// Compare plain password with hashed
-adminUserSchema.methods.comparePassword = async function (plainPassword) {
+
+adminUserSchema.methods.comparePassword = function (plainPassword) {
     return bcrypt.compare(plainPassword, this.password);
 };
 
-// Compare plain secretCode with hashed
-adminUserSchema.methods.compareSecretCode = async function (plainCode) {
+
+adminUserSchema.methods.compareSecretCode = function (plainCode) {
     return bcrypt.compare(plainCode, this.secretCode);
 };
 
-// Strip sensitive fields from JSON response
 adminUserSchema.methods.toJSON = function () {
     const obj = this.toObject();
     delete obj.password;
