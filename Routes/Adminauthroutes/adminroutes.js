@@ -12,11 +12,10 @@ const {
     verifyAdminExists,
 } = require('../../Middleware/rolemiddleware');
 
-// ── Public routes ─────────────────────────────────────────────────────────────
+
 router.post('/register-admin', registerAdmin);
 router.post('/admin',          loginAdmin);
 
-// ── Protected routes ──────────────────────────────────────────────────────────
 router.get('/me',
     protect,        
     isAdmin,           
