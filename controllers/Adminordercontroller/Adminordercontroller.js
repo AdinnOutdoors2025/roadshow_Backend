@@ -470,7 +470,7 @@ exports.createCampaignType = async (req, res) => {
     if (!name?.trim())
       return res.status(400).json({ message: "Campaign type name required" });
 
-    // Already exists-ஆ check பண்ணு
+  
     const existing = await CampaignType.findOne({
       name: { $regex: `^${name.trim()}$`, $options: "i" }
     });
