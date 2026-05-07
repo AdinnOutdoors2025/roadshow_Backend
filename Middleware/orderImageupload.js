@@ -1,12 +1,9 @@
-
-
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-  
     const modelName = req.body.model || "misc";
     const formattedModel = modelName.trim().replace(/\s+/g, "_");
     const uploadPath = path.join(__dirname, "../public/uploads", formattedModel);
@@ -22,16 +19,10 @@ const storage = multer.diskStorage({
   },
 });
 
-const vehicleUpload = multer({
-  storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-}).fields([
-  { name: "mainImage", maxCount: 4 },
-  { name: "sideImages", maxCount: 4 },
-  { name: "interiorImages", maxCount: 4 },
-  { name: "ledDisplayImage", maxCount: 4 },
-  { name: "brandingSample", maxCount: 4 },
-  { name: "vehicleVideo", maxCount: 4 },
-]);
 
-module.exports = vehicleUpload;
+const adminOrderUpload = multer({
+  storage: storage,
+  limits: { fileSize: 50 * 1024 * 1024 }, 
+}).any();
+
+module.exports = {adminOrderUpload };

@@ -26,6 +26,7 @@ const productenquiry = require("./Routes/Productenquiry/productenquiry");
 const ContactEnquiryRoutes = require("./Routes/ContactEnquiryRoute/ContactEnquiryRoute");
 const packageRoutes = require('./Routes/PackageManagementRoutes/packagemanagement');
 const adminOrderRoutes = require("./Routes/AdminorderRoutes/AdminorderRoutes");
+const locationRoutes = require('./Routes/locationRoutes/locationRoutes');
 //Image upload requirements
 const multer = require("multer");
 const path = require("path");
@@ -172,6 +173,7 @@ app.use('/productenquiry', productenquiry);
 app.use(ContactEnquiryRoutes);
 app.use('/packages', packageRoutes);
 app.use("/admin", adminOrderRoutes);
+app.use('/locations', locationRoutes);
 
 
 // VEHICLE DETAILS STORED WITH CRUD OPERATIONS

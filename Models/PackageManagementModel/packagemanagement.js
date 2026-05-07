@@ -20,6 +20,7 @@ const packageSchema = new mongoose.Schema({
   promoterChargePerDay: { type: Number, default: 0 },
   driverCharges: { type: Number, required: true },
   rtoCharges: { type: Number, required: true },
+  perKmCharge: { type: Number, default: 0 },
   isActive: { type: Boolean, default: true },
   inactiveReason: { type: String, default: '' }, 
 }, { timestamps: true });
