@@ -91,10 +91,11 @@ app.use(cors({
 
 const allowedOrigins = [
   "http://localhost:3000",
-  "http://192.168.2.159:3000",
-  "https://frontend-roadshow.vercel.app",
-  "https://frontend-roadshow-97ae.vercel.app",
-  "https://frontend-roadshow-*-your-username.vercel.app",
+  // "http://192.168.2.159:3000",
+  // "https://frontend-roadshow.vercel.app",
+  // "https://frontend-roadshow-97ae.vercel.app",
+  // "https://frontend-roadshow-*-your-username.vercel.app",
+  "https://roadshow-backend.onrender.com/"
 ];
 
 app.use(
