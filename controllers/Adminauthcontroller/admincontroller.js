@@ -1,5 +1,8 @@
+
+
 const jwt = require('jsonwebtoken');
 const AdminUser = require('../../Models/MainLoginSchema');
+const { successResponse, errorResponse } = require('../../Utils/response');
 
 const JWT_SECRET     = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN;
@@ -17,32 +20,20 @@ const registerAdmin = async (req, res) => {
 
   try {
     if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'All fields are required: username, password',
-      });
+      return errorResponse(res, 'All fields are required: username, password', null, 400);
     }
 
     if (!/^[a-zA-Z0-9]{4,20}$/.test(username)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Username must be 4-20 alphanumeric characters',
-      });
+      return errorResponse(res, 'Username must be 4-20 alphanumeric characters', null, 400);
     }
 
     if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: 'Password must be at least 6 characters',
-      });
+      return errorResponse(res, 'Password must be at least 6 characters', null, 400);
     }
 
     const existing = await AdminUser.findOne({ username: username.trim() });
     if (existing) {
-      return res.status(409).json({
-        success: false,
-        message: 'USERNAME_ALREADY_EXISTS',
-      });
+      return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
     }
 
     const admin = new AdminUser({
@@ -54,19 +45,17 @@ const registerAdmin = async (req, res) => {
 
     const token = generateToken(admin);
 
-    return res.status(201).json({
-      success: true,
-      message: 'Admin registered successfully',
+    return successResponse(res, 'Admin registered successfully', {
       token,
       user: { id: admin._id, username: admin.username, role: admin.role },
-    });
+    }, 201);
 
   } catch (err) {
     if (err.code === 11000) {
-      return res.status(409).json({ success: false, message: 'USERNAME_ALREADY_EXISTS' });
+      return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
     }
     console.error('Register error:', err.message);
-    return res.status(500).json({ success: false, message: 'Server error during registration' });
+    return errorResponse(res, 'Server error during registration', err.message);
   }
 };
 
@@ -76,10 +65,7 @@ const loginAdmin = async (req, res) => {
 
   try {
     if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Username and password are required',
-      });
+      return errorResponse(res, 'Username and password are required', null, 400);
     }
 
     const admin = await AdminUser.findOne({
@@ -88,41 +74,27 @@ const loginAdmin = async (req, res) => {
     });
 
     if (!admin) {
-      return res.status(401).json({
-        success: false,
-        message: 'ADMIN_NOT_FOUND',
-      });
+      return errorResponse(res, 'ADMIN_NOT_FOUND', null, 401);
     }
 
     const isAuthenticated = await admin.comparePassword(password);
     if (!isAuthenticated) {
-      return res.status(401).json({
-        success: false,
-        message: 'INVALID_PASSWORD',
-      });
+      return errorResponse(res, 'INVALID_PASSWORD', null, 401);
     }
 
     const token = generateToken(admin);
 
-    return res.status(200).json({
-      success: true,
-      message: 'Login successful',
-      token,
-      user: admin,
-    });
+    return successResponse(res, 'Login successful', { token, user: admin });
 
   } catch (err) {
     console.error(err);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error',
-    });
+    return errorResponse(res, 'Server error', err.message);
   }
 };
 
+
 const getAdminProfile = (req, res) => {
-  return res.status(200).json({
-    success: true,
+  return successResponse(res, 'Profile fetched successfully', {
     user: {
       id:        req.admin._id,
       username:  req.admin.username,
