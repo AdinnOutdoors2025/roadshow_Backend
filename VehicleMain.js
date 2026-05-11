@@ -29,6 +29,8 @@ const dashboardRoutes = require("./Routes/Dashboard/dashboard");
 const productenquiry = require("./Routes/Productenquiry/productenquiry");
 const ContactEnquiryRoutes = require("./Routes/ContactEnquiryRoute/ContactEnquiryRoute");
 const packageRoutes = require('./Routes/PackageManagementRoutes/packagemanagement');
+// VEHICLE TYPE 
+const vehicleTypeRoutes = require("./Routes/vehicleTypeRoutes");
 
 //Image upload requirements
 const multer = require("multer");
@@ -135,9 +137,8 @@ app.use(express.static("public"));
 
 mongoose
   .connect(
-    "mongodb+srv://roadshowAdinn:doAztsUGMfooi5PY@roadshowadinn.sephmyg.mongodb.net/?appName=RoadshowAdinn",
-  //  "mongodb://localhost:27017/Roadshow",
-
+    // "mongodb+srv://roadshowAdinn:doAztsUGMfooi5PY@roadshowadinn.sephmyg.mongodb.net/?appName=RoadshowAdinn",
+   "mongodb://localhost:27017/Roadshows",
   )
 
 // mongoose
@@ -156,7 +157,9 @@ mongoose
 
 
 // ─── Routes ──────────────────────────────────
-app.use(newVehicleRoutes);
+app.use("/api", newVehicleRoutes);
+//VEHICLE TYPE 
+app.use("/api", vehicleTypeRoutes);
 
 app.use("/auth", authRoutes);
 app.use("/vehicles", vehicleRoutes);
