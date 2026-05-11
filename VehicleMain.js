@@ -1,3 +1,7 @@
+const dns = require('dns');
+dns.setServers(['8.8.8.8', '1.1.1.1']); //Added For IP Whitelisting new11
+
+
 const express = require("express");
 const app = express();
 const cors = require("cors");
@@ -132,8 +136,8 @@ app.use(express.static("public"));
 
 mongoose
   .connect(
-    // "mongodb+srv://roadshowAdinn:doAztsUGMfooi5PY@roadshowadinn.sephmyg.mongodb.net/?appName=RoadshowAdinn",
-   "mongodb://localhost:27017/Roadshow",
+    "mongodb+srv://roadshowAdinn:doAztsUGMfooi5PY@roadshowadinn.sephmyg.mongodb.net/?appName=RoadshowAdinn",
+  //  "mongodb://localhost:27017/Roadshow",
 
   )
 
