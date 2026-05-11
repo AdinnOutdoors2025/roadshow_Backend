@@ -137,8 +137,8 @@ app.use(express.static("public"));
 
 mongoose
   .connect(
-    // "mongodb+srv://roadshowAdinn:doAztsUGMfooi5PY@roadshowadinn.sephmyg.mongodb.net/?appName=RoadshowAdinn",
-   "mongodb://localhost:27017/Roadshows",
+   "mongodb+srv://roadshowAdinn:doAztsUGMfooi5PY@roadshowadinn.sephmyg.mongodb.net/?appName=RoadshowAdinn",
+  //  "mongodb://localhost:27017/Roadshows",
   )
 
 // mongoose
