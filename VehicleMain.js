@@ -31,7 +31,7 @@ const ContactEnquiryRoutes = require("./Routes/ContactEnquiryRoute/ContactEnquir
 const packageRoutes = require('./Routes/PackageManagementRoutes/packagemanagement');
 const adminOrderRoutes = require("./Routes/AdminorderRoutes/AdminorderRoutes");
 const locationRoutes = require('./Routes/locationRoutes/locationRoutes');
-const vehicleTypeRoutes = require("./Routes/vehicleTypeRoutes");
+const vehicleTypeRoutes = require("./Routes/VehicleTypeRoutes");
 //Image upload requirements
 const multer = require("multer");
 const path = require("path");
