@@ -69,22 +69,22 @@ const verifyAdminExists = async (req, res, next) => {
 
 // STEP 3B — verifyEmployeeExists   (Employee DB check)
 
-const verifyEmployeeExists = async (req, res, next) => {
-    try {
-        const employee = await Employee.findById(req.user.id);
-        if (!employee) {
-            return res.status(401).json({
-                success: false,
-                message: 'Employee account no longer exists.',
-            });
-        }
-        req.employee = employee;
-        next();
-    } catch (err) {
-        console.error('verifyEmployeeExists error:', err.message);
-        return res.status(500).json({ success: false, message: 'Server error.' });
-    }
-};
+// const verifyEmployeeExists = async (req, res, next) => {
+//     try {
+//         const employee = await Employee.findById(req.user.id);
+//         if (!employee) {
+//             return res.status(401).json({
+//                 success: false,
+//                 message: 'Employee account no longer exists.',
+//             });
+//         }
+//         req.employee = employee;
+//         next();
+//     } catch (err) {
+//         console.error('verifyEmployeeExists error:', err.message);
+//         return res.status(500).json({ success: false, message: 'Server error.' });
+//     }
+// };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Named shortcuts (optional convenience aliases)
@@ -98,5 +98,5 @@ module.exports = {
     isAdmin,            
     isEmployee,        
     verifyAdminExists,  
-    verifyEmployeeExists,
+    // verifyEmployeeExists,
 };

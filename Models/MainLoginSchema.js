@@ -1,6 +1,35 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+// const adminUserSchema = new mongoose.Schema(
+//   {
+//     username: {
+//       type: String,
+//       required: [true, 'Username is required'],
+//       unique: true,
+//       trim: true,
+//       minlength: 4,
+//       maxlength: 20,
+//       match: [/^[a-zA-Z0-9]+$/, 'Only letters & numbers'],
+//     },
+//     password: {
+//       type: String,
+//       required: true,
+//       minlength: 6,
+//     },
+//     isAdmin: { type: Number, default: 1 },
+//     isStaffAdmin: { type: Number, default: 0 },
+//     role: {
+//       type: String,
+//       enum: ['user', 'admin'],
+//       default: 'admin',
+//     },
+//   },
+//   { timestamps: true }
+// );
+
+
+
 const adminUserSchema = new mongoose.Schema(
   {
     username: {
@@ -17,11 +46,19 @@ const adminUserSchema = new mongoose.Schema(
       required: true,
       minlength: 6,
     },
+    phone: {
+      type: String,
+      default: '',
+    },
     isAdmin: { type: Number, default: 1 },
-    isStaffAdmin: { type: Number, default: 0 },
+    status: {
+      type: String,
+      enum: ['active', 'inactive'],
+      default: 'active',
+    },
     role: {
       type: String,
-      enum: ['user', 'admin'],
+      enum: ['admin', 'staffAdmin'],
       default: 'admin',
     },
   },

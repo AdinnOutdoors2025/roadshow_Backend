@@ -22,7 +22,7 @@ const newVehicleRoutes = require("./Routes/vehicleDetailsRoutes/vehicleDetails")
 const cartRoutes = require("./Routes/cartRoutes/cart");
 const orderRoutes = require("./Routes/OrderRoutes/orderRoutes");
 const adminAuthRoutes = require('./Routes/Adminauthroutes/adminroutes');
-const employeeAuthRoutes = require('./Routes/Employeeauthroutes/employeeauthroutes');
+// const employeeAuthRoutes = require('./Routes/Employeeauthroutes/employeeauthroutes');
 const vehicleOfferRoutes = require('./Routes/vehicleOfferRoutes/vehicleOffer');
 const EnquiryRoutes = require("./Routes/EnquiryRoutes/Enquiry");
 const dashboardRoutes = require("./Routes/Dashboard/dashboard");
@@ -138,7 +138,8 @@ app.use(express.static("public"));
 mongoose
   .connect(
     // "mongodb+srv://roadshowAdinn:doAztsUGMfooi5PY@roadshowadinn.sephmyg.mongodb.net/?appName=RoadshowAdinn",
-   "mongodb://localhost:27017/Roadshows",
+"mongodb+srv://Vignesh:Vignesh@roadshow.0jruqnx.mongodb.net/?appName=Roadshow",
+  //  "mongodb://localhost:27017/Roadshows",
   )
 
 // mongoose
@@ -171,7 +172,7 @@ app.use(vehiclesAvailabilityElectionRoutes);
 app.use(cartRoutes);
 app.use(orderRoutes);
 app.use(adminAuthRoutes);
-app.use(employeeAuthRoutes);
+// app.use(employeeAuthRoutes);
 app.use('/vehicleoffers', vehicleOfferRoutes);
 app.use(EnquiryRoutes);
 app.use(dashboardRoutes);

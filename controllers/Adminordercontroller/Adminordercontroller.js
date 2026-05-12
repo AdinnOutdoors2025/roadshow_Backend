@@ -24,55 +24,6 @@ async function generateAdminOrderId() {
 }
 
 
-function calculateVehiclePricing(pkg, fromDate, toDate, quantity, needPromoter, extraKm = 0, extraDays = 0, extraHours = 0, additionalFields = [],promoterQuantity) {
-  const from = new Date(fromDate);
-  const to = new Date(toDate);
-
-  const baseDays = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)));
-  const totalDays = baseDays + (extraDays || 0);
-
-  const rentalCost = pkg.perDayRentalCost * totalDays * quantity;
-  const driverCost = pkg.driverCharges * totalDays * quantity;
-
-    const promoterCost = needPromoter && pkg.promoterAvailable
-    ? (pkg.promoterChargePerDay || 0) * totalDays * promoterQuantity  
-    : 0;
-  const rtoCost = pkg.rtoCharges * quantity;
-
-  const extraKmCost = extraKm > 0 ? (pkg.perKmCharge || 0) * extraKm : 0;
-  const extraHourCost = extraHours > 0 ? (pkg.additionalHourCharges || 0) * extraHours : 0;
-
-  const additionalNet = (additionalFields || []).reduce((acc, c) => {
-    const amt = Number(c.amount) || 0;
-    return c.mode === "+" ? acc + amt : acc - amt;
-  }, 0);
-
-  const subtotal = Math.max(0, rentalCost + driverCost + promoterCost + rtoCost + extraKmCost + extraHourCost + additionalNet);
-  const gstAmount = Math.round(subtotal * 0.18);
-  const totalAmount = subtotal + gstAmount;
-
-  return {
-    totalDays,
-    perDayRentalCost: pkg.perDayRentalCost,
-    driverCharges: pkg.driverCharges,
-    promoterChargePerDay: needPromoter ? (pkg.promoterChargePerDay || 0) : 0,
-    rtoCharges: pkg.rtoCharges,
-    additionalHourCharges: pkg.additionalHourCharges,
-    dailyKmLimit: pkg.dailyKmLimit,
-    rentalCost,
-    driverCost,
-    promoterCost,
-    rtoCost,
-    extraKmCost,
-    extraHourCost,
-    additionalNet,
-    subtotal,
-    gstAmount,
-    totalAmount,
-  };
-}
-
-
 
 exports.createCustomer = async (req, res) => {
   try {
@@ -99,92 +50,6 @@ exports.createCustomer = async (req, res) => {
     await customer.save();
 
     return successResponse(res, "Customer created successfully", { customer }, 201);
-  } catch (error) {
-    return errorResponse(res, error.message);
-  }
-};
-
-
-exports.searchCustomers = async (req, res) => {
-  try {
-    const { q } = req.query;
-    if (!q || q.trim().length < 2)
-      return errorResponse(res, "Search query must be at least 2 characters", null, 400);
-
-    const query = q.trim();
-    const customers = await User.find({
-      $or: [
-        { phone: { $regex: query, $options: "i" } },
-        { name: { $regex: query, $options: "i" } },
-      ],
-    }).limit(10).select("_id name phone address email createdAt");
-
-    return successResponse(res, "Customers fetched successfully", { total: customers.length, customers });
-  } catch (error) {
-    return errorResponse(res, error.message);
-  }
-};
-
-
-exports.getCustomerById = async (req, res) => {
-  try {
-    const customer = await User.findById(req.params.customerId).select("_id name phone address email");
-    if (!customer)
-      return errorResponse(res, "Customer not found", null, 404);
-
-    return successResponse(res, "Customer fetched successfully", { customer });
-  } catch (error) {
-    return errorResponse(res, error.message);
-  }
-};
-
-
-// ─── Packages ─────────────────────────────────────────────────────────────────
-
-exports.getPackagesForOrder = async (req, res) => {
-  try {
-    const filter = { isActive: true };
-    if (req.query.vehicleType) filter.vehicleType = req.query.vehicleType;
-    if (req.query.vehicleModel) filter.vehicleModel = req.query.vehicleModel;
-
-    const packages = await Package.find(filter).select(
-      "_id vehicleType vehicleModel perDayRentalCost dailyKmLimit additionalHourCharges " +
-      "promoterAvailable promoterChargePerDay driverCharges rtoCharges"
-    );
-
-    return successResponse(res, "Packages fetched successfully", { packages });
-  } catch (error) {
-    return errorResponse(res, error.message);
-  }
-};
-
-
-// ─── Preview Pricing ──────────────────────────────────────────────────────────
-
-exports.previewPricing = async (req, res) => {
-  try {
-    const { packageId, fromDate, toDate, quantity, needPromoter, extraKm, extraDays, additionalFields } = req.body;
-
-    if (!packageId || !fromDate || !toDate || !quantity)
-      return errorResponse(res, "packageId, fromDate, toDate, quantity required", null, 400);
-
-    const pkg = await Package.findById(packageId);
-    if (!pkg)
-      return errorResponse(res, "Package not found", null, 404);
-    if (!pkg.isActive)
-      return errorResponse(res, "Package is inactive", null, 400);
-
-    if (new Date(fromDate) >= new Date(toDate))
-      return errorResponse(res, "fromDate must be before toDate", null, 400);
-
-    const pricing = calculateVehiclePricing(
-      pkg, fromDate, toDate, Number(quantity), !!needPromoter,
-      Number(extraKm) || 0, Number(extraDays) || 0,
-      0,
-      additionalFields
-    );
-
-    return successResponse(res, "Pricing calculated successfully", { pricing });
   } catch (error) {
     return errorResponse(res, error.message);
   }
@@ -373,6 +238,8 @@ exports.createAdminOrder = async (req, res) => {
   }
 };
 
+
+
 exports.getCustomerOrders = async (req, res) => {
   try {
     const orders = await Order.find({ userId: req.params.customerId })
@@ -469,5 +336,147 @@ exports.createCampaignType = async (req, res) => {
     return successResponse(res, "Campaign type created successfully", { type }, 201);
   } catch (error) {
     return errorResponse(res, error.message);
+  }
+};
+
+const STAGE_ORDER = [
+  "todo",
+  "inProgress",
+  "customerConfirmation",
+  "waitingForPO",
+  "paymentStage1",
+  "projectCodeCreation",
+  "projectExecution",
+  "onRoad",
+  "campaignRunning",
+  "vehicleUnavailable",
+  "clientClosure",
+  "invoiceGeneration",
+  "paymentStage2",
+  "closedWon",
+  "closedLost",
+];
+
+
+exports.getOrdersByPipeline = async (req, res) => {
+  try {
+    const orders = await Order.find()
+      .sort({ createdAt: -1 })
+      .select(
+        "orderId name phone customerType pipelineStatus orderStatus " +
+        "grandTotal grandNegotiationTotal bookingItems handlerName " +
+        "isAdminCreated createdAt pipelineLogs negotiationLogs " +
+        "companyName email address poDocument paymentAmount advancePayment totalPayment"
+      );
+
+    // Group by stage
+    const grouped = {};
+    STAGE_ORDER.forEach((s) => (grouped[s] = []));
+    orders.forEach((o) => {
+      const stage = o.pipelineStatus || "todo";
+      if (grouped[stage]) grouped[stage].push(o);
+      else grouped["todo"].push(o);
+    });
+
+    return successResponse(res, "Pipeline orders fetched", { grouped, stages: STAGE_ORDER });
+  } catch (error) {
+    return errorResponse(res, error.message);
+  }
+};
+
+exports.updateOrderPipeline = async (req, res) => {
+  try {
+    const { orderId } = req.params; 
+    const {
+      pipelineStatus,
+      movedBy,
+      handlerName,
+      customerType,
+      paymentAmount,
+      advancePayment,
+      totalPayment,
+    } = req.body;
+
+    // Validate stage
+    if (!STAGE_ORDER.includes(pipelineStatus))
+      return errorResponse(res, "Invalid pipeline stage", null, 400);
+
+    const order = await Order.findById(orderId);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const oldStage = order.pipelineStatus;
+
+    if (pipelineStatus === "inProgress") {
+      if (!handlerName?.trim())
+        return errorResponse(res, "Handler name is required to move to In Progress", null, 400);
+
+      order.handlerName = handlerName.trim();
+
+    
+      if (order.customerType === null || order.customerType === undefined) {
+        if (customerType === undefined || customerType === null)
+          return errorResponse(res, "Customer type is required (0 = Agency, 1 = Individual)", null, 400);
+
+        if (![0, 1].includes(Number(customerType)))
+          return errorResponse(res, "customerType must be 0 or 1", null, 400);
+
+        order.customerType = Number(customerType);
+      }
+    }
+
+  
+    if (pipelineStatus === "waitingForPO") {
+      const poFile = req.file;
+      if (!poFile)
+        return errorResponse(res, "PO document upload is required", null, 400);
+
+      order.poDocument = `/uploads/${path.basename(poFile.path)}`;
+    }
+
+    // → waitingForPO → paymentStage1 (only individual = 1)
+    if (pipelineStatus === "paymentStage1") {
+      if (order.customerType !== 1)
+        return errorResponse(res, "Payment Stage 1 is only for Individual customers", null, 400);
+
+      if (!paymentAmount && !advancePayment && !totalPayment)
+        return errorResponse(res, "Payment details are required", null, 400);
+
+      order.paymentAmount = Number(paymentAmount) || 0;
+      order.advancePayment = Number(advancePayment) || 0;
+      order.totalPayment = Number(totalPayment) || 0;
+    }
+
+    // → waitingForPO → projectCodeCreation (only agency = 0)
+    if (pipelineStatus === "projectCodeCreation") {
+      if (order.customerType !== 0)
+        return errorResponse(res, "Project Code Creation is only for Agency customers", null, 400);
+    }
+
+  
+
+    order.pipelineStatus = pipelineStatus;
+
+    const logEntry = {
+      fromStage: oldStage,
+      toStage: pipelineStatus,
+      movedBy: movedBy || "Admin",
+      movedAt: new Date(),
+    };
+
+    if (pipelineStatus === "inProgress") logEntry.handlerName = handlerName?.trim();
+    if (pipelineStatus === "waitingForPO") logEntry.poDocument = order.poDocument;
+
+    if (pipelineStatus === "paymentStage1") {
+      logEntry.paymentAmount = order.paymentAmount;
+      logEntry.advancePayment = order.advancePayment;
+      logEntry.totalPayment = order.totalPayment;
+    }
+
+    order.pipelineLogs.push(logEntry);
+    await order.save();
+
+    return successResponse(res, "Pipeline stage updated successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
   }
 };
