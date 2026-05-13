@@ -83,11 +83,6 @@ const orderSchema = new mongoose.Schema(
       default: "Pending",
     },
 
-    // pipelineStatus: {
-    //   type: String,
-    //   enum: ["newOrder", "proposal", "negotiation", "closedWon", "closedLoss"],
-    //   default: "newOrder",
-    // },
 
     pipelineStatus: {
       type: String,
@@ -111,17 +106,10 @@ const orderSchema = new mongoose.Schema(
       default: "newOrder",
     },
 
-    handlername: String,
+    handlerName: String,
     reasonDescription: String,
+    poDocument: String,  
 
-    // pipelineLogs: [
-    //   {
-    //     fromStage: String,
-    //     toStage: String,
-    //     movedBy: String,
-    //     movedAt: { type: Date, default: Date.now },
-    //   },
-    // ],
 
     pipelineLogs: [
   {
@@ -130,22 +118,21 @@ const orderSchema = new mongoose.Schema(
     movedBy: String,
     movedAt: { type: Date, default: Date.now },
     handlerName: String,        
-    poDocument: String,         
-    paymentAmount: Number,     
-    advancePayment: Number,
-    totalPayment: Number,
+          
+  
   },
 ],
 
+
     negotiationLogs: [
-      {
-        fromStage: String,
-        toStage: String,
-        movedBy: String,
-        movedAt: { type: Date, default: Date.now },
-        amount: Number,
-      },
-    ],
+  {
+    fromStage: String,
+    toStage: String,
+    movedBy: String,
+    movedAt: { type: Date, default: Date.now },
+    discountAmount: Number,
+  },
+],
 
     grandNegotiationTotal: { type: Number, default: null },
   },

@@ -80,7 +80,7 @@ exports.createAdminOrder = async (req, res) => {
     for (let i = 0; i < vehicles.length; i++) {
       const v = vehicles[i];
 
-     
+
       const fp = v.pricing || {};
 
       const missing = [];
@@ -152,7 +152,7 @@ exports.createAdminOrder = async (req, res) => {
         .filter((f) => f.fieldname === `campaignVideos_${i}`)
         .map((f) => `/uploads/${path.basename(f.path)}`);
 
-     
+
       bookingItems.push({
         packageId: pkg._id,
         vehicleType: pkg.vehicleType,
@@ -202,7 +202,7 @@ exports.createAdminOrder = async (req, res) => {
 
     const orderId = await generateAdminOrderId();
 
- 
+
     const grandTotal = Number(req.body.grandTotal) || 0;
     const grandGst = Number(req.body.grandGst) || 0;
 
@@ -212,7 +212,7 @@ exports.createAdminOrder = async (req, res) => {
       phone: customerPhone,
       address: customerAddress || "",
       email: customerEmail || "",
-      customerType: Number(req.body.customerType) ?? 1, 
+      customerType: Number(req.body.customerType) ?? 1,
       isAdminCreated: true,
       bookingItems,
       grandTotal,
@@ -364,8 +364,8 @@ exports.getOrdersByPipeline = async (req, res) => {
       .sort({ createdAt: -1 })
       .select(
         "orderId name phone customerType pipelineStatus orderStatus " +
-        "grandTotal grandNegotiationTotal bookingItems handlerName " +
-        "isAdminCreated createdAt pipelineLogs negotiationLogs " +
+        "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
+        "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
         "companyName email address poDocument paymentAmount advancePayment totalPayment"
       );
 
@@ -386,18 +386,19 @@ exports.getOrdersByPipeline = async (req, res) => {
 
 exports.updateOrderPipeline = async (req, res) => {
   try {
-    const { orderId } = req.params; 
+    const { orderId } = req.params;
     const {
       pipelineStatus,
-      movedBy,
       handlerName,
       customerType,
       paymentAmount,
       advancePayment,
       totalPayment,
+      discountType,   // "amount" or "percent"
+      discountValue,  // number
+      balanceAmount,
     } = req.body;
 
-    // Validate stage
     if (!STAGE_ORDER.includes(pipelineStatus))
       return errorResponse(res, "Invalid pipeline stage", null, 400);
 
@@ -406,71 +407,99 @@ exports.updateOrderPipeline = async (req, res) => {
 
     const oldStage = order.pipelineStatus;
 
+    // ── inProgress ──────────────────────────────────────────────
     if (pipelineStatus === "inProgress") {
-      if (!handlerName?.trim())
-        return errorResponse(res, "Handler name is required to move to In Progress", null, 400);
 
-      order.handlerName = handlerName.trim();
+      const isStaffAdmin = Number(req.user.isAdmin) === 0;
 
-    
+      if (isStaffAdmin) {
+        // Staff admin — req.user.username auto set
+        order.handlerName = req.user.username;
+      } else {
+        // Super admin — body-ல handlerName வரணும்
+        if (!handlerName?.trim())
+          return errorResponse(res, "Handler name is required", null, 400);
+        order.handlerName = handlerName.trim();
+      }
+
+      // customerType — order-ல இல்லாட்டி மட்டும் set
       if (order.customerType === null || order.customerType === undefined) {
         if (customerType === undefined || customerType === null)
-          return errorResponse(res, "Customer type is required (0 = Agency, 1 = Individual)", null, 400);
-
+          return errorResponse(res, "Customer type is required", null, 400);
         if (![0, 1].includes(Number(customerType)))
           return errorResponse(res, "customerType must be 0 or 1", null, 400);
-
         order.customerType = Number(customerType);
       }
     }
 
-  
+    // ── waitingForPO ─────────────────────────────────────────────
     if (pipelineStatus === "waitingForPO") {
       const poFile = req.file;
       if (!poFile)
         return errorResponse(res, "PO document upload is required", null, 400);
-
       order.poDocument = `/uploads/${path.basename(poFile.path)}`;
     }
 
-    // → waitingForPO → paymentStage1 (only individual = 1)
-    if (pipelineStatus === "paymentStage1") {
-      if (order.customerType !== 1)
-        return errorResponse(res, "Payment Stage 1 is only for Individual customers", null, 400);
-
-      if (!paymentAmount && !advancePayment && !totalPayment)
-        return errorResponse(res, "Payment details are required", null, 400);
-
-      order.paymentAmount = Number(paymentAmount) || 0;
-      order.advancePayment = Number(advancePayment) || 0;
-      order.totalPayment = Number(totalPayment) || 0;
-    }
-
-    // → waitingForPO → projectCodeCreation (only agency = 0)
+    // ── projectCodeCreation (Agency only) ────────────────────────
     if (pipelineStatus === "projectCodeCreation") {
       if (order.customerType !== 0)
         return errorResponse(res, "Project Code Creation is only for Agency customers", null, 400);
     }
 
-  
 
+    // ── Pipeline status update ────────────────────────────────────
     order.pipelineStatus = pipelineStatus;
+
+    // movedBy name decide
+    const movedByFinal = Number(req.user.isAdmin) === 0
+      ? req.user.username
+      : (handlerName?.trim() || order.handlerName || "Admin");
+
+
+    if (pipelineStatus === "customerConfirmation") {
+  const subtotal = order.bookingItems.reduce(
+    (sum, item) => sum + (item.totalAmount || 0), 0
+  );
+
+  let discountAmount = 0;
+  if (discountValue != null && discountValue !== "") {
+    if (discountType === "percent") {
+      const pct = Math.min(Number(discountValue) || 0, 100);
+      discountAmount = Math.floor((subtotal * pct) / 100);
+    } else {
+      discountAmount = Number(discountValue) || 0;
+    }
+  }
+
+ 
+  const previousTotalDiscount = (order.negotiationLogs || []).reduce(
+    (sum, log) => sum + (log.discountAmount || 0), 0
+  );
+  const newTotalDiscount = previousTotalDiscount + discountAmount;
+
+ 
+  order.grandNegotiationTotal = subtotal - newTotalDiscount;
+
+  order.negotiationLogs.push({
+    fromStage: oldStage,
+    toStage: pipelineStatus,
+    movedBy: movedByFinal,
+    movedAt: new Date(),
+    discountAmount, 
+  });
+}
 
     const logEntry = {
       fromStage: oldStage,
       toStage: pipelineStatus,
-      movedBy: movedBy || "Admin",
+      movedBy: movedByFinal,
       movedAt: new Date(),
     };
 
-    if (pipelineStatus === "inProgress") logEntry.handlerName = handlerName?.trim();
-    if (pipelineStatus === "waitingForPO") logEntry.poDocument = order.poDocument;
-
-    if (pipelineStatus === "paymentStage1") {
-      logEntry.paymentAmount = order.paymentAmount;
-      logEntry.advancePayment = order.advancePayment;
-      logEntry.totalPayment = order.totalPayment;
-    }
+    if (pipelineStatus === "inProgress")
+      logEntry.handlerName = order.handlerName;
+    if (pipelineStatus === "waitingForPO")
+      logEntry.poDocument = order.poDocument;
 
     order.pipelineLogs.push(logEntry);
     await order.save();
