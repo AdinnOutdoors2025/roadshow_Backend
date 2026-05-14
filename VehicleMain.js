@@ -67,7 +67,15 @@ const upload = multer({
   limits: { files: 4 },
 });
 
-app.use("/uploads", express.static("uploads"));
+
+
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  
+}
+
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // // Enhanced CORS configuration
 // app.use(cors({

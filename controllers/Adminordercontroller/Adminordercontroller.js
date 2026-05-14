@@ -366,7 +366,7 @@ exports.getOrdersByPipeline = async (req, res) => {
         "orderId name phone customerType pipelineStatus orderStatus " +
         "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
         "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
-        "companyName email address poDocument paymentAmount advancePayment totalPayment"
+        "companyName email address poDocumentLogs paymentStageFirst"
       );
 
     // Group by stage
@@ -388,16 +388,20 @@ exports.updateOrderPipeline = async (req, res) => {
   try {
     const { orderId } = req.params;
     const {
-      pipelineStatus,
+      pipelineStatus: rawPipelineStatus,
       handlerName,
       customerType,
-      paymentAmount,
+      discountType,
+      discountValue,
+      poDate,
+      poNotes,
       advancePayment,
-      totalPayment,
-      discountType,   // "amount" or "percent"
-      discountValue,  // number
-      balanceAmount,
+      paymentDate,
+      paymentVerification,
+      paymentNotes,
     } = req.body;
+
+    let pipelineStatus = rawPipelineStatus;
 
     if (!STAGE_ORDER.includes(pipelineStatus))
       return errorResponse(res, "Invalid pipeline stage", null, 400);
@@ -407,22 +411,21 @@ exports.updateOrderPipeline = async (req, res) => {
 
     const oldStage = order.pipelineStatus;
 
-    // ── inProgress ──────────────────────────────────────────────
+    const movedByFinal =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : handlerName?.trim() || order.handlerName || "Admin";
+
+    // ── inProgress ───────────────────────────────────────────────
     if (pipelineStatus === "inProgress") {
-
       const isStaffAdmin = Number(req.user.isAdmin) === 0;
-
       if (isStaffAdmin) {
-        // Staff admin — req.user.username auto set
         order.handlerName = req.user.username;
       } else {
-        // Super admin — body-ல handlerName வரணும்
         if (!handlerName?.trim())
           return errorResponse(res, "Handler name is required", null, 400);
         order.handlerName = handlerName.trim();
       }
-
-      // customerType — order-ல இல்லாட்டி மட்டும் set
       if (order.customerType === null || order.customerType === undefined) {
         if (customerType === undefined || customerType === null)
           return errorResponse(res, "Customer type is required", null, 400);
@@ -433,61 +436,139 @@ exports.updateOrderPipeline = async (req, res) => {
     }
 
     // ── waitingForPO ─────────────────────────────────────────────
+    // ADD this flag ↓
+    // let autoRoutedFromPO = false;
+
+    // if (pipelineStatus === "waitingForPO") {
+    //   const poFile = req.files?.find((f) => f.fieldname === "poDocument");
+    //   if (!poFile)
+    //     return errorResponse(res, "PO document upload is required", null, 400);
+    //   if (!poDate)
+    //     return errorResponse(res, "PO date is required", null, 400);
+
+    //   const poUrl = `/uploads/${path.basename(poFile.path)}`;
+
+    //   order.poDocumentLogs.push({
+    //     poDocument: poUrl,
+    //     poDate: new Date(poDate),
+    //     poNotes: (poNotes || "").trim(),
+    //     uploadedBy: movedByFinal,
+    //     uploadedAt: new Date(),
+    //   });
+
+    //   if (order.customerType === 1) {
+    //     pipelineStatus = "paymentStage1";
+    //     autoRoutedFromPO = true;   // ← flag set
+    //   } else if (order.customerType === 0) {
+    //     pipelineStatus = "projectCodeCreation";
+    //     autoRoutedFromPO = true;   // ← flag set
+    //   } else {
+    //     return errorResponse(res, "Customer type not set on this order", null, 400);
+    //   }
+    // }
+
+    // ── waitingForPO ─────────────────────────────────────────────
+    let autoRoutedFromPO = false;
+
     if (pipelineStatus === "waitingForPO") {
-      const poFile = req.file;
-      if (!poFile)
-        return errorResponse(res, "PO document upload is required", null, 400);
-      order.poDocument = `/uploads/${path.basename(poFile.path)}`;
+      const poFile = req.files?.find((f) => f.fieldname === "poDocument");
+
+      // ✅ poFile இருந்தா மட்டும் save பண்ணு — இல்லன்னா skip
+      if (poFile) {
+        if (!poDate)
+          return errorResponse(res, "PO date is required", null, 400);
+
+        const poUrl = `/uploads/${path.basename(poFile.path)}`;
+        order.poDocumentLogs.push({
+          poDocument: poUrl,
+          poDate: new Date(poDate),
+          poNotes: (poNotes || "").trim(),
+          uploadedBy: movedByFinal,
+          uploadedAt: new Date(),
+        });
+
+        // File இருந்தா மட்டும் auto-route
+        if (order.customerType === 1) {
+          pipelineStatus = "paymentStage1";
+          autoRoutedFromPO = true;
+        } else if (order.customerType === 0) {
+          pipelineStatus = "projectCodeCreation";
+          autoRoutedFromPO = true;
+        } else {
+          return errorResponse(res, "Customer type not set on this order", null, 400);
+        }
+      }
+      // ✅ File இல்லன்னா — waitingForPO-லயே நிக்கும், auto-route இல்ல
     }
 
-    // ── projectCodeCreation (Agency only) ────────────────────────
-    if (pipelineStatus === "projectCodeCreation") {
-      if (order.customerType !== 0)
-        return errorResponse(res, "Project Code Creation is only for Agency customers", null, 400);
+    // ── paymentStage1 ─────────────────────────────────────────────
+    // autoRoutedFromPO இருந்தா இந்த block skip ஆகும் ↓
+    if (pipelineStatus === "paymentStage1" && !autoRoutedFromPO) {
+      const proofFile = req.files?.find((f) => f.fieldname === "paymentProofDocument");
+      if (!proofFile)
+        return errorResponse(res, "Payment proof document is required", null, 400);
+      if (!advancePayment)
+        return errorResponse(res, "Advance payment amount is required", null, 400);
+      if (!paymentDate)
+        return errorResponse(res, "Payment date is required", null, 400);
+      if (!paymentVerification)
+        return errorResponse(res, "Payment verification status is required", null, 400);
+
+      const proofUrl = `/uploads/${path.basename(proofFile.path)}`;
+
+      order.paymentStageFirst.push({
+        advancePayment: Number(advancePayment),
+        paymentProofDocument: proofUrl,
+        paymentDate: new Date(paymentDate),
+        paymentVerification: paymentVerification.trim(),
+        paymentNotes: (paymentNotes || "").trim(),
+        uploadedBy: movedByFinal,
+        uploadedAt: new Date(),
+      });
     }
 
+    // ── projectCodeCreation ──────────────────────────────────────
+    // if (pipelineStatus === "projectCodeCreation" && !autoRoutedFromPO) {
+    //   if (order.customerType !== 0)
+    //     return errorResponse(res, "Project Code Creation is only for Existing customers", null, 400);
+    // }
 
-    // ── Pipeline status update ────────────────────────────────────
-    order.pipelineStatus = pipelineStatus;
+    // ── projectCodeCreation ──────────────────────────────────────
+    if (pipelineStatus === "projectCodeCreation" && !autoRoutedFromPO) {
+      const comingFromPaymentStage = order.pipelineStatus === "paymentStage1";
+      if (order.customerType !== 0 && !comingFromPaymentStage)
+        return errorResponse(res, "Project Code Creation is only for Existing customers", null, 400);
+    }
 
-    // movedBy name decide
-    const movedByFinal = Number(req.user.isAdmin) === 0
-      ? req.user.username
-      : (handlerName?.trim() || order.handlerName || "Admin");
-
-
+    // ── customerConfirmation ─────────────────────────────────────
     if (pipelineStatus === "customerConfirmation") {
-  const subtotal = order.bookingItems.reduce(
-    (sum, item) => sum + (item.totalAmount || 0), 0
-  );
-
-  let discountAmount = 0;
-  if (discountValue != null && discountValue !== "") {
-    if (discountType === "percent") {
-      const pct = Math.min(Number(discountValue) || 0, 100);
-      discountAmount = Math.floor((subtotal * pct) / 100);
-    } else {
-      discountAmount = Number(discountValue) || 0;
+      const subtotal = order.bookingItems.reduce(
+        (sum, item) => sum + (item.totalAmount || 0), 0
+      );
+      let discountAmount = 0;
+      if (discountValue != null && discountValue !== "") {
+        if (discountType === "percent") {
+          const pct = Math.min(Number(discountValue) || 0, 100);
+          discountAmount = Math.floor((subtotal * pct) / 100);
+        } else {
+          discountAmount = Number(discountValue) || 0;
+        }
+      }
+      const previousTotalDiscount = (order.negotiationLogs || []).reduce(
+        (sum, log) => sum + (log.discountAmount || 0), 0
+      );
+      order.grandNegotiationTotal = subtotal - (previousTotalDiscount + discountAmount);
+      order.negotiationLogs.push({
+        fromStage: oldStage,
+        toStage: pipelineStatus,
+        movedBy: movedByFinal,
+        movedAt: new Date(),
+        discountAmount,
+      });
     }
-  }
 
- 
-  const previousTotalDiscount = (order.negotiationLogs || []).reduce(
-    (sum, log) => sum + (log.discountAmount || 0), 0
-  );
-  const newTotalDiscount = previousTotalDiscount + discountAmount;
-
- 
-  order.grandNegotiationTotal = subtotal - newTotalDiscount;
-
-  order.negotiationLogs.push({
-    fromStage: oldStage,
-    toStage: pipelineStatus,
-    movedBy: movedByFinal,
-    movedAt: new Date(),
-    discountAmount, 
-  });
-}
+    // ── Update pipeline status + log ─────────────────────────────
+    order.pipelineStatus = pipelineStatus;
 
     const logEntry = {
       fromStage: oldStage,
@@ -495,11 +576,7 @@ exports.updateOrderPipeline = async (req, res) => {
       movedBy: movedByFinal,
       movedAt: new Date(),
     };
-
-    if (pipelineStatus === "inProgress")
-      logEntry.handlerName = order.handlerName;
-    if (pipelineStatus === "waitingForPO")
-      logEntry.poDocument = order.poDocument;
+    if (pipelineStatus === "inProgress") logEntry.handlerName = order.handlerName;
 
     order.pipelineLogs.push(logEntry);
     await order.save();

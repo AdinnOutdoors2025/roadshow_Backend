@@ -57,6 +57,30 @@ const bookingItemSchema = new mongoose.Schema({
   additionalFields: { type: [additionalChargeSchema], default: [] },
 });
 
+const poDocumentLogSchema = new mongoose.Schema(
+  {
+    poDocument: { type: String, required: true },   
+    poDate:     { type: Date,   required: true },
+    poNotes:    { type: String, default: "" },       
+    uploadedBy: { type: String },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+
+const paymentStageFirstSchema = new mongoose.Schema(
+  {
+    advancePayment:       { type: Number, required: true },
+    paymentProofDocument: { type: String, required: true }, 
+    paymentDate:          { type: Date,   required: true },
+    paymentVerification:  { type: String, required: true }, 
+    paymentNotes:         { type: String, default: "" },    
+    uploadedBy:           { type: String },
+    uploadedAt:           { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
 
 const orderSchema = new mongoose.Schema(
   {
@@ -108,7 +132,7 @@ const orderSchema = new mongoose.Schema(
 
     handlerName: String,
     reasonDescription: String,
-    poDocument: String,  
+
 
 
     pipelineLogs: [
@@ -122,6 +146,9 @@ const orderSchema = new mongoose.Schema(
   
   },
 ],
+
+poDocumentLogs:    { type: [poDocumentLogSchema],    default: [] },
+paymentStageFirst: { type: [paymentStageFirstSchema], default: [] },
 
 
     negotiationLogs: [
