@@ -435,45 +435,13 @@ exports.updateOrderPipeline = async (req, res) => {
       }
     }
 
-    // ── waitingForPO ─────────────────────────────────────────────
-    // ADD this flag ↓
-    // let autoRoutedFromPO = false;
-
-    // if (pipelineStatus === "waitingForPO") {
-    //   const poFile = req.files?.find((f) => f.fieldname === "poDocument");
-    //   if (!poFile)
-    //     return errorResponse(res, "PO document upload is required", null, 400);
-    //   if (!poDate)
-    //     return errorResponse(res, "PO date is required", null, 400);
-
-    //   const poUrl = `/uploads/${path.basename(poFile.path)}`;
-
-    //   order.poDocumentLogs.push({
-    //     poDocument: poUrl,
-    //     poDate: new Date(poDate),
-    //     poNotes: (poNotes || "").trim(),
-    //     uploadedBy: movedByFinal,
-    //     uploadedAt: new Date(),
-    //   });
-
-    //   if (order.customerType === 1) {
-    //     pipelineStatus = "paymentStage1";
-    //     autoRoutedFromPO = true;   // ← flag set
-    //   } else if (order.customerType === 0) {
-    //     pipelineStatus = "projectCodeCreation";
-    //     autoRoutedFromPO = true;   // ← flag set
-    //   } else {
-    //     return errorResponse(res, "Customer type not set on this order", null, 400);
-    //   }
-    // }
-
-    // ── waitingForPO ─────────────────────────────────────────────
+ 
     let autoRoutedFromPO = false;
 
     if (pipelineStatus === "waitingForPO") {
       const poFile = req.files?.find((f) => f.fieldname === "poDocument");
 
-      // ✅ poFile இருந்தா மட்டும் save பண்ணு — இல்லன்னா skip
+ 
       if (poFile) {
         if (!poDate)
           return errorResponse(res, "PO date is required", null, 400);
@@ -487,7 +455,7 @@ exports.updateOrderPipeline = async (req, res) => {
           uploadedAt: new Date(),
         });
 
-        // File இருந்தா மட்டும் auto-route
+       
         if (order.customerType === 1) {
           pipelineStatus = "paymentStage1";
           autoRoutedFromPO = true;
@@ -498,11 +466,10 @@ exports.updateOrderPipeline = async (req, res) => {
           return errorResponse(res, "Customer type not set on this order", null, 400);
         }
       }
-      // ✅ File இல்லன்னா — waitingForPO-லயே நிக்கும், auto-route இல்ல
+    
     }
 
-    // ── paymentStage1 ─────────────────────────────────────────────
-    // autoRoutedFromPO இருந்தா இந்த block skip ஆகும் ↓
+   
     if (pipelineStatus === "paymentStage1" && !autoRoutedFromPO) {
       const proofFile = req.files?.find((f) => f.fieldname === "paymentProofDocument");
       if (!proofFile)
