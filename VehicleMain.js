@@ -37,6 +37,10 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
+//DIGITAL OCEAN SPACE
+const spacesClient = require("./Middleware/spaceUpload").spacesClient;
+
+
 const storage = multer.diskStorage({
   destination: async function (req, file, cb) {
     const modelName = req.body.model;
@@ -67,7 +71,11 @@ const upload = multer({
   limits: { files: 4 },
 });
 
-app.use("/uploads", express.static("uploads"));
+// app.use("/uploads", express.static("uploads"));
+if (process.env.STORAGE_TYPE !== "space") {
+  app.use("/uploads", express.static("public/uploads"));
+  app.use("/public", express.static(path.join(__dirname, "public")));
+}
 
 // // Enhanced CORS configuration
 // app.use(cors({
@@ -138,7 +146,9 @@ app.use(express.static("public"));
 mongoose
   .connect(
     // "mongodb+srv://roadshowAdinn:doAztsUGMfooi5PY@roadshowadinn.sephmyg.mongodb.net/?appName=RoadshowAdinn",
-   "mongodb://localhost:27017/Roadshows",
+  //  "mongodb://localhost:27017/Roadshows",
+   "mongodb+srv://Vignesh:Vignesh@roadshow.0jruqnx.mongodb.net/?appName=Roadshow" // Vigesh acc db
+
   )
 
 // mongoose
@@ -194,17 +204,19 @@ cloudinary.config({
 });
 //ORDER MANAGEMENT AND ADD TO CART , ORDER CREATION CODES
 
-const vehicleUpload = multer({
-  storage: storage, // reuse existing storage
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-}).fields([
-  { name: "mainImage", maxCount: 4 },
-  { name: "sideImages", maxCount: 4 },
-  { name: "interiorImages", maxCount: 4 },
-  { name: "ledDisplayImage", maxCount: 4 },
-  { name: "brandingSample", maxCount: 4 },
-  { name: "vehicleVideo", maxCount: 4 },
-]);
+// const vehicleUpload = multer({
+//   storage: storage, // reuse existing storage
+//   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+// }).fields([
+//   { name: "mainImage", maxCount: 4 },
+//   { name: "sideImages", maxCount: 4 },
+//   { name: "interiorImages", maxCount: 4 },
+//   { name: "ledDisplayImage", maxCount: 4 },
+//   { name: "brandingSample", maxCount: 4 },
+//   { name: "vehicleVideo", maxCount: 4 },
+// ]);
+
+const vehicleUpload = require("./Middleware/vehicleDetailsUpload");
 //ORDER MANAGEMENT AND ADD TO CART , ORDER CREATION CODES
 
 // Configure storage for main image upload

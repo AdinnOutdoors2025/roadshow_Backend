@@ -1,717 +1,38 @@
-// //CONTROLLERS.JS
-// const Vehicle = require("../../Models/vehicleDetails");
-// const mongoose = require("mongoose");
-// const path = require("path");
-
-// // Helper function to parse registration numbers from various formats
-// const parseRegistrationNumbers = (registrationNumbersInput) => {
-//   if (!registrationNumbersInput) {
-//     return [];
-//   }
-  
-//   // If it's already an array
-//   if (Array.isArray(registrationNumbersInput)) {
-//     return registrationNumbersInput.filter(reg => reg && reg.trim() !== "");
-//   }
-  
-//   // If it's a string
-//   if (typeof registrationNumbersInput === 'string') {
-//     // Check if it has commas (multiple registration numbers)
-//     if (registrationNumbersInput.includes(',')) {
-//       // Split by comma and clean each item
-//       return registrationNumbersInput.split(',').map(reg => reg.trim()).filter(reg => reg);
-//     } else {
-//       // Single registration number
-//       return [registrationNumbersInput.trim()];
-//     }
-//   }
-  
-//   return [];
-// };
-
-// // Helper function to validate and clean a single registration number
-// const validateAndCleanRegNumber = (regNumber) => {
-//   if (!regNumber || typeof regNumber !== 'string') {
-//     return { isValid: false, cleaned: regNumber, error: "Invalid registration number" };
-//   }
-  
-//   // Remove all spaces and convert to uppercase
-//   let cleaned = regNumber.replace(/\s/g, "").toUpperCase();
-  
-//   // Remove any special characters
-//   cleaned = cleaned.replace(/[^A-Z0-9]/g, "");
-  
-//   // Check if it matches the pattern: 2 letters, 2 numbers, 2 letters, 4 numbers
-//   const pattern = /^[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{4}$/;
-  
-//   if (pattern.test(cleaned)) {
-//     return { isValid: true, cleaned };
-//   }
-  
-//   return { isValid: false, cleaned: regNumber, error: `Invalid format: ${regNumber}` };
-// };
-
-// // Helper function to generate unique vehicle ID
-// const generateVehicleId = async (vehicleType) => {
-//   const prefix = vehicleType.substring(0, 3).toUpperCase().replace(/\s/g, "");
-//   const count = await Vehicle.countDocuments({ "basicInfo.vehicleType": vehicleType });
-//   const sequence = String(count + 1).padStart(4, "0");
-//   return `${prefix}-${sequence}`;
-// };
-
-// // Helper function to parse form data from various formats
-// const parseFormData = (req) => {
-//   console.log("Parsing request data...");
-//   console.log("Content-Type:", req.headers['content-type']);
-  
-//   // If request body already has nested structure (JSON)
-//   if (req.body.basicInfo && typeof req.body.basicInfo === "object") {
-//     console.log("Detected nested JSON structure");
-//     return {
-//       basicInfo: req.body.basicInfo,
-//       techSpecs: req.body.techSpecs || {},
-//       vehicleDetails: req.body.vehicleDetails || {},
-//       pricing: req.body.pricing || {},
-//       driverDetails: req.body.driverDetails || {},
-//       statusAvailability: req.body.statusAvailability || {},
-//       maintenanceInfo: req.body.maintenanceInfo || {},
-//       mediaFiles: req.files || {}
-//     };
-//   }
-  
-//   // If form-data with flat structure
-//   console.log("Detected flat form-data structure");
-//   const result = {
-//     basicInfo: {},
-//     techSpecs: {},
-//     vehicleDetails: {},
-//     pricing: {},
-//     driverDetails: {},
-//     statusAvailability: {},
-//     maintenanceInfo: {},
-//     mediaFiles: req.files || {}
-//   };
-  
-//   // Parse flat form-data into nested structure
-//   for (let key in req.body) {
-//     const match = key.match(/^(\w+)\[(\w+)\]$/);
-//     if (match) {
-//       const [, section, field] = match;
-//       if (result[section]) {
-//         result[section][field] = req.body[key];
-//       }
-//     } else {
-//       // Handle non-section fields
-//       result.basicInfo[key] = req.body[key];
-//     }
-//   }
-  
-//   return result;
-// };
-
-// // // Create new vehicle(s)
-// // const createVehicle = async (req, res) => {
-// //   try {
-// //     console.log("=== CREATE VEHICLE REQUEST ===");
-// //     console.log("Request body:", JSON.stringify(req.body, null, 2));
-    
-// //     // Parse the request data
-// //     const parsedData = parseFormData(req);
-    
-// //     const { basicInfo, techSpecs, vehicleDetails, pricing, driverDetails, statusAvailability, maintenanceInfo } = parsedData;
-    
-// //     // Parse registration numbers (handle string or array)
-// //     let registrationNumbers = parseRegistrationNumbers(basicInfo.registrationNumbers);
-    
-// //     console.log("Raw registration numbers input:", basicInfo.registrationNumbers);
-// //     console.log("Parsed registration numbers:", registrationNumbers);
-    
-// //     // Validate and clean registration numbers
-// //     const validRegNumbers = [];
-// //     const invalidRegNumbers = [];
-    
-// //     for (const reg of registrationNumbers) {
-// //       if (reg && reg.trim()) {
-// //         const { isValid, cleaned, error } = validateAndCleanRegNumber(reg);
-// //         if (isValid) {
-// //           validRegNumbers.push(cleaned);
-// //         } else {
-// //           invalidRegNumbers.push({ original: reg, error });
-// //         }
-// //       }
-// //     }
-    
-// //     console.log("Valid registration numbers:", validRegNumbers);
-// //     console.log("Invalid registration numbers:", invalidRegNumbers);
-    
-// //     // Check if we have any valid registration numbers
-// //     if (validRegNumbers.length === 0) {
-// //       return res.status(400).json({
-// //         success: false,
-// //         message: "Invalid registration number format",
-// //         error: `Please provide valid registration numbers. Format: XX NN XX NNNN (e.g., TN01AB1234 or TN 01 AB 1234)`,
-// //         received: registrationNumbers,
-// //         invalid: invalidRegNumbers
-// //       });
-// //     }
-    
-// //     // Validate required fields
-// //     if (!basicInfo.vehicleName || basicInfo.vehicleName.trim() === "") {
-// //       return res.status(400).json({
-// //         success: false,
-// //         message: "Vehicle name is required",
-// //       });
-// //     }
-    
-// //     if (!basicInfo.city || basicInfo.city.trim() === "") {
-// //       return res.status(400).json({
-// //         success: false,
-// //         message: "City is required",
-// //       });
-// //     }
-    
-// //     // Convert boolean strings
-// //     if (basicInfo.gpsEnabled === "true") basicInfo.gpsEnabled = true;
-// //     if (basicInfo.gpsEnabled === "false") basicInfo.gpsEnabled = false;
-// //     if (basicInfo.status === "true") basicInfo.status = true;
-// //     if (basicInfo.status === "false") basicInfo.status = false;
-    
-// //     // Convert numeric values
-// //     const numericFields = ["avgKmPerDay", "extraKmPrice", "avgBookingHrs", "extraHrPrice", "rtoCharges", "costPerDay", "kmCost"];
-// //     numericFields.forEach(field => {
-// //       if (vehicleDetails[field]) vehicleDetails[field] = Number(vehicleDetails[field]);
-// //       if (pricing[field]) pricing[field] = Number(pricing[field]);
-// //     });
-    
-// //     // Check for existing vehicles with same name and city
-// //     const existingVehicles = await Vehicle.find({
-// //       "basicInfo.vehicleName": basicInfo.vehicleName,
-// //       "basicInfo.city": basicInfo.city
-// //     });
-    
-// //     console.log("Existing vehicles found:", existingVehicles.length);
-    
-// //     if (existingVehicles.length > 0) {
-// //       const existingVehicle = existingVehicles[0];
-      
-// //       // Check for duplicate registration numbers
-// //       const existingRegNumbers = [];
-// //       existingVehicles.forEach(v => {
-// //         if (v.basicInfo && v.basicInfo.registrationNumbers) {
-// //           existingRegNumbers.push(...v.basicInfo.registrationNumbers);
-// //         }
-// //       });
-      
-// //       const duplicateRegs = validRegNumbers.filter(reg => existingRegNumbers.includes(reg));
-      
-// //       if (duplicateRegs.length > 0) {
-// //         return res.status(400).json({
-// //           success: false,
-// //           message: `Registration numbers already exist: ${duplicateRegs.join(", ")}`,
-// //           duplicates: duplicateRegs,
-// //         });
-// //       }
-      
-// //       // Add to existing group
-// //       const updatedVehicle = await Vehicle.findByIdAndUpdate(
-// //         existingVehicle._id,
-// //         {
-// //           $inc: { "basicInfo.vehicleCount": validRegNumbers.length },
-// //           $push: { "basicInfo.registrationNumbers": { $each: validRegNumbers } },
-// //           $set: {
-// //             techSpecs,
-// //             vehicleDetails,
-// //             pricing,
-// //             driverDetails,
-// //             statusAvailability,
-// //             maintenanceInfo
-// //           }
-// //         },
-// //         { new: true }
-// //       );
-      
-// //       return res.status(200).json({
-// //         success: true,
-// //         message: `${validRegNumbers.length} new vehicle(s) added to existing group. Total: ${updatedVehicle.basicInfo.vehicleCount} vehicles`,
-// //         data: updatedVehicle,
-// //       });
-// //     }
-    
-// //     // Generate vehicle ID if not provided
-// //     if (!basicInfo.vehicleId || basicInfo.vehicleId === "") {
-// //       basicInfo.vehicleId = await generateVehicleId(basicInfo.vehicleType);
-// //     }
-    
-// //     // Create new vehicle group
-// //     const newVehicleData = {
-// //       basicInfo: {
-// //         ...basicInfo,
-// //         registrationNumbers: validRegNumbers,
-// //         vehicleCount: validRegNumbers.length,
-// //       },
-// //       techSpecs,
-// //       vehicleDetails,
-// //       pricing,
-// //       driverDetails,
-// //       statusAvailability,
-// //       maintenanceInfo
-// //     };
-    
-// //     console.log("Creating new vehicle with data:", JSON.stringify(newVehicleData, null, 2));
-    
-// //     const newVehicle = new Vehicle(newVehicleData);
-// //     const savedVehicle = await newVehicle.save();
-    
-// //     return res.status(201).json({
-// //       success: true,
-// //       message: `${savedVehicle.basicInfo.vehicleCount} new vehicle(s) created successfully`,
-// //       data: savedVehicle,
-// //     });
-    
-// //   } catch (error) {
-// //     console.error("Create Vehicle Error:", error);
-// //     res.status(500).json({
-// //       success: false,
-// //       message: "Error Creating Vehicle",
-// //       error: error.message,
-// //       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-// //     });
-// //   }
-// // };
-
-
-// // Create new vehicle(s)
-// const createVehicle = async (req, res) => {
-//   try {
-//     console.log("=== CREATE VEHICLE REQUEST ===");
-    
-//     // Parse the data from form-data
-//     let basicInfo, techSpecs, vehicleDetails, pricing, driverDetails, statusAvailability, maintenanceInfo;
-    
-//     // Check if data is sent as JSON string in 'data' field
-//     if (req.body.data) {
-//       const parsedData = JSON.parse(req.body.data);
-//       basicInfo = parsedData.basicInfo;
-//       techSpecs = parsedData.techSpecs;
-//       vehicleDetails = parsedData.vehicleDetails;
-//       pricing = parsedData.pricing;
-//       driverDetails = parsedData.driverDetails;
-//       statusAvailability = parsedData.statusAvailability;
-//       maintenanceInfo = parsedData.maintenanceInfo;
-//     } else {
-//       // Parse flat form-data structure
-//       basicInfo = {};
-//       techSpecs = {};
-//       vehicleDetails = {};
-//       pricing = {};
-//       driverDetails = {};
-//       statusAvailability = {};
-//       maintenanceInfo = {};
-      
-//       for (let key in req.body) {
-//         const match = key.match(/^(\w+)\[(\w+)\]$/);
-//         if (match) {
-//           const [, section, field] = match;
-//           if (section === 'basicInfo') basicInfo[field] = req.body[key];
-//           else if (section === 'techSpecs') techSpecs[field] = req.body[key];
-//           else if (section === 'vehicleDetails') vehicleDetails[field] = req.body[key];
-//           else if (section === 'pricing') pricing[field] = req.body[key];
-//           else if (section === 'driverDetails') driverDetails[field] = req.body[key];
-//           else if (section === 'statusAvailability') statusAvailability[field] = req.body[key];
-//           else if (section === 'maintenanceInfo') maintenanceInfo[field] = req.body[key];
-//         } else {
-//           basicInfo[key] = req.body[key];
-//         }
-//       }
-//     }
-    
-//     console.log("Basic Info:", basicInfo);
-    
-//     // Get registration numbers
-//     let registrationNumbers = [];
-//     if (basicInfo.registrationNumbers) {
-//       if (Array.isArray(basicInfo.registrationNumbers)) {
-//         registrationNumbers = basicInfo.registrationNumbers;
-//       } else if (typeof basicInfo.registrationNumbers === 'string') {
-//         registrationNumbers = [basicInfo.registrationNumbers];
-//       }
-//     }
-    
-//     // Validate registration numbers
-//     const validRegNumbers = [];
-//     const invalidRegNumbers = [];
-    
-//     for (const reg of registrationNumbers) {
-//       if (reg && reg.trim()) {
-//         const clean = reg.replace(/\s/g, "").toUpperCase();
-//         const pattern = /^[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{4}$/;
-//         if (pattern.test(clean)) {
-//           validRegNumbers.push(clean);
-//         } else {
-//           invalidRegNumbers.push({ original: reg, error: "Invalid format" });
-//         }
-//       }
-//     }
-    
-//     if (validRegNumbers.length === 0) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "At least one valid registration number is required",
-//         invalid: invalidRegNumbers
-//       });
-//     }
-    
-//     // Convert boolean values
-//     basicInfo.gpsEnabled = basicInfo.gpsEnabled === true || basicInfo.gpsEnabled === "true";
-//     basicInfo.status = basicInfo.status === true || basicInfo.status === "true";
-    
-//     // Process uploaded files
-//     const mediaFiles = {};
-//     if (req.files) {
-//       if (req.files.frontViewImage) mediaFiles.frontViewImage = req.files.frontViewImage[0].path;
-//       if (req.files.leftSideImage) mediaFiles.leftSideImage = req.files.leftSideImage[0].path;
-//       if (req.files.rightSideImage) mediaFiles.rightSideImage = req.files.rightSideImage[0].path;
-//       if (req.files.rearViewImage) mediaFiles.rearViewImage = req.files.rearViewImage[0].path;
-//       if (req.files.interiorImage) mediaFiles.interiorImage = req.files.interiorImage[0].path;
-//       if (req.files.demoVideo) mediaFiles.demoVideo = req.files.demoVideo[0].path;
-//     }
-    
-//     // Generate vehicle ID if not provided
-//     if (!basicInfo.vehicleId || basicInfo.vehicleId === "") {
-//       const prefix = (basicInfo.vehicleType || "VEH").substring(0, 3).toUpperCase();
-//       const count = await Vehicle.countDocuments();
-//       const sequence = String(count + 1).padStart(4, "0");
-//       basicInfo.vehicleId = `${prefix}-${sequence}`;
-//     }
-    
-//     // Create new vehicle
-//     const vehicleData = {
-//       basicInfo: {
-//         ...basicInfo,
-//         registrationNumbers: validRegNumbers,
-//         vehicleCount: validRegNumbers.length
-//       },
-//       techSpecs: techSpecs || {},
-//       vehicleDetails: vehicleDetails || {},
-//       pricing: pricing || {},
-//       driverDetails: driverDetails || {},
-//       statusAvailability: statusAvailability || {},
-//       maintenanceInfo: maintenanceInfo || {},
-//       mediaFiles: mediaFiles
-//     };
-    
-//     const vehicle = new Vehicle(vehicleData);
-//     const savedVehicle = await vehicle.save();
-    
-//     res.status(201).json({
-//       success: true,
-//       message: `${validRegNumbers.length} vehicle(s) created successfully`,
-//       data: savedVehicle
-//     });
-    
-//   } catch (error) {
-//     console.error("Create Vehicle Error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Error Creating Vehicle",
-//       error: error.message
-//     });
-//   }
-// };
-
-
-
-// // Get all vehicles
-// const getNewVehicles = async (req, res) => {
-//   try {
-//     const { page = 1, limit = 50, search, vehicleType, city, status } = req.query;
-    
-//     let query = {};
-    
-//     if (search) {
-//       query.$or = [
-//         { "basicInfo.vehicleName": { $regex: search, $options: "i" } },
-//         { "basicInfo.registrationNumbers": { $in: [new RegExp(search, "i")] } },
-//         { "basicInfo.vehicleId": { $regex: search, $options: "i" } },
-//       ];
-//     }
-    
-//     if (vehicleType) query["basicInfo.vehicleType"] = vehicleType;
-//     if (city) query["basicInfo.city"] = city;
-//     if (status !== undefined) query["basicInfo.status"] = status === "true";
-    
-//     const skip = (parseInt(page) - 1) * parseInt(limit);
-    
-//     const [vehicles, total] = await Promise.all([
-//       Vehicle.find(query)
-//         .sort({ createdAt: -1 })
-//         .skip(skip)
-//         .limit(parseInt(limit)),
-//       Vehicle.countDocuments(query),
-//     ]);
-    
-//     res.status(200).json({
-//       success: true,
-//       count: vehicles.length,
-//       total,
-//       page: parseInt(page),
-//       totalPages: Math.ceil(total / parseInt(limit)),
-//       data: vehicles,
-//     });
-    
-//   } catch (error) {
-//     console.error("Get Vehicles Error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Error Fetching Vehicles",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// // Get single vehicle by ID
-// const getVehicleById = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-    
-//     if (!mongoose.Types.ObjectId.isValid(id)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Invalid Vehicle ID",
-//       });
-//     }
-    
-//     const vehicle = await Vehicle.findById(id);
-    
-//     if (!vehicle) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Vehicle not found",
-//       });
-//     }
-    
-//     res.status(200).json({
-//       success: true,
-//       data: vehicle,
-//     });
-    
-//   } catch (error) {
-//     console.error("Get Vehicle Error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Error Fetching Vehicle",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// // Update vehicle
-// const updateVehicle = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const parsedData = parseFormData(req);
-//     const { basicInfo, techSpecs, vehicleDetails, pricing, driverDetails, statusAvailability, maintenanceInfo } = parsedData;
-    
-//     if (!mongoose.Types.ObjectId.isValid(id)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Invalid Vehicle ID",
-//       });
-//     }
-    
-//     const existingVehicle = await Vehicle.findById(id);
-//     if (!existingVehicle) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Vehicle Not Found",
-//       });
-//     }
-    
-//     const updatedVehicle = await Vehicle.findByIdAndUpdate(
-//       id,
-//       {
-//         $set: {
-//           basicInfo,
-//           techSpecs,
-//           vehicleDetails,
-//           pricing,
-//           driverDetails,
-//           statusAvailability,
-//           maintenanceInfo
-//         }
-//       },
-//       { new: true, runValidators: true }
-//     );
-    
-//     return res.status(200).json({
-//       success: true,
-//       message: "Vehicle Updated Successfully",
-//       data: updatedVehicle,
-//     });
-    
-//   } catch (error) {
-//     console.error("Update Vehicle Error:", error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Error Updating Vehicle",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// // Delete vehicle
-// const deleteVehicle = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const { registrationNumber } = req.body;
-    
-//     if (!mongoose.Types.ObjectId.isValid(id)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Invalid Vehicle ID",
-//       });
-//     }
-    
-//     const vehicle = await Vehicle.findById(id);
-//     if (!vehicle) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Vehicle not found",
-//       });
-//     }
-    
-//     if (registrationNumber && vehicle.basicInfo?.registrationNumbers?.length > 1) {
-//       const updatedNumbers = vehicle.basicInfo.registrationNumbers.filter(num => num !== registrationNumber);
-      
-//       const updatedVehicle = await Vehicle.findByIdAndUpdate(
-//         id,
-//         {
-//           $set: {
-//             "basicInfo.registrationNumbers": updatedNumbers,
-//             "basicInfo.vehicleCount": updatedNumbers.length,
-//           },
-//         },
-//         { new: true }
-//       );
-      
-//       return res.status(200).json({
-//         success: true,
-//         message: `Vehicle ${registrationNumber} removed from group`,
-//         data: updatedVehicle,
-//       });
-//     }
-    
-//     await Vehicle.findByIdAndDelete(id);
-    
-//     return res.status(200).json({
-//       success: true,
-//       message: "Vehicle group deleted successfully",
-//     });
-    
-//   } catch (error) {
-//     console.error("Delete Vehicle Error:", error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Error Deleting Vehicle",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// // Get vehicle statistics
-// const getVehicleStatistics = async (req, res) => {
-//   try {
-//     const [totalVehicles, activeVehicles, byType, byCity] = await Promise.all([
-//       Vehicle.countDocuments(),
-//       Vehicle.countDocuments({ "basicInfo.status": true }),
-//       Vehicle.aggregate([
-//         { $group: { _id: "$basicInfo.vehicleType", count: { $sum: "$basicInfo.vehicleCount" } } },
-//         { $sort: { count: -1 } },
-//       ]),
-//       Vehicle.aggregate([
-//         { $group: { _id: "$basicInfo.city", count: { $sum: 1 } } },
-//         { $sort: { count: -1 } },
-//         { $limit: 5 },
-//       ]),
-//     ]);
-    
-//     res.status(200).json({
-//       success: true,
-//       data: {
-//         totalVehicles,
-//         activeVehicles,
-//         inactiveVehicles: totalVehicles - activeVehicles,
-//         vehiclesByType: byType,
-//         topCities: byCity,
-//       },
-//     });
-    
-//   } catch (error) {
-//     console.error("Get Statistics Error:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Error Fetching Statistics",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// module.exports = {
-//   createVehicle,
-//   getNewVehicles,
-//   getVehicleById,
-//   updateVehicle,
-//   deleteVehicle,
-//   getVehicleStatistics,
-// };
-
-
-
-
 // controllers/VehicleDetailsController/vehicledetails.js
-
 const Vehicle = require("../../Models/vehicleDetails");
 const mongoose = require("mongoose");
 
 // Generate unique vehicle ID (ddmmyyyy001 format)
-// const generateVehicleId = () => {
-//   const now = new Date();
-//   const day = String(now.getDate()).padStart(2, '0');
-//   const month = String(now.getMonth() + 1).padStart(2, '0');
-//   const year = String(now.getFullYear()).slice(-2);
-//   const random = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
-//   return `${day}${month}${year}${random}`;
-// };
-
-
 const generateVehicleId = async () => {
   const now = new Date();
-  const day = String(now.getDate()).padStart(2, '0');
-  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, "0");
+  const month = String(now.getMonth() + 1).padStart(2, "0");
   const year = String(now.getFullYear()).slice(-2);
-  
-  // Check for existing IDs to avoid duplicates
+
   let vehicleId;
   let isUnique = false;
   let attempt = 0;
-  
+
   while (!isUnique && attempt < 10) {
-    const random = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+    const random = String(Math.floor(Math.random() * 1000)).padStart(3, "0");
     vehicleId = `${day}${month}${year}${random}`;
-    
+
     const existing = await Vehicle.findOne({
-      "registrationVehicles.vehicleId": vehicleId
+      "registrationVehicles.vehicleId": vehicleId,
     });
-    
+
     if (!existing) {
       isUnique = true;
     }
     attempt++;
   }
-  
+
+  if (!vehicleId || !isUnique) {
+    vehicleId = `${day}${month}${year}${String(Date.now()).slice(-3)}`;
+  }
+
   return vehicleId;
 };
-
 
 // Helper function to clean registration number (remove spaces)
 const cleanRegistrationNumber = (regNumber) => {
@@ -723,7 +44,7 @@ const cleanRegistrationNumber = (regNumber) => {
 const formatRegistrationNumber = (regNumber) => {
   const clean = cleanRegistrationNumber(regNumber);
   if (clean.length !== 10) return regNumber;
-  return `${clean.slice(0,2)} ${clean.slice(2,4)} ${clean.slice(4,6)} ${clean.slice(6,10)}`;
+  return `${clean.slice(0, 2)} ${clean.slice(2, 4)} ${clean.slice(4, 6)} ${clean.slice(6, 10)}`;
 };
 
 // Helper function to validate registration number
@@ -733,199 +54,305 @@ const isValidRegistrationNumber = (regNumber) => {
   return /^[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{4}$/.test(clean);
 };
 
+// Helper function to get file URL (handles both local and Spaces)
+const getFileUrl = (file) => {
+  if (!file) return "";
+  if (typeof file === "string") return file;
+  if (file.location) return file.location;
+  if (file.path) {
+    const baseUrl = process.env.NODE_ENV === "production" 
+      ? process.env.PRODUCTION_BASE_URL 
+      : process.env.LOCAL_BASE_URL || "http://localhost:3001";
+    const relativePath = file.path.replace(process.cwd(), "").replace(/\\/g, "/");
+    return `${baseUrl}${relativePath}`;
+  }
+  return "";
+};
+
 // Create new vehicle(s)
 const createVehicle = async (req, res) => {
   try {
     console.log("=== CREATE VEHICLE REQUEST ===");
-    
+
     let parsedData;
     if (req.body.data) {
       parsedData = JSON.parse(req.body.data);
     } else {
       parsedData = req.body;
     }
-    
-    const { 
-      basicInfo, 
-      techSpecs, 
-      pricing, 
+
+    const {
+      basicInfo,
+      techSpecs,
+      pricing,
       registrationVehicles,
       mediaFiles,
-      vehicleDescription
+      vehicleDescription,
     } = parsedData;
-    
+
     // Validate basic info
     if (!basicInfo?.vehicleType) {
       return res.status(400).json({
         success: false,
-        message: "Vehicle type is required"
+        message: "Vehicle type is required",
       });
     }
-    
+
     // Validate registration vehicles
     if (!registrationVehicles || registrationVehicles.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "At least one registration vehicle is required"
+        message: "At least one registration vehicle is required",
       });
     }
-    
+
     // Process media files from request
     const processedMediaFiles = {};
-    const mediaFields = ['frontViewImage', 'leftSideImage', 'rightSideImage', 'rearViewImage', 'interiorImage', 'demoVideo'];
-    
-    mediaFields.forEach(field => {
+    const mediaFields = [
+      "frontViewImage",
+      "leftSideImage",
+      "rightSideImage",
+      "rearViewImage",
+      "interiorImage",
+      "demoVideo",
+    ];
+
+    mediaFields.forEach((field) => {
       if (req.files && req.files[field] && req.files[field][0]) {
-        // Get file path or URL based on storage type
         const file = req.files[field][0];
-        if (file.path) {
-          processedMediaFiles[field] = file.path;
-        } else if (file.filename) {
-          // For Cloudinary
-          processedMediaFiles[field] = file.path || file.url;
-        }
+        processedMediaFiles[field] = getFileUrl(file);
       } else if (mediaFiles && mediaFiles[field]) {
         processedMediaFiles[field] = mediaFiles[field];
       } else {
         processedMediaFiles[field] = "";
       }
     });
-    
+
     // Process each registration vehicle
     const processedVehicles = [];
     const duplicateRegNumbers = [];
     const invalidRegNumbers = [];
-    
+
     for (const regVehicle of registrationVehicles) {
       const cleanReg = cleanRegistrationNumber(regVehicle.registrationNumber);
-      
+
       // Validate registration number format
       if (!isValidRegistrationNumber(cleanReg)) {
         invalidRegNumbers.push(regVehicle.registrationNumber);
         continue;
       }
-      
+
       // Check for duplicate in existing database
       const existingVehicle = await Vehicle.findOne({
-        "registrationVehicles.registrationNumber": cleanReg
+        "registrationVehicles.registrationNumber": cleanReg,
       });
-      
+
       if (existingVehicle) {
         duplicateRegNumbers.push(cleanReg);
         continue;
       }
-      
-      // Generate vehicle ID for this registration (consistent and unique)
+
+      // Generate vehicle ID for this registration
       const vehicleId = await generateVehicleId();
-      
-      // Process status availability
+
+      // Resolve statusAvailability
+      const currentStatus =
+        regVehicle.statusAvailability?.currentStatus ||
+        regVehicle.currentStatus ||
+        "Available";
+
       let statusAvailability = {
-        currentStatus: regVehicle.currentStatus || "Available",
+        currentStatus,
         availableFrom: null,
-        remarks: ""
+        remarks: "",
       };
-      
-      if (regVehicle.currentStatus === "Unavailable") {
+
+      if (currentStatus === "Unavailable") {
         statusAvailability = {
           currentStatus: "Unavailable",
-          availableFrom: regVehicle.availableFrom || null,
-          remarks: regVehicle.remarks || ""
+          availableFrom:
+            regVehicle.statusAvailability?.availableFrom ||
+            regVehicle.availableFrom ||
+            null,
+          remarks:
+            regVehicle.statusAvailability?.remarks || regVehicle.remarks || "",
         };
       }
-      
-      // Create registration vehicle object with formatted registration number (store without spaces)
+
+      // Resolve maintenance
+      const maintenance = {
+        lastServiceDate:
+          regVehicle.maintenance?.lastServiceDate ||
+          regVehicle.lastServiceDate ||
+          null,
+        insuranceExpiryDate:
+          regVehicle.maintenance?.insuranceExpiryDate ||
+          regVehicle.insuranceExpiryDate ||
+          null,
+        pollutionExpiryDate:
+          regVehicle.maintenance?.pollutionExpiryDate ||
+          regVehicle.pollutionExpiryDate ||
+          null,
+      };
+
+      // Resolve driverDetails
+      const driverDetails = {
+        driverName: regVehicle.driverDetails?.driverName || regVehicle.driverName || "",
+        driverPhone: regVehicle.driverDetails?.driverPhone || regVehicle.driverPhone || "",
+        backupDriver: regVehicle.driverDetails?.backupDriver || regVehicle.backupDriver || "",
+        backupDriverPhone:
+          regVehicle.driverDetails?.backupDriverPhone || regVehicle.backupDriverPhone || "",
+        driverCharges: regVehicle.driverDetails?.driverCharges ?? regVehicle.driverCharges ?? 0,
+      };
+
       processedVehicles.push({
-        registrationNumber: cleanReg, // Store without spaces
+        registrationNumber: cleanReg,
         vehicleId: vehicleId,
         city: regVehicle.city,
-        modelConfig: regVehicle.modelConfig,
-        permitType: regVehicle.permitType,
-        ownershipType: regVehicle.ownershipType,
-        fuelType: regVehicle.fuelType,
+        modelConfig: regVehicle.modelConfig || "",
+        permitType: regVehicle.permitType || "",
+        ownershipType: regVehicle.ownershipType || "",
+        fuelType: regVehicle.fuelType || "",
         manufacturingYear: regVehicle.manufacturingYear || "",
         gpsEnabled: regVehicle.gpsEnabled !== undefined ? regVehicle.gpsEnabled : true,
         activeStatus: regVehicle.activeStatus !== undefined ? regVehicle.activeStatus : true,
-        statusAvailability: statusAvailability,
-        maintenance: {
-          lastServiceDate: regVehicle.lastServiceDate || null,
-          insuranceExpiryDate: regVehicle.insuranceExpiryDate || null,
-          pollutionExpiryDate: regVehicle.pollutionExpiryDate || null
-        },
-        driverDetails: {
-          driverName: regVehicle.driverName || "",
-          driverPhone: regVehicle.driverPhone || "",
-          backupDriver: regVehicle.backupDriver || "",
-          backupDriverPhone: regVehicle.backupDriverPhone || "",
-          driverCharges: regVehicle.driverCharges || 0
-        }
+        statusAvailability,
+        maintenance,
+        driverDetails,
       });
     }
-    
+
     // Check for invalid registration numbers
     if (invalidRegNumbers.length > 0) {
       return res.status(400).json({
         success: false,
         message: `Invalid registration number format: ${invalidRegNumbers.join(", ")}`,
-        invalid: invalidRegNumbers
+        invalid: invalidRegNumbers,
       });
     }
-    
+
     // Check for duplicates
     if (duplicateRegNumbers.length > 0) {
       return res.status(400).json({
         success: false,
         message: `Registration numbers already exist: ${duplicateRegNumbers.join(", ")}`,
-        duplicates: duplicateRegNumbers
+        duplicates: duplicateRegNumbers,
       });
     }
-    
+
+    // Build techSpecs with new field structure
+    const updatedTechSpecs = {
+      screenType: techSpecs?.screenType || "LED Only",
+      numberOfScreens: techSpecs?.numberOfScreens || "",
+      leftRightScreenWidth: techSpecs?.leftRightScreenWidth || techSpecs?.screenSizeWidth || "",
+      leftRightScreenHeight: techSpecs?.leftRightScreenHeight || techSpecs?.screenSizeHeight || "",
+      backScreenWidth: techSpecs?.backScreenWidth || "",
+      backScreenHeight: techSpecs?.backScreenHeight || "",
+      leftRightResolutionWidth: techSpecs?.leftRightResolutionWidth || "",
+      leftRightResolutionHeight: techSpecs?.leftRightResolutionHeight || "",
+      backResolutionWidth: techSpecs?.backResolutionWidth || "",
+      backResolutionHeight: techSpecs?.backResolutionHeight || "",
+      audioOutput: techSpecs?.audioOutput || "",
+      brightness: techSpecs?.brightness || "",
+      displayVersion: techSpecs?.displayVersion || "",
+      soundQuality: techSpecs?.soundQuality || "",
+      generatorCapacity: techSpecs?.generatorCapacity || "",
+      additionalFeatures: techSpecs?.additionalFeatures || "",
+    };
+
     // Check if group already exists (same vehicle type)
     let existingGroup = await Vehicle.findOne({
-      "basicInfo.vehicleType": basicInfo.vehicleType
+      "basicInfo.vehicleType": basicInfo.vehicleType,
     });
-    
+
     if (existingGroup) {
       // Add to existing group
       existingGroup.registrationVehicles.push(...processedVehicles);
       existingGroup.totalVehicles = existingGroup.registrationVehicles.length;
-      await existingGroup.save();
       
+      if (vehicleDescription !== undefined) {
+        existingGroup.vehicleDescription = vehicleDescription;
+      }
+      
+      // Update techSpecs if provided
+      if (Object.keys(updatedTechSpecs).some(key => updatedTechSpecs[key])) {
+        existingGroup.techSpecs = updatedTechSpecs;
+      }
+      
+      // Update pricing if provided
+      if (pricing) {
+        existingGroup.pricing = {
+          basePriceType: pricing.basePriceType || existingGroup.pricing.basePriceType,
+          costPerDay: Number(pricing.costPerDay) || existingGroup.pricing.costPerDay,
+          avgKmPerDay: Number(pricing.avgKmPerDay) || existingGroup.pricing.avgKmPerDay,
+          extraKmPrice: Number(pricing.extraKmPrice) || existingGroup.pricing.extraKmPrice,
+          avgBookingHrs: Number(pricing.avgBookingHrs) || existingGroup.pricing.avgBookingHrs,
+          extraHrPrice: Number(pricing.extraHrPrice) || existingGroup.pricing.extraHrPrice,
+          rtoCharges: Number(pricing.rtoCharges) || existingGroup.pricing.rtoCharges,
+          fuelEfficiency: Number(pricing.fuelEfficiency) || existingGroup.pricing.fuelEfficiency,
+          minBookingDuration: pricing.minBookingDuration || existingGroup.pricing.minBookingDuration,
+          overtimeCharges: Number(pricing.overtimeCharges) || existingGroup.pricing.overtimeCharges,
+          waitingCharges: Number(pricing.waitingCharges) || existingGroup.pricing.waitingCharges,
+        };
+      }
+      
+      // Update media files if new ones provided
+      Object.keys(processedMediaFiles).forEach(field => {
+        if (processedMediaFiles[field]) {
+          existingGroup.mediaFiles[field] = processedMediaFiles[field];
+        }
+      });
+      
+      await existingGroup.save();
+
       return res.status(200).json({
         success: true,
         message: `${processedVehicles.length} vehicle(s) added to existing group. Total: ${existingGroup.totalVehicles} vehicles`,
-        data: existingGroup
+        data: existingGroup,
       });
     }
-    
+
     // Create new group
     const vehicleData = {
       basicInfo: {
         customizedType: basicInfo.customizedType || "Non-Customized",
-        vehicleType: basicInfo.vehicleType
+        vehicleType: basicInfo.vehicleType,
+        vehicleName: basicInfo.vehicleName || "",
       },
-       vehicleDescription: vehicleDescription || "",
-      techSpecs: techSpecs || {},
-      pricing: pricing || {},
+      vehicleDescription: vehicleDescription || "",
+      techSpecs: updatedTechSpecs,
+      pricing: {
+        basePriceType: pricing?.basePriceType || "Per Day",
+        costPerDay: Number(pricing?.costPerDay) || 0,
+        avgKmPerDay: Number(pricing?.avgKmPerDay) || 0,
+        extraKmPrice: Number(pricing?.extraKmPrice) || 0,
+        avgBookingHrs: Number(pricing?.avgBookingHrs) || 0,
+        extraHrPrice: Number(pricing?.extraHrPrice) || 0,
+        rtoCharges: Number(pricing?.rtoCharges) || 0,
+        fuelEfficiency: Number(pricing?.fuelEfficiency) || 0,
+        minBookingDuration: pricing?.minBookingDuration || "",
+        overtimeCharges: Number(pricing?.overtimeCharges) || 0,
+        waitingCharges: Number(pricing?.waitingCharges) || 0,
+      },
       mediaFiles: processedMediaFiles,
       registrationVehicles: processedVehicles,
-      totalVehicles: processedVehicles.length
+      totalVehicles: processedVehicles.length,
     };
-    
+
     const vehicle = new Vehicle(vehicleData);
     const savedVehicle = await vehicle.save();
-    
+
     res.status(201).json({
       success: true,
       message: `${processedVehicles.length} vehicle(s) created successfully`,
-      data: savedVehicle
+      data: savedVehicle,
     });
-    
   } catch (error) {
     console.error("Create Vehicle Error:", error);
     res.status(500).json({
       success: false,
       message: "Error Creating Vehicle",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -934,44 +361,41 @@ const createVehicle = async (req, res) => {
 const getNewVehicles = async (req, res) => {
   try {
     const { page = 1, limit = 50, search, vehicleType, city, status } = req.query;
-    
+
     let query = {};
-    
+
     if (search) {
       const cleanSearch = cleanRegistrationNumber(search);
       query.$or = [
         { "registrationVehicles.registrationNumber": { $regex: cleanSearch, $options: "i" } },
-        { "basicInfo.vehicleType": { $regex: search, $options: "i" } }
+        { "basicInfo.vehicleType": { $regex: search, $options: "i" } },
+        { "basicInfo.vehicleName": { $regex: search, $options: "i" } },
       ];
     }
-    
+
     if (vehicleType) query["basicInfo.vehicleType"] = vehicleType;
-    
+
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    
+
     const [vehicles, total] = await Promise.all([
-      Vehicle.find(query)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit)),
+      Vehicle.find(query).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
       Vehicle.countDocuments(query),
     ]);
-    
-    // Filter by city and status if needed
+
     let filteredVehicles = vehicles;
     if (city) {
-      filteredVehicles = vehicles.filter(v => 
-        v.registrationVehicles.some(rv => rv.city === city)
+      filteredVehicles = vehicles.filter((v) =>
+        v.registrationVehicles.some((rv) => rv.city === city)
       );
     }
-    
+
     if (status !== undefined) {
       const statusBool = status === "true";
-      filteredVehicles = vehicles.filter(v => 
-        v.registrationVehicles.some(rv => rv.activeStatus === statusBool)
+      filteredVehicles = vehicles.filter((v) =>
+        v.registrationVehicles.some((rv) => rv.activeStatus === statusBool)
       );
     }
-    
+
     res.status(200).json({
       success: true,
       count: filteredVehicles.length,
@@ -980,7 +404,6 @@ const getNewVehicles = async (req, res) => {
       totalPages: Math.ceil(total / parseInt(limit)),
       data: filteredVehicles,
     });
-    
   } catch (error) {
     console.error("Get Vehicles Error:", error);
     res.status(500).json({
@@ -995,28 +418,27 @@ const getNewVehicles = async (req, res) => {
 const getVehicleById = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid Vehicle ID",
       });
     }
-    
+
     const vehicle = await Vehicle.findById(id);
-    
+
     if (!vehicle) {
       return res.status(404).json({
         success: false,
         message: "Vehicle not found",
       });
     }
-    
+
     res.status(200).json({
       success: true,
       data: vehicle,
     });
-    
   } catch (error) {
     console.error("Get Vehicle Error:", error);
     res.status(500).json({
@@ -1027,41 +449,37 @@ const getVehicleById = async (req, res) => {
   }
 };
 
-// Get single registration vehicle by registration number (returns formatted number)
+// Get single registration vehicle by registration number
 const getRegistrationVehicleByNumber = async (req, res) => {
   try {
     const { registrationNumber } = req.params;
     const cleanReg = cleanRegistrationNumber(registrationNumber);
-    
+
     const vehicle = await Vehicle.findOne({
-      "registrationVehicles.registrationNumber": cleanReg
+      "registrationVehicles.registrationNumber": cleanReg,
     });
-    
+
     if (!vehicle) {
       return res.status(404).json({
         success: false,
         message: "Vehicle not found",
       });
     }
-    
-    const regVehicle = vehicle.registrationVehicles.find(
-      rv => rv.registrationNumber === cleanReg
-    );
-    
-    // Return with formatted registration number
+
+    const regVehicle = vehicle.registrationVehicles.find((rv) => rv.registrationNumber === cleanReg);
+
     const responseData = {
       ...vehicle.toObject(),
       currentRegistrationVehicle: {
         ...regVehicle,
-        formattedRegistrationNumber: formatRegistrationNumber(regVehicle.registrationNumber)
-      }
+        formattedRegistrationNumber: formatRegistrationNumber(regVehicle.registrationNumber),
+      },
     };
-    
+
     res.status(200).json({
       success: true,
       data: responseData,
     });
-    
   } catch (error) {
     console.error("Get Registration Vehicle Error:", error);
     res.status(500).json({
@@ -1076,55 +494,138 @@ const getRegistrationVehicleByNumber = async (req, res) => {
 const updateVehicle = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid Vehicle ID",
       });
     }
-    
+
     let updateData;
     if (req.body.data) {
       updateData = JSON.parse(req.body.data);
     } else {
       updateData = req.body;
     }
-    
+
+    // Update registrationVehicles structure
+    if (updateData.registrationVehicles && Array.isArray(updateData.registrationVehicles)) {
+      updateData.registrationVehicles = updateData.registrationVehicles.map((regVehicle) => {
+        const cleanReg = cleanRegistrationNumber(regVehicle.registrationNumber);
+
+        const currentStatus =
+          regVehicle.statusAvailability?.currentStatus || regVehicle.currentStatus || "Available";
+
+        const statusAvailability = {
+          currentStatus,
+          availableFrom:
+            currentStatus === "Unavailable"
+              ? regVehicle.statusAvailability?.availableFrom || regVehicle.availableFrom || null
+              : null,
+          remarks:
+            currentStatus === "Unavailable"
+              ? regVehicle.statusAvailability?.remarks || regVehicle.remarks || ""
+              : "",
+        };
+
+        const maintenance = {
+          lastServiceDate:
+            regVehicle.maintenance?.lastServiceDate || regVehicle.lastServiceDate || null,
+          insuranceExpiryDate:
+            regVehicle.maintenance?.insuranceExpiryDate || regVehicle.insuranceExpiryDate || null,
+          pollutionExpiryDate:
+            regVehicle.maintenance?.pollutionExpiryDate || regVehicle.pollutionExpiryDate || null,
+        };
+
+        const driverDetails = {
+          driverName: regVehicle.driverDetails?.driverName || regVehicle.driverName || "",
+          driverPhone: regVehicle.driverDetails?.driverPhone || regVehicle.driverPhone || "",
+          backupDriver: regVehicle.driverDetails?.backupDriver || regVehicle.backupDriver || "",
+          backupDriverPhone:
+            regVehicle.driverDetails?.backupDriverPhone || regVehicle.backupDriverPhone || "",
+          driverCharges: regVehicle.driverDetails?.driverCharges ?? regVehicle.driverCharges ?? 0,
+        };
+
+        return {
+          ...regVehicle,
+          registrationNumber: cleanReg,
+          statusAvailability,
+          maintenance,
+          driverDetails,
+        };
+      });
+    }
+
+    // Update techSpecs with new structure if present
+    if (updateData.techSpecs) {
+      updateData.techSpecs = {
+        screenType: updateData.techSpecs.screenType || "LED Only",
+        numberOfScreens: updateData.techSpecs.numberOfScreens || "",
+        leftRightScreenWidth: updateData.techSpecs.leftRightScreenWidth || "",
+        leftRightScreenHeight: updateData.techSpecs.leftRightScreenHeight || "",
+        backScreenWidth: updateData.techSpecs.backScreenWidth || "",
+        backScreenHeight: updateData.techSpecs.backScreenHeight || "",
+        leftRightResolutionWidth: updateData.techSpecs.leftRightResolutionWidth || "",
+        leftRightResolutionHeight: updateData.techSpecs.leftRightResolutionHeight || "",
+        backResolutionWidth: updateData.techSpecs.backResolutionWidth || "",
+        backResolutionHeight: updateData.techSpecs.backResolutionHeight || "",
+        audioOutput: updateData.techSpecs.audioOutput || "",
+        brightness: updateData.techSpecs.brightness || "",
+        displayVersion: updateData.techSpecs.displayVersion || "",
+        soundQuality: updateData.techSpecs.soundQuality || "",
+        generatorCapacity: updateData.techSpecs.generatorCapacity || "",
+        additionalFeatures: updateData.techSpecs.additionalFeatures || "",
+      };
+    }
+
     // Process media files if any
-    const mediaFields = ['frontViewImage', 'leftSideImage', 'rightSideImage', 'rearViewImage', 'interiorImage', 'demoVideo'];
+    const mediaFields = [
+      "frontViewImage",
+      "leftSideImage",
+      "rightSideImage",
+      "rearViewImage",
+      "interiorImage",
+      "demoVideo",
+    ];
     const mediaUpdates = {};
-    
-    mediaFields.forEach(field => {
+
+    mediaFields.forEach((field) => {
       if (req.files && req.files[field] && req.files[field][0]) {
         const file = req.files[field][0];
-        mediaUpdates[`mediaFiles.${field}`] = file.path || file.url;
+        mediaUpdates[`mediaFiles.${field}`] = getFileUrl(file);
       }
     });
-    
+
     if (Object.keys(mediaUpdates).length > 0) {
       updateData = { ...updateData, ...mediaUpdates };
     }
-    
+
+    // Remove any undefined or null values from updateData
+    Object.keys(updateData).forEach(key => {
+      if (updateData[key] === undefined || updateData[key] === null) {
+        delete updateData[key];
+      }
+    });
+
     const updatedVehicle = await Vehicle.findByIdAndUpdate(
       id,
       { $set: updateData },
       { new: true, runValidators: true }
     );
-    
+
     if (!updatedVehicle) {
       return res.status(404).json({
         success: false,
         message: "Vehicle Not Found",
       });
     }
-    
+
     res.status(200).json({
       success: true,
       message: "Vehicle Updated Successfully",
       data: updatedVehicle,
     });
-    
   } catch (error) {
     console.error("Update Vehicle Error:", error);
     res.status(500).json({
@@ -1140,14 +641,14 @@ const updateRegistrationVehicle = async (req, res) => {
   try {
     const { id, registrationNumber } = req.params;
     const cleanReg = cleanRegistrationNumber(registrationNumber);
-    
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid Vehicle ID",
       });
     }
-    
+
     const vehicle = await Vehicle.findById(id);
     if (!vehicle) {
       return res.status(404).json({
@@ -1155,21 +656,18 @@ const updateRegistrationVehicle = async (req, res) => {
         message: "Vehicle not found",
       });
     }
-    
-    const regIndex = vehicle.registrationVehicles.findIndex(
-      rv => rv.registrationNumber === cleanReg
-    );
-    
+
+    const regIndex = vehicle.registrationVehicles.findIndex((rv) => rv.registrationNumber === cleanReg);
+
     if (regIndex === -1) {
       return res.status(404).json({
         success: false,
         message: "Registration vehicle not found",
       });
     }
-    
+
     const updateData = req.body;
-    
-    // Update specific fields
+
     if (updateData.city) vehicle.registrationVehicles[regIndex].city = updateData.city;
     if (updateData.modelConfig) vehicle.registrationVehicles[regIndex].modelConfig = updateData.modelConfig;
     if (updateData.permitType) vehicle.registrationVehicles[regIndex].permitType = updateData.permitType;
@@ -1178,8 +676,7 @@ const updateRegistrationVehicle = async (req, res) => {
     if (updateData.manufacturingYear) vehicle.registrationVehicles[regIndex].manufacturingYear = updateData.manufacturingYear;
     if (updateData.gpsEnabled !== undefined) vehicle.registrationVehicles[regIndex].gpsEnabled = updateData.gpsEnabled;
     if (updateData.activeStatus !== undefined) vehicle.registrationVehicles[regIndex].activeStatus = updateData.activeStatus;
-    
-    // Update status availability
+
     if (updateData.currentStatus) {
       vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus = updateData.currentStatus;
       if (updateData.currentStatus === "Unavailable") {
@@ -1190,27 +687,32 @@ const updateRegistrationVehicle = async (req, res) => {
         vehicle.registrationVehicles[regIndex].statusAvailability.remarks = "";
       }
     }
-    
-    // Update maintenance
-    if (updateData.lastServiceDate !== undefined) vehicle.registrationVehicles[regIndex].maintenance.lastServiceDate = updateData.lastServiceDate || null;
-    if (updateData.insuranceExpiryDate !== undefined) vehicle.registrationVehicles[regIndex].maintenance.insuranceExpiryDate = updateData.insuranceExpiryDate || null;
-    if (updateData.pollutionExpiryDate !== undefined) vehicle.registrationVehicles[regIndex].maintenance.pollutionExpiryDate = updateData.pollutionExpiryDate || null;
-    
-    // Update driver details
-    if (updateData.driverName !== undefined) vehicle.registrationVehicles[regIndex].driverDetails.driverName = updateData.driverName || "";
-    if (updateData.driverPhone !== undefined) vehicle.registrationVehicles[regIndex].driverDetails.driverPhone = updateData.driverPhone || "";
-    if (updateData.backupDriver !== undefined) vehicle.registrationVehicles[regIndex].driverDetails.backupDriver = updateData.backupDriver || "";
-    if (updateData.backupDriverPhone !== undefined) vehicle.registrationVehicles[regIndex].driverDetails.backupDriverPhone = updateData.backupDriverPhone || "";
-    if (updateData.driverCharges !== undefined) vehicle.registrationVehicles[regIndex].driverDetails.driverCharges = updateData.driverCharges || 0;
-    
+
+    if (updateData.lastServiceDate !== undefined)
+      vehicle.registrationVehicles[regIndex].maintenance.lastServiceDate = updateData.lastServiceDate || null;
+    if (updateData.insuranceExpiryDate !== undefined)
+      vehicle.registrationVehicles[regIndex].maintenance.insuranceExpiryDate = updateData.insuranceExpiryDate || null;
+    if (updateData.pollutionExpiryDate !== undefined)
+      vehicle.registrationVehicles[regIndex].maintenance.pollutionExpiryDate = updateData.pollutionExpiryDate || null;
+
+    if (updateData.driverName !== undefined)
+      vehicle.registrationVehicles[regIndex].driverDetails.driverName = updateData.driverName || "";
+    if (updateData.driverPhone !== undefined)
+      vehicle.registrationVehicles[regIndex].driverDetails.driverPhone = updateData.driverPhone || "";
+    if (updateData.backupDriver !== undefined)
+      vehicle.registrationVehicles[regIndex].driverDetails.backupDriver = updateData.backupDriver || "";
+    if (updateData.backupDriverPhone !== undefined)
+      vehicle.registrationVehicles[regIndex].driverDetails.backupDriverPhone = updateData.backupDriverPhone || "";
+    if (updateData.driverCharges !== undefined)
+      vehicle.registrationVehicles[regIndex].driverDetails.driverCharges = updateData.driverCharges || 0;
+
     await vehicle.save();
-    
+
     res.status(200).json({
       success: true,
       message: "Registration vehicle updated successfully",
-      data: vehicle
+      data: vehicle,
     });
-    
   } catch (error) {
     console.error("Update Registration Vehicle Error:", error);
     res.status(500).json({
@@ -1225,28 +727,27 @@ const updateRegistrationVehicle = async (req, res) => {
 const deleteVehicle = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid Vehicle ID",
       });
     }
-    
+
     const vehicle = await Vehicle.findByIdAndDelete(id);
-    
+
     if (!vehicle) {
       return res.status(404).json({
         success: false,
         message: "Vehicle not found",
       });
     }
-    
+
     res.status(200).json({
       success: true,
       message: "Vehicle group deleted successfully",
     });
-    
   } catch (error) {
     console.error("Delete Vehicle Error:", error);
     res.status(500).json({
@@ -1262,14 +763,14 @@ const deleteRegistrationVehicle = async (req, res) => {
   try {
     const { id, registrationNumber } = req.params;
     const cleanReg = cleanRegistrationNumber(registrationNumber);
-    
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid Vehicle ID",
       });
     }
-    
+
     const vehicle = await Vehicle.findById(id);
     if (!vehicle) {
       return res.status(404).json({
@@ -1277,23 +778,19 @@ const deleteRegistrationVehicle = async (req, res) => {
         message: "Vehicle not found",
       });
     }
-    
-    const regIndex = vehicle.registrationVehicles.findIndex(
-      rv => rv.registrationNumber === cleanReg
-    );
-    
+
+    const regIndex = vehicle.registrationVehicles.findIndex((rv) => rv.registrationNumber === cleanReg);
+
     if (regIndex === -1) {
       return res.status(404).json({
         success: false,
         message: "Registration vehicle not found",
       });
     }
-    
-    // Remove the registration vehicle
+
     vehicle.registrationVehicles.splice(regIndex, 1);
     vehicle.totalVehicles = vehicle.registrationVehicles.length;
-    
-    // If no vehicles left, delete the entire group
+
     if (vehicle.registrationVehicles.length === 0) {
       await Vehicle.findByIdAndDelete(id);
       return res.status(200).json({
@@ -1301,15 +798,14 @@ const deleteRegistrationVehicle = async (req, res) => {
         message: "Vehicle group deleted as no vehicles remain",
       });
     }
-    
+
     await vehicle.save();
-    
+
     res.status(200).json({
       success: true,
       message: `Vehicle ${formatRegistrationNumber(cleanReg)} removed successfully`,
-      data: vehicle
+      data: vehicle,
     });
-    
   } catch (error) {
     console.error("Delete Registration Vehicle Error:", error);
     res.status(500).json({
@@ -1324,38 +820,36 @@ const deleteRegistrationVehicle = async (req, res) => {
 const getVehicleStatistics = async (req, res) => {
   try {
     const vehicles = await Vehicle.find();
-    
+
     let totalVehicles = 0;
     let activeVehicles = 0;
     const cityStats = {};
     const typeStats = {};
-    
+
     for (const vehicle of vehicles) {
       for (const regVehicle of vehicle.registrationVehicles) {
         totalVehicles++;
         if (regVehicle.activeStatus) activeVehicles++;
-        
-        // City statistics
+
         if (regVehicle.city) {
           cityStats[regVehicle.city] = (cityStats[regVehicle.city] || 0) + 1;
         }
-        
-        // Type statistics
+
         if (vehicle.basicInfo.vehicleType) {
           typeStats[vehicle.basicInfo.vehicleType] = (typeStats[vehicle.basicInfo.vehicleType] || 0) + 1;
         }
       }
     }
-    
+
     const topCities = Object.entries(cityStats)
       .map(([city, count]) => ({ city, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
-    
+
     const vehiclesByType = Object.entries(typeStats)
       .map(([type, count]) => ({ type, count }))
       .sort((a, b) => b.count - a.count);
-    
+
     res.status(200).json({
       success: true,
       data: {
@@ -1366,7 +860,6 @@ const getVehicleStatistics = async (req, res) => {
         vehiclesByType,
       },
     });
-    
   } catch (error) {
     console.error("Get Statistics Error:", error);
     res.status(500).json({
@@ -1377,22 +870,21 @@ const getVehicleStatistics = async (req, res) => {
   }
 };
 
-// Check if registration number exists (for real-time validation)
+// Check if registration number exists
 const checkRegistrationExists = async (req, res) => {
   try {
     const { registrationNumber } = req.params;
     const cleanReg = cleanRegistrationNumber(registrationNumber);
-    
+
     const existingVehicle = await Vehicle.findOne({
-      "registrationVehicles.registrationNumber": cleanReg
+      "registrationVehicles.registrationNumber": cleanReg,
     });
-    
+
     res.status(200).json({
       success: true,
       exists: !!existingVehicle,
-      registrationNumber: cleanReg
+      registrationNumber: cleanReg,
     });
-    
   } catch (error) {
     console.error("Check Registration Error:", error);
     res.status(500).json({
@@ -1403,95 +895,104 @@ const checkRegistrationExists = async (req, res) => {
   }
 };
 
-
-// Function to generate unique vehicle ID
+// Generate unique vehicle ID
 const generateUniqueVehicleIdInternal = async () => {
   const now = new Date();
-  const day = String(now.getDate()).padStart(2, '0');
-  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, "0");
+  const month = String(now.getMonth() + 1).padStart(2, "0");
   const year = String(now.getFullYear()).slice(-2);
-  
+
   let vehicleId;
   let isUnique = false;
   let attempts = 0;
-  
+
   while (!isUnique && attempts < 20) {
-    const random = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+    const random = String(Math.floor(Math.random() * 10000)).padStart(4, "0");
     vehicleId = `${day}${month}${year}${random}`;
-    
+
     const existing = await Vehicle.findOne({
-      "registrationVehicles.vehicleId": vehicleId
+      "registrationVehicles.vehicleId": vehicleId,
     });
-    
+
     if (!existing) {
       isUnique = true;
     }
     attempts++;
   }
-  
+
+  if (!vehicleId || !isUnique) {
+    vehicleId = `${day}${month}${year}${String(Date.now()).slice(-4)}`;
+  }
+
   return vehicleId;
 };
 
-// Add this endpoint handler
 const generateUniqueVehicleId = async (req, res) => {
   try {
     const vehicleId = await generateUniqueVehicleIdInternal();
     res.status(200).json({
       success: true,
-      vehicleId: vehicleId
+      vehicleId: vehicleId,
     });
   } catch (error) {
     console.error("Error generating vehicle ID:", error);
     res.status(500).json({
       success: false,
       message: "Error generating vehicle ID",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// Add this function for single registration vehicle creation
+// Create single registration vehicle
 const createRegistrationVehicle = async (req, res) => {
   try {
     const formData = req.body;
     const files = req.files;
-    
+
     const cleanReg = cleanRegistrationNumber(formData.registrationNumber);
-    
+
     if (!isValidRegistrationNumber(cleanReg)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid registration number format"
+        message: "Invalid registration number format",
       });
     }
-    
+
     const existingVehicle = await Vehicle.findOne({
-      "registrationVehicles.registrationNumber": cleanReg
+      "registrationVehicles.registrationNumber": cleanReg,
     });
-    
+
     if (existingVehicle) {
       return res.status(400).json({
         success: false,
-        message: "Registration number already exists"
+        message: "Registration number already exists",
       });
     }
-    
+
     const vehicleId = await generateUniqueVehicleIdInternal();
-    
+
     // Process media files
     const mediaFiles = {};
-    const mediaFields = ['frontViewImage', 'leftSideImage', 'rightSideImage', 'rearViewImage', 'interiorImage', 'demoVideo'];
-    
-    mediaFields.forEach(field => {
+    const mediaFields = [
+      "frontViewImage",
+      "leftSideImage",
+      "rightSideImage",
+      "rearViewImage",
+      "interiorImage",
+      "demoVideo",
+    ];
+
+    mediaFields.forEach((field) => {
       if (files && files[field] && files[field][0]) {
-        mediaFiles[field] = files[field][0].path || files[field][0].url;
+        mediaFiles[field] = getFileUrl(files[field][0]);
       } else if (formData[field]) {
         mediaFiles[field] = formData[field];
       } else {
         mediaFiles[field] = "";
       }
     });
-    
+
     const registrationVehicle = {
       registrationNumber: cleanReg,
       vehicleId: vehicleId,
@@ -1501,62 +1002,63 @@ const createRegistrationVehicle = async (req, res) => {
       ownershipType: formData.ownershipType,
       fuelType: formData.fuelType,
       manufacturingYear: formData.manufacturingYear || "",
-      gpsEnabled: formData.gpsEnabled === 'true',
-      activeStatus: formData.activeStatus === 'true',
+      gpsEnabled: formData.gpsEnabled === "true",
+      activeStatus: formData.activeStatus === "true",
       statusAvailability: {
         currentStatus: formData.currentStatus || "Available",
         availableFrom: formData.currentStatus === "Unavailable" ? formData.availableFrom : null,
-        remarks: formData.currentStatus === "Unavailable" ? formData.remarks : ""
+        remarks: formData.currentStatus === "Unavailable" ? formData.remarks : "",
       },
       maintenance: {
         lastServiceDate: formData.lastServiceDate || null,
         insuranceExpiryDate: formData.insuranceExpiryDate || null,
-        pollutionExpiryDate: formData.pollutionExpiryDate || null
+        pollutionExpiryDate: formData.pollutionExpiryDate || null,
       },
       driverDetails: {
         driverName: formData.driverName || "",
         driverPhone: formData.driverPhone || "",
         backupDriver: formData.backupDriver || "",
         backupDriverPhone: formData.backupDriverPhone || "",
-        driverCharges: formData.driverCharges || 0
-      }
+        driverCharges: formData.driverCharges || 0,
+      },
     };
-    
+
     let vehicleGroup = await Vehicle.findOne({
-      "basicInfo.vehicleType": formData.vehicleType || "Default"
+      "basicInfo.vehicleType": formData.vehicleType || "Default",
     });
-    
+
     if (!vehicleGroup) {
       vehicleGroup = new Vehicle({
         basicInfo: {
           customizedType: "Non-Customized",
-          vehicleType: formData.vehicleType || "Default"
+          vehicleType: formData.vehicleType || "Default",
+          vehicleName: formData.vehicleName || "",
         },
+        vehicleDescription: formData.vehicleDescription || "",
         techSpecs: {},
         pricing: {},
         mediaFiles: mediaFiles,
         registrationVehicles: [registrationVehicle],
-        totalVehicles: 1
+        totalVehicles: 1,
       });
     } else {
       vehicleGroup.registrationVehicles.push(registrationVehicle);
       vehicleGroup.totalVehicles = vehicleGroup.registrationVehicles.length;
     }
-    
+
     await vehicleGroup.save();
-    
+
     res.status(201).json({
       success: true,
       message: "Vehicle created successfully",
-      data: registrationVehicle
+      data: registrationVehicle,
     });
-    
   } catch (error) {
     console.error("Create Registration Vehicle Error:", error);
     res.status(500).json({
       success: false,
       message: "Error creating vehicle",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -1565,21 +1067,20 @@ const createRegistrationVehicle = async (req, res) => {
 const getVehiclesByType = async (req, res) => {
   try {
     const { typeId } = req.params;
-    
+
     if (!typeId) {
       return res.status(400).json({
         success: false,
-        message: "Vehicle type ID is required"
+        message: "Vehicle type ID is required",
       });
     }
-    
+
     const vehicles = await Vehicle.find({
-      "basicInfo.vehicleType": typeId
+      "basicInfo.vehicleType": typeId,
     }).sort({ createdAt: -1 });
-    
-    // Extract all registration vehicles from matching vehicle groups
+
     let allRegistrationVehicles = [];
-    
+
     for (const vehicle of vehicles) {
       if (vehicle.registrationVehicles && vehicle.registrationVehicles.length > 0) {
         allRegistrationVehicles.push({
@@ -1588,65 +1089,63 @@ const getVehiclesByType = async (req, res) => {
           techSpecs: vehicle.techSpecs,
           pricing: vehicle.pricing,
           mediaFiles: vehicle.mediaFiles,
-          registrationVehicles: vehicle.registrationVehicles
+          registrationVehicles: vehicle.registrationVehicles,
         });
       }
     }
-    
+
     res.status(200).json({
       success: true,
       count: allRegistrationVehicles.length,
-      data: allRegistrationVehicles
+      data: allRegistrationVehicles,
     });
-    
   } catch (error) {
     console.error("Get Vehicles By Type Error:", error);
     res.status(500).json({
       success: false,
       message: "Error Fetching Vehicles By Type",
-      error: error.message
+      error: error.message,
     });
   }
 };
-// Add this endpoint to get vehicle group by type
+
+// Get vehicle group by type
 const getVehicleGroupByType = async (req, res) => {
   try {
     const { typeId } = req.params;
-    
+
     if (!typeId) {
       return res.status(400).json({
         success: false,
-        message: "Vehicle type ID is required"
+        message: "Vehicle type ID is required",
       });
     }
-    
+
     const vehicle = await Vehicle.findOne({
-      "basicInfo.vehicleType": typeId
+      "basicInfo.vehicleType": typeId,
     });
-    
+
     if (!vehicle) {
       return res.status(200).json({
         success: false,
         message: "No vehicle found for this type",
-        data: null
+        data: null,
       });
     }
-    
+
     res.status(200).json({
       success: true,
-      data: vehicle
+      data: vehicle,
     });
-    
   } catch (error) {
     console.error("Get Vehicle Group By Type Error:", error);
     res.status(500).json({
       success: false,
       message: "Error Fetching Vehicle Group",
-      error: error.message
+      error: error.message,
     });
   }
 };
-
 
 module.exports = {
   createVehicle,
@@ -1662,5 +1161,5 @@ module.exports = {
   generateUniqueVehicleId,
   createRegistrationVehicle,
   getVehiclesByType,
-  getVehicleGroupByType
+  getVehicleGroupByType,
 };
