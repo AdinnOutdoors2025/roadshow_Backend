@@ -106,7 +106,7 @@ const vehicleSchema = new mongoose.Schema(
       vehicleType: { type: String, required: true },
     },
 
-    // Vehicle Description (Shared)
+    // Vehicle Description 
     vehicleDescription: { type: String, default: "" },
 
     // Technical Specifications (Shared) - UPDATED with separate Width/Height fields
@@ -138,20 +138,20 @@ const vehicleSchema = new mongoose.Schema(
       additionalFeatures: { type: String, default: "" },
     },
 
-    // Pricing (Shared)
-    pricing: {
-      basePriceType: { type: String, default: "Per Day" },
-      costPerDay: { type: Number, default: 0 },
-      avgKmPerDay: { type: Number, default: 0 },
-      extraKmPrice: { type: Number, default: 0 },
-      avgBookingHrs: { type: Number, default: 0 },
-      extraHrPrice: { type: Number, default: 0 },
-      rtoCharges: { type: Number, default: 0 },
-      fuelEfficiency: { type: Number, default: 0 },
-      minBookingDuration: { type: String, default: "" },
-      overtimeCharges: { type: Number, default: 0 },
-      waitingCharges: { type: Number, default: 0 },
-    },
+    // // Pricing (Shared)
+    // pricing: {
+    //   basePriceType: { type: String, default: "Per Day" },
+    //   costPerDay: { type: Number, default: 0 },
+    //   avgKmPerDay: { type: Number, default: 0 },
+    //   extraKmPrice: { type: Number, default: 0 },
+    //   avgBookingHrs: { type: Number, default: 0 },
+    //   extraHrPrice: { type: Number, default: 0 },
+    //   rtoCharges: { type: Number, default: 0 },
+    //   fuelEfficiency: { type: Number, default: 0 },
+    //   minBookingDuration: { type: String, default: "" },
+    //   overtimeCharges: { type: Number, default: 0 },
+    //   waitingCharges: { type: Number, default: 0 },
+    // },
 
     // Media Files (Shared)
     mediaFiles: {
@@ -168,6 +168,18 @@ const vehicleSchema = new mongoose.Schema(
 
     // Total count
     totalVehicles: { type: Number, default: 0 },
+    // New: step completion tracking
+    completedSteps: {
+      type: Object,
+      default: {
+        step1: false,  // Basic Info
+        step2: false,  // Tech Specs
+        step3: false,  // Media & Description
+        step4: false,  // Drivers & Maintenance
+        step5: false,  // Summary (final submission)
+      },
+      },
+    completedOnboarding: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
