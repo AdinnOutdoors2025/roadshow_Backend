@@ -186,7 +186,8 @@ const vehicleSchema = new mongoose.Schema(
 
 // Indexes for faster queries
 vehicleSchema.index({ "basicInfo.vehicleType": 1 });
-vehicleSchema.index({ "registrationVehicles.registrationNumber": 1 });
+// vehicleSchema.index({ "registrationVehicles.registrationNumber": 1 });
+vehicleSchema.index({ "registrationVehicles.registrationNumber": 1 }, { unique: true, sparse: true });
 vehicleSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model("vehicleDetails", vehicleSchema);

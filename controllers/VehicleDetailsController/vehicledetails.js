@@ -128,8 +128,24 @@ const createVehicle = async (req, res) => {
     if (duplicateRegNumbers.length) return res.status(400).json({ success: false, message: `Duplicates: ${duplicateRegNumbers.join(", ")}` });
 
     // Build techSpecs (same as before, no pricing)
-    const updatedTechSpecs = { /* same as original */ };
-
+const updatedTechSpecs = techSpecs || {
+  screenType: "LED Only",
+  numberOfScreens: "",
+  leftRightScreenWidth: "",
+  leftRightScreenHeight: "",
+  backScreenWidth: "",
+  backScreenHeight: "",
+  leftRightResolutionWidth: "",
+  leftRightResolutionHeight: "",
+  backResolutionWidth: "",
+  backResolutionHeight: "",
+  audioOutput: "",
+  brightness: "",
+  displayVersion: "",
+  soundQuality: "",
+  generatorCapacity: "",
+  additionalFeatures: "",
+};
     let existingGroup = await Vehicle.findOne({ "basicInfo.vehicleType": basicInfo.vehicleType });
     if (existingGroup) {
       existingGroup.registrationVehicles.push(...processedVehicles);
@@ -162,6 +178,66 @@ const createVehicle = async (req, res) => {
   }
 };
 
+// const updateVehicleStep = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { step, stepData, completed } = req.body;
+
+//     if (!mongoose.Types.ObjectId.isValid(id)) {
+//       return res.status(400).json({ success: false, message: "Invalid ID" });
+//     }
+
+//     const vehicle = await Vehicle.findById(id);
+//     if (!vehicle) {
+//       return res.status(404).json({ success: false, message: "Vehicle not found" });
+//     }
+
+//     // Handle registrationVehicles specially: merge instead of replace
+//     if (stepData.registrationVehicles && Array.isArray(stepData.registrationVehicles)) {
+//       for (const updatedReg of stepData.registrationVehicles) {
+//         const index = vehicle.registrationVehicles.findIndex(
+//           rv => rv.registrationNumber === updatedReg.registrationNumber
+//         );
+//         if (index !== -1) {
+//           // Merge: preserve existing fields, overwrite with new values
+//           vehicle.registrationVehicles[index] = {
+//             ...vehicle.registrationVehicles[index].toObject(),
+//             ...updatedReg,
+//           };
+//         } else {
+//           // If new vehicle, push it (but should not happen at step 4)
+//           vehicle.registrationVehicles.push(updatedReg);
+//         }
+//       }
+//       // Remove the property so we don't double-process
+//       delete stepData.registrationVehicles;
+//     }
+
+//     // Apply all other stepData fields
+//     Object.keys(stepData).forEach(key => {
+//       if (stepData[key] !== undefined) {
+//         vehicle[key] = stepData[key];
+//       }
+//     });
+
+//     // Mark step as completed
+//     if (completed) {
+//       vehicle.completedSteps[`step${step}`] = true;
+//       const allCompleted = Object.values(vehicle.completedSteps).every(v => v === true);
+//       if (allCompleted) vehicle.completedOnboarding = true;
+//     }
+
+//     await vehicle.save();
+//     res.status(200).json({ success: true, message: `Step ${step} updated`, data: vehicle });
+//   } catch (error) {
+//     console.error("Update step error:", error);
+//     res.status(500).json({ success: false, message: error.message });
+//   }
+// };
+
+
+// Get all vehicles
+
 const updateVehicleStep = async (req, res) => {
   try {
     const { id } = req.params;
@@ -176,35 +252,25 @@ const updateVehicleStep = async (req, res) => {
       return res.status(404).json({ success: false, message: "Vehicle not found" });
     }
 
-    // Handle registrationVehicles specially: merge instead of replace
-    if (stepData.registrationVehicles && Array.isArray(stepData.registrationVehicles)) {
-      for (const updatedReg of stepData.registrationVehicles) {
-        const index = vehicle.registrationVehicles.findIndex(
-          rv => rv.registrationNumber === updatedReg.registrationNumber
-        );
-        if (index !== -1) {
-          // Merge: preserve existing fields, overwrite with new values
-          vehicle.registrationVehicles[index] = {
-            ...vehicle.registrationVehicles[index].toObject(),
-            ...updatedReg,
-          };
-        } else {
-          // If new vehicle, push it (but should not happen at step 4)
-          vehicle.registrationVehicles.push(updatedReg);
-        }
-      }
-      // Remove the property so we don't double-process
-      delete stepData.registrationVehicles;
-    }
+  if (stepData.registrationVehicles) {
+  const regVehicles = stepData.registrationVehicles;
+  const regNumbers = regVehicles.map(rv => rv.registrationNumber);
+  if (new Set(regNumbers).size !== regNumbers.length) {
+    return res.status(400).json({ success: false, message: "Duplicate registration numbers in request" });
+  }
+  vehicle.registrationVehicles = regVehicles;
+  vehicle.totalVehicles = regVehicles.length;
+  delete stepData.registrationVehicles;
+}
 
-    // Apply all other stepData fields
+    // Apply all other fields (techSpecs, vehicleDescription, etc.)
     Object.keys(stepData).forEach(key => {
       if (stepData[key] !== undefined) {
         vehicle[key] = stepData[key];
       }
     });
 
-    // Mark step as completed
+    // Mark step completion
     if (completed) {
       vehicle.completedSteps[`step${step}`] = true;
       const allCompleted = Object.values(vehicle.completedSteps).every(v => v === true);
@@ -220,7 +286,6 @@ const updateVehicleStep = async (req, res) => {
 };
 
 
-// Get all vehicles
 const getNewVehicles = async (req, res) => {
   try {
     const { page = 1, limit = 50, search, vehicleType, city, status } = req.query;
