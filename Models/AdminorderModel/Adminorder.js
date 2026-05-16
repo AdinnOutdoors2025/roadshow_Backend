@@ -76,7 +76,7 @@ const paymentStageFirstSchema = new mongoose.Schema(
     paymentDate:          { type: Date,   required: true },
     paymentVerification:  { type: String, required: true }, 
     paymentNotes:         { type: String, default: "" },    
-    uploadedBy:           { type: String },
+    uploadedBy:           { type: String }, 
     uploadedAt:           { type: Date, default: Date.now },
   },
   { _id: true }
@@ -158,6 +158,7 @@ paymentStageFirst: { type: [paymentStageFirstSchema], default: [] },
     movedBy: String,
     movedAt: { type: Date, default: Date.now },
     discountAmount: Number,
+    discountNotes: { type: String, default: "" },
   },
 ],
 
