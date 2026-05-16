@@ -1,5 +1,5 @@
 
-
+require("dotenv").config();
 const jwt = require('jsonwebtoken');
 const AdminUser = require('../../Models/MainLoginSchema');
 const { successResponse, errorResponse } = require('../../Utils/response');
@@ -70,7 +70,7 @@ const loginAdmin = async (req, res) => {
 
     const admin = await AdminUser.findOne({
       username: username.trim(),
-      role: 'admin',
+      // role: 'admin',
     });
 
     if (!admin) {
@@ -104,4 +104,112 @@ const getAdminProfile = (req, res) => {
   });
 };
 
-module.exports = { registerAdmin, loginAdmin, getAdminProfile };
+const createStaffAdmin = async (req, res) => {
+  const { username, password, phone } = req.body;
+
+  try {
+    if (!username || !password)
+      return errorResponse(res, 'Username and password are required', null, 400);
+
+    if (!/^[a-zA-Z0-9]{4,20}$/.test(username))
+      return errorResponse(res, 'Username must be 4-20 alphanumeric characters', null, 400);
+
+    if (password.length < 6)
+      return errorResponse(res, 'Password must be at least 6 characters', null, 400);
+
+    const existing = await AdminUser.findOne({ username: username.trim() });
+    if (existing)
+      return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+
+    const staffAdmin = new AdminUser({
+      username: username.trim(),
+      password,
+      phone: phone || '',
+      isAdmin: 0,
+      role: 'staffAdmin',
+      status: 'active',
+    });
+
+    await staffAdmin.save();
+
+    return successResponse(res, 'Staff admin created successfully', {
+      user: {
+        id: staffAdmin._id,
+        username: staffAdmin.username,
+        phone: staffAdmin.phone,
+        role: staffAdmin.role,
+        isAdmin: staffAdmin.isAdmin,
+        status: staffAdmin.status,
+      },
+    }, 201);
+
+  } catch (err) {
+    if (err.code === 11000)
+      return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+    return errorResponse(res, 'Server error', err.message);
+  }
+};
+
+// GET ALL
+const getAllStaffAdmins = async (req, res) => {
+  try {
+    const list = await AdminUser.find({ role: 'staffAdmin' }).sort({ createdAt: -1 });
+    return successResponse(res, 'Staff admins fetched', { data: list });
+  } catch (err) {
+    return errorResponse(res, 'Server error', err.message);
+  }
+};
+
+// UPDATE
+const updateStaffAdmin = async (req, res) => {
+  const { id } = req.params;
+  const { username, phone, status, password } = req.body;
+
+  try {
+    const staffAdmin = await AdminUser.findOne({ _id: id, role: 'staffAdmin' });
+    if (!staffAdmin)
+      return errorResponse(res, 'Staff admin not found', null, 404);
+
+    if (username) staffAdmin.username = username.trim();
+    if (phone !== undefined) staffAdmin.phone = phone;
+    if (status) staffAdmin.status = status;
+
+    if (password) {
+      if (password.length < 6)
+        return errorResponse(res, 'Password must be at least 6 characters', null, 400);
+      staffAdmin.password = password; // pre-save hook hash பண்ணும்
+    }
+
+    await staffAdmin.save();
+
+    return successResponse(res, 'Staff admin updated successfully', {
+      user: {
+        id: staffAdmin._id,
+        username: staffAdmin.username,
+        phone: staffAdmin.phone,
+        status: staffAdmin.status,
+      },
+    });
+  } catch (err) {
+    if (err.code === 11000)
+      return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+    return errorResponse(res, 'Server error', err.message);
+  }
+};
+
+// DELETE
+const deleteStaffAdmin = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const staffAdmin = await AdminUser.findOneAndDelete({ _id: id, role: 'staffAdmin' });
+    if (!staffAdmin)
+      return errorResponse(res, 'Staff admin not found', null, 404);
+    return successResponse(res, 'Staff admin deleted successfully', null);
+  } catch (err) {
+    return errorResponse(res, 'Server error', err.message);
+  }
+};
+
+
+
+module.exports = { registerAdmin, loginAdmin, getAdminProfile,createStaffAdmin, getAllStaffAdmins, updateStaffAdmin, deleteStaffAdmin };

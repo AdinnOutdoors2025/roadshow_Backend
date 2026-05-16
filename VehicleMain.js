@@ -22,7 +22,7 @@ const newVehicleRoutes = require("./Routes/vehicleDetailsRoutes/vehicleDetails")
 const cartRoutes = require("./Routes/cartRoutes/cart");
 const orderRoutes = require("./Routes/OrderRoutes/orderRoutes");
 const adminAuthRoutes = require('./Routes/Adminauthroutes/adminroutes');
-const employeeAuthRoutes = require('./Routes/Employeeauthroutes/employeeauthroutes');
+// const employeeAuthRoutes = require('./Routes/Employeeauthroutes/employeeauthroutes');
 const vehicleOfferRoutes = require('./Routes/vehicleOfferRoutes/vehicleOffer');
 const EnquiryRoutes = require("./Routes/EnquiryRoutes/Enquiry");
 const dashboardRoutes = require("./Routes/Dashboard/dashboard");
@@ -76,6 +76,17 @@ if (process.env.STORAGE_TYPE !== "space") {
   app.use("/uploads", express.static("public/uploads"));
   app.use("/public", express.static(path.join(__dirname, "public")));
 }
+
+/////////by karthi///////
+
+// const uploadsDir = path.join(__dirname, "uploads");
+// if (!fs.existsSync(uploadsDir)) {
+//   fs.mkdirSync(uploadsDir, { recursive: true });
+  
+// }
+
+// app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+/////////by karthi///////
 
 // // Enhanced CORS configuration
 // app.use(cors({
@@ -181,7 +192,7 @@ app.use(vehiclesAvailabilityElectionRoutes);
 app.use(cartRoutes);
 app.use(orderRoutes);
 app.use(adminAuthRoutes);
-app.use(employeeAuthRoutes);
+// app.use(employeeAuthRoutes);
 app.use('/vehicleoffers', vehicleOfferRoutes);
 app.use(EnquiryRoutes);
 app.use(dashboardRoutes);
