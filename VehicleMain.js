@@ -77,6 +77,8 @@ if (process.env.STORAGE_TYPE !== "space") {
   app.use("/public", express.static(path.join(__dirname, "public")));
 }
 
+
+
 /////////by karthi///////
 
 // const uploadsDir = path.join(__dirname, "uploads");
