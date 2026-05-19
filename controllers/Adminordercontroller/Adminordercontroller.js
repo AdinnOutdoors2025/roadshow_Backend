@@ -95,7 +95,7 @@ function calcPricingBackend(pkg, v) {
   }, 0);
 
   const subtotal =
-    rentalCost + driverCost + promoterCost + rtoCost +
+    rentalCost  + promoterCost + rtoCost +
     extraKmCost + extraHourCost + additionalAdds;
 
   // Discount cap: 15%
@@ -336,6 +336,7 @@ exports.getCustomerOrders = async (req, res) => {
 };
 
 
+
 exports.getAllOrders = async (req, res) => {
   try {
     const { pipelineStatus, orderStatus, search, page = 1, limit = 50 } = req.query;
@@ -360,8 +361,8 @@ exports.getAllOrders = async (req, res) => {
       .skip(skip)
       .limit(Number(limit))
       .select(
-        "orderId userId customerId name phone address email " +
-        "grandTotal grandNegotiationTotal orderStatus pipelineStatus " +
+        "orderId userId customerId name phone address email customerType poDocumentLogs paymentStageFirst " +
+        "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
         "isAdminCreated handlername reasonDescription " +
         "bookingItems pipelineLogs negotiationLogs createdAt updatedAt"
       );
@@ -376,6 +377,7 @@ exports.getAllOrders = async (req, res) => {
     return errorResponse(res, error.message);
   }
 };
+
 
 
 exports.getOrderById = async (req, res) => {
