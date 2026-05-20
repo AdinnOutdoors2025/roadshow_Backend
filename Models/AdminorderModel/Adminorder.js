@@ -39,14 +39,15 @@ const bookingItemSchema = new mongoose.Schema({
   promoterType: String,
   otherPromoterType: String,
   promoterGender: { type: String, default: "" },
-  promoterLanguage: { type: String, default: "" },
+  // promoterLanguage: { type: String, default: "" },
+  promoterLanguage: { type: [String], default: [] },
   promoterQuantity: { type: Number, default: 0 },
   perDayRentalCost: { type: Number, default: 0 },
-driverCharges: { type: Number, default: 0 },
-promoterChargePerDay: { type: Number, default: 0 },
-rtoCharges: { type: Number, default: 0 },
-additionalHourCharges: { type: Number, default: 0 },
-dailyKmcharges: { type: Number, default: 0 },
+  driverCharges: { type: Number, default: 0 },
+  promoterChargePerDay: { type: Number, default: 0 },
+  rtoCharges: { type: Number, default: 0 },
+  additionalHourCharges: { type: Number, default: 0 },
+  dailyKmcharges: { type: Number, default: 0 },
   campaignImages: [String],
   campaignVideos: [String],
   dailyKmLimit: Number,
@@ -65,9 +66,9 @@ dailyKmcharges: { type: Number, default: 0 },
 
 const poDocumentLogSchema = new mongoose.Schema(
   {
-    poDocument: { type: String, required: true },   
-    poDate:     { type: Date,   required: true },
-    poNotes:    { type: String, default: "" },       
+    poDocument: { type: String, required: true },
+    poDate: { type: Date, required: true },
+    poNotes: { type: String, default: "" },
     uploadedBy: { type: String },
     uploadedAt: { type: Date, default: Date.now },
   },
@@ -77,13 +78,13 @@ const poDocumentLogSchema = new mongoose.Schema(
 
 const paymentStageFirstSchema = new mongoose.Schema(
   {
-    advancePayment:       { type: Number, required: true },
-    paymentProofDocument: { type: String, required: true }, 
-    paymentDate:          { type: Date,   required: true },
-    paymentVerification:  { type: String, required: true }, 
-    paymentNotes:         { type: String, default: "" },    
-    uploadedBy:           { type: String }, 
-    uploadedAt:           { type: Date, default: Date.now },
+    advancePayment: { type: Number, required: true },
+    paymentProofDocument: { type: String, required: true },
+    paymentDate: { type: Date, required: true },
+    paymentVerification: { type: String, required: true },
+    paymentNotes: { type: String, default: "" },
+    uploadedBy: { type: String },
+    uploadedAt: { type: Date, default: Date.now },
   },
   { _id: true }
 );
@@ -100,7 +101,10 @@ const orderSchema = new mongoose.Schema(
     address: String,
     email: String,
     companyName: String,
+    clientName: String,
     designation: String,
+    gstNumber: String,
+    customerCategory: { type: String, enum: ["individual", "organization"], default: "individual" },
 
     isAdminCreated: { type: Boolean, default: false },
     bookingItems: [bookingItemSchema],
@@ -142,31 +146,31 @@ const orderSchema = new mongoose.Schema(
 
 
     pipelineLogs: [
-  {
-    fromStage: String,
-    toStage: String,
-    movedBy: String,
-    movedAt: { type: Date, default: Date.now },
-    handlerName: String,        
-          
-  
-  },
-],
+      {
+        fromStage: String,
+        toStage: String,
+        movedBy: String,
+        movedAt: { type: Date, default: Date.now },
+        handlerName: String,
 
-poDocumentLogs:    { type: [poDocumentLogSchema],    default: [] },
-paymentStageFirst: { type: [paymentStageFirstSchema], default: [] },
+
+      },
+    ],
+
+    poDocumentLogs: { type: [poDocumentLogSchema], default: [] },
+    paymentStageFirst: { type: [paymentStageFirstSchema], default: [] },
 
 
     negotiationLogs: [
-  {
-    fromStage: String,
-    toStage: String,
-    movedBy: String,
-    movedAt: { type: Date, default: Date.now },
-    discountAmount: Number,
-    discountNotes: { type: String, default: "" },
-  },
-],
+      {
+        fromStage: String,
+        toStage: String,
+        movedBy: String,
+        movedAt: { type: Date, default: Date.now },
+        discountAmount: Number,
+        discountNotes: { type: String, default: "" },
+      },
+    ],
 
     grandNegotiationTotal: { type: Number, default: null },
   },

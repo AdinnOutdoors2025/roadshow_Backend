@@ -1,4 +1,5 @@
 
+
 const path = require("path");
 const Order = require("../../Models/AdminorderModel/Adminorder");
 const User = require("../../Models/User/user");
@@ -24,7 +25,6 @@ async function generateAdminOrderId() {
 }
 
 
-
 exports.createCustomer = async (req, res) => {
   try {
     const { name, phone, address, email } = req.body;
@@ -40,10 +40,8 @@ exports.createCustomer = async (req, res) => {
     if (!address?.trim())
       return errorResponse(res, "Address is required", null, 400);
 
-   
     const existingUser = await User.findOne({ phone: phoneStr });
     if (existingUser) {
-    
       return successResponse(res, "Customer already exists", {
         customer: existingUser,
         alreadyExists: true,
@@ -87,7 +85,6 @@ function calcPricingBackend(pkg, v) {
   const extraKmCost = extraKm > 0 ? (pkg.perKmCharge || 0) * extraKm : 0;
   const extraHourCost = extraHours > 0 ? pkg.additionalHourCharges * extraHours : 0;
 
-  // Additional charges — only "+" mode supported for now
   const additionalCharges = v.additionalCharges || [];
   const additionalAdds = additionalCharges.reduce((acc, c) => {
     const amt = Number(c.amount) || 0;
@@ -95,10 +92,9 @@ function calcPricingBackend(pkg, v) {
   }, 0);
 
   const subtotal =
-    rentalCost  + promoterCost + rtoCost +
+    rentalCost + promoterCost + rtoCost +
     extraKmCost + extraHourCost + additionalAdds;
 
-  // Discount cap: 15%
   const MAX_DISCOUNT_PCT = parseFloat(process.env.MAX_DISCOUNT_PERCENT || "15");
   const maxDiscountAmount = Math.floor(subtotal * (MAX_DISCOUNT_PCT / 100));
 
@@ -122,7 +118,7 @@ function calcPricingBackend(pkg, v) {
     rtoCharges: pkg.rtoCharges,
     additionalHourCharges: pkg.additionalHourCharges,
     dailyKmLimit: pkg.dailyKmLimit,
-    dailyKmcharges:pkg.perKmCharge,
+    dailyKmcharges: pkg.perKmCharge,
     rentalCost,
     driverCost,
     promoterCost,
@@ -140,8 +136,51 @@ function calcPricingBackend(pkg, v) {
 
 exports.createAdminOrder = async (req, res) => {
   try {
-    const { customerId, customerName, customerPhone, customerAddress, customerEmail } = req.body;
+    const {
+      customerName,
+      customerPhone,
+      customerAddress,
+      customerEmail,
+      // ── NEW fields ──
+      customerCategory,
+      companyName,
+      clientName,
+      designation,
+      gstNumber,
+    } = req.body;
 
+    // ── Validate required fields based on category ──
+    const category = customerCategory || "individual";
+
+    if (category === "individual") {
+      if (!customerName?.trim())
+        return errorResponse(res, "Customer name is required", null, 400);
+      if (!customerPhone)
+        return errorResponse(res, "Phone number is required", null, 400);
+      if (!/^[6-9]\d{9}$/.test(customerPhone.toString().trim()))
+        return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
+      if (!customerEmail?.trim())
+        return errorResponse(res, "Email is required", null, 400);
+     
+    } else {
+      // organization
+      if (!companyName?.trim())
+        return errorResponse(res, "Company name is required", null, 400);
+      if (!clientName?.trim())
+        return errorResponse(res, "Client name is required", null, 400);
+      if (!designation?.trim())
+        return errorResponse(res, "Designation is required", null, 400);
+      if (!customerPhone)
+        return errorResponse(res, "Phone number is required", null, 400);
+      if (!/^[6-9]\d{9}$/.test(customerPhone.toString().trim()))
+        return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
+      if (!customerEmail?.trim())
+        return errorResponse(res, "Email is required", null, 400);
+      if (!gstNumber?.trim())
+        return errorResponse(res, "GST number is required", null, 400);
+    }
+
+    // ── Parse vehicles ──
     const vehicles = [];
     let idx = 0;
     while (req.body[`vehicle_${idx}`] !== undefined) {
@@ -158,144 +197,145 @@ exports.createAdminOrder = async (req, res) => {
 
     const bookingItems = [];
 
+    for (let i = 0; i < vehicles.length; i++) {
+      const v = vehicles[i];
 
+      const missing = [];
+      if (!v.packageId) missing.push("packageId");
+      // if (!v.bookingFor) missing.push("bookingFor");
+      if (!v.campaignType) missing.push("campaignType");
+      if (v.campaignType === "Other" && !v.otherCampaignType) missing.push("otherCampaignType");
+      if (!v.fromDate) missing.push("fromDate");
+      if (!v.toDate) missing.push("toDate");
+      if (!v.state) missing.push("state");
+      if (!v.city) missing.push("city");
+      if (!v.fromLocation) missing.push("fromLocation");
+      if (!v.toLocation) missing.push("toLocation");
+      if (!v.quantity || Number(v.quantity) < 1) missing.push("quantity");
+      // if (v.bookingFor === "Agency" && !v.gstNumber?.trim()) missing.push("gstNumber (required for Agency)");
+      if (missing.length > 0)
+        return errorResponse(res, `Vehicle ${i + 1}: Missing fields — ${missing.join(", ")}`, null, 400);
 
-for (let i = 0; i < vehicles.length; i++) {
-  const v = vehicles[i];
+      if (new Date(v.fromDate) >= new Date(v.toDate))
+        return errorResponse(res, `Vehicle ${i + 1}: fromDate must be before toDate`, null, 400);
 
-  // Validate missing fields first
-  const missing = [];
-  if (!v.packageId) missing.push("packageId");
-  if (!v.bookingFor) missing.push("bookingFor");
-  if (!v.campaignType) missing.push("campaignType");
-  if (v.campaignType === "Other" && !v.otherCampaignType) missing.push("otherCampaignType");
-  if (!v.fromDate) missing.push("fromDate");
-  if (!v.toDate) missing.push("toDate");
-  if (!v.state) missing.push("state");
-  if (!v.city) missing.push("city");
-  if (!v.fromLocation) missing.push("fromLocation");
-  if (!v.toLocation) missing.push("toLocation");
-  if (!v.quantity || Number(v.quantity) < 1) missing.push("quantity");
-  if (v.bookingFor === "Agency" && !v.gstNumber?.trim()) missing.push("gstNumber (required for Agency)");
-  if (missing.length > 0)
-    return errorResponse(res, `Vehicle ${i + 1}: Missing fields — ${missing.join(", ")}`, null, 400);
+      const pkg = await Package.findById(v.packageId);
+      if (!pkg) return errorResponse(res, `Vehicle ${i + 1}: Package not found`, null, 404);
+      if (!pkg.isActive) return errorResponse(res, `Vehicle ${i + 1}: Package "${pkg.vehicleModel}" is inactive`, null, 400);
 
-  if (new Date(v.fromDate) >= new Date(v.toDate))
-    return errorResponse(res, `Vehicle ${i + 1}: fromDate must be before toDate`, null, 400);
+      // if (v.needPromoter && !pkg.promoterAvailable)
+      //   return errorResponse(res, `Vehicle ${i + 1}: Promoter not available for "${pkg.vehicleModel}"`, null, 400);
+      if (v.needPromoter && !v.promoterType)
+        return errorResponse(res, `Vehicle ${i + 1}: promoterType required`, null, 400);
+      if (v.needPromoter && v.promoterType === "Other" && !v.otherPromoterType)
+        return errorResponse(res, `Vehicle ${i + 1}: otherPromoterType required`, null, 400);
 
-  // Fetch package
-  const pkg = await Package.findById(v.packageId);
-  if (!pkg) return errorResponse(res, `Vehicle ${i + 1}: Package not found`, null, 404);
-  if (!pkg.isActive) return errorResponse(res, `Vehicle ${i + 1}: Package "${pkg.vehicleModel}" is inactive`, null, 400);
+      const fp = calcPricingBackend(pkg, v);
 
-  if (v.needPromoter && !pkg.promoterAvailable)
-    return errorResponse(res, `Vehicle ${i + 1}: Promoter not available for "${pkg.vehicleModel}"`, null, 400);
-  if (v.needPromoter && !v.promoterType)
-    return errorResponse(res, `Vehicle ${i + 1}: promoterType required`, null, 400);
-  if (v.needPromoter && v.promoterType === "Other" && !v.otherPromoterType)
-    return errorResponse(res, `Vehicle ${i + 1}: otherPromoterType required`, null, 400);
+      const additionalFields = (v.additionalCharges || []).map((c) => ({
+        label: (c.label || "").trim() || "Custom charge",
+        mode: c.mode === "-" ? "-" : "+",
+        amount: Math.max(0, Number(c.amount) || 0),
+      }));
 
- 
-  const fp = calcPricingBackend(pkg, v);
+      let campaignTypeRef = null;
+      let campaignTypeName = v.campaignType;
+      if (v.campaignType && v.campaignType !== "Other") {
+        const ct = await CampaignType.findById(v.campaignType).catch(() => null);
+        if (ct) { campaignTypeRef = ct._id; campaignTypeName = ct.name; }
+      } else if (v.campaignType === "Other" && v.otherCampaignType?.trim()) {
+        let ct = await CampaignType.findOne({ name: { $regex: `^${v.otherCampaignType.trim()}$`, $options: "i" } });
+        if (!ct) ct = await CampaignType.create({ name: v.otherCampaignType.trim() });
+        campaignTypeRef = ct._id;
+        campaignTypeName = ct.name;
+      }
 
-  const additionalFields = (v.additionalCharges || []).map((c) => ({
-    label: (c.label || "").trim() || "Custom charge",
-    mode: c.mode === "-" ? "-" : "+",
-    amount: Math.max(0, Number(c.amount) || 0),
-  }));
+      const vehicleGstNumber = v.bookingFor === "Agency" ? (v.gstNumber || "").trim() : "";
 
-  
-  let campaignTypeRef = null;
-  let campaignTypeName = v.campaignType;
-  if (v.campaignType && v.campaignType !== "Other") {
-    const ct = await CampaignType.findById(v.campaignType).catch(() => null);
-    if (ct) { campaignTypeRef = ct._id; campaignTypeName = ct.name; }
-  } else if (v.campaignType === "Other" && v.otherCampaignType?.trim()) {
-    let ct = await CampaignType.findOne({ name: { $regex: `^${v.otherCampaignType.trim()}$`, $options: "i" } });
-    if (!ct) ct = await CampaignType.create({ name: v.otherCampaignType.trim() });
-    campaignTypeRef = ct._id;
-    campaignTypeName = ct.name;
-  }
+      const uploadedFiles = req.files || [];
+      const campaignImages = uploadedFiles
+        .filter((f) => f.fieldname === `campaignImages_${i}`)
+        .map((f) => `/uploads/${path.basename(f.path)}`);
+      const campaignVideos = uploadedFiles
+        .filter((f) => f.fieldname === `campaignVideos_${i}`)
+        .map((f) => `/uploads/${path.basename(f.path)}`);
 
-  const gstNumber = v.bookingFor === "Agency" ? (v.gstNumber || "").trim() : "";
+      console.log(`Vehicle ${i + 1} — Images:`, campaignImages, "Videos:", campaignVideos);
 
-  const uploadedFiles = req.files || [];
+      bookingItems.push({
+        packageId: pkg._id,
+        vehicleType: pkg.vehicleType,
+        vehicleModel: pkg.vehicleModel,
+        bookingFor: v.bookingFor,
+        gstNumber: vehicleGstNumber,
+        campaignType: campaignTypeName,
+        campaignTypeRef,
+        otherCampaignType: v.campaignType === "Other" ? (v.otherCampaignType || "") : "",
+        promoterGender: v.needPromoter ? (v.promoterGender || "") : "",
+        // promoterLanguage: v.needPromoter ? (v.promoterLanguage || "") : "",
+        promoterLanguage: v.needPromoter ? (v.promoterLanguage || []) : [],
+        promoterQuantity: v.needPromoter ? (Number(v.promoterQuantity) || 0) : 0,
+        fromDate: new Date(v.fromDate),
+        toDate: new Date(v.toDate),
+        state: v.state,
+        city: v.city,
+        fromLocation: v.fromLocation,
+        toLocation: v.toLocation,
+        quantity: Number(v.quantity),
+        extraKm: Number(v.extraKm) || 0,
+        extraDays: Number(v.extraDays) || 0,
+        extraHours: Number(v.extraHours) || 0,
+        needPromoter: !!v.needPromoter,
+        promoterType: v.needPromoter ? v.promoterType : "",
+        otherPromoterType: v.needPromoter && v.promoterType === "Other" ? v.otherPromoterType : "",
+        campaignImages,
+        campaignVideos,
+        totalDays: fp.totalDays,
+        perDayRentalCost: fp.perDayRentalCost,
+        driverCharges: fp.driverCharges,
+        promoterChargePerDay: fp.promoterChargePerDay,
+        rtoCharges: fp.rtoCharges,
+        additionalHourCharges: fp.additionalHourCharges,
+        dailyKmcharges: fp.dailyKmcharges,
+        dailyKmLimit: fp.dailyKmLimit,
+        rentalCost: fp.rentalCost,
+        driverCost: fp.driverCost,
+        promoterCost: fp.promoterCost,
+        rtoCost: fp.rtoCost,
+        extraKmCost: fp.extraKmCost,
+        extraHourCost: fp.extraHourCost,
+        additionalNet: fp.additionalNet,
+        subtotal: fp.subtotal,
+        totalAmount: fp.totalAmount,
+        additionalFields,
+      });
+    }
 
-  const campaignImages = uploadedFiles
-  .filter((f) => f.fieldname === `campaignImages_${i}`)
-  .map((f) => `/uploads/${path.basename(f.path)}`);
-const campaignVideos = uploadedFiles
-  .filter((f) => f.fieldname === `campaignVideos_${i}`)
-  .map((f) => `/uploads/${path.basename(f.path)}`);
-
-console.log(`Vehicle ${i + 1} — Images:`, campaignImages, "Videos:", campaignVideos);
-
-  bookingItems.push({
-    packageId: pkg._id,
-    vehicleType: pkg.vehicleType,
-    vehicleModel: pkg.vehicleModel,
-    bookingFor: v.bookingFor,
-    gstNumber,
-    campaignType: campaignTypeName,
-    campaignTypeRef,
-    otherCampaignType: v.campaignType === "Other" ? (v.otherCampaignType || "") : "",
-    promoterGender: v.needPromoter ? (v.promoterGender || "") : "",
-    promoterLanguage: v.needPromoter ? (v.promoterLanguage || "") : "",
-    promoterQuantity: v.needPromoter ? (Number(v.promoterQuantity) || 0) : 0,
-    fromDate: new Date(v.fromDate),
-    toDate: new Date(v.toDate),
-    state: v.state,
-    city: v.city,
-    fromLocation: v.fromLocation,
-    toLocation: v.toLocation,
-    quantity: Number(v.quantity),
-    extraKm: Number(v.extraKm) || 0,
-    extraDays: Number(v.extraDays) || 0,
-    extraHours: Number(v.extraHours) || 0,
-    needPromoter: !!v.needPromoter,
-    promoterType: v.needPromoter ? v.promoterType : "",
-    otherPromoterType: v.needPromoter && v.promoterType === "Other" ? v.otherPromoterType : "",
-    campaignImages,
-    campaignVideos,
-    
-    totalDays: fp.totalDays,
-    perDayRentalCost: fp.perDayRentalCost,
-    driverCharges: fp.driverCharges,
-    promoterChargePerDay: fp.promoterChargePerDay,
-    rtoCharges: fp.rtoCharges,
-    additionalHourCharges: fp.additionalHourCharges,
-    dailyKmcharges:fp.dailyKmcharges,
-    dailyKmLimit: fp.dailyKmLimit,
-    rentalCost: fp.rentalCost,
-    driverCost: fp.driverCost,
-    promoterCost: fp.promoterCost,
-    rtoCost: fp.rtoCost,
-    extraKmCost: fp.extraKmCost,
-    extraHourCost: fp.extraHourCost,
-    additionalNet: fp.additionalNet,
-    subtotal: fp.subtotal,
-    totalAmount: fp.totalAmount,
-    additionalFields,
-  });
-}
-
-
-const taxableAmount = bookingItems.reduce((s, item) => s + item.totalAmount, 0);
-const grandGst = Math.floor(taxableAmount * 0.18);
-const grandTotal = taxableAmount + grandGst;
+    const taxableAmount = bookingItems.reduce((s, item) => s + item.totalAmount, 0);
+    const grandGst = Math.floor(taxableAmount * 0.18);
+    const grandTotal = taxableAmount + grandGst;
 
     const orderId = await generateAdminOrderId();
 
-
-
+    // ── Determine display name ──
+    // individual → customerName, organization → clientName
+    const orderName = category === "individual"
+      ? (customerName || "").trim()
+      : (clientName || "").trim();
 
     const order = new Order({
       orderId,
-      name: customerName,
-      phone: customerPhone,
+      name: orderName,
+      phone: customerPhone.toString().trim(),
       address: customerAddress || "",
       email: customerEmail || "",
-      customerType: Number(req.body.customerType) ?? 1,
+      // 0 = individual, 1 = organization
+      customerType: category === "individual" ? 0 : 1,
+      customerCategory: category,
+      companyName: category === "organization" ? (companyName || "").trim() : "",
+      clientName: category === "organization" ? (clientName || "").trim() : "",
+      designation: category === "organization" ? (designation || "").trim() : "",
+      gstNumber: category === "organization" ? (gstNumber || "").trim() : "",
       isAdminCreated: true,
       bookingItems,
       grandTotal,
@@ -322,7 +362,6 @@ const grandTotal = taxableAmount + grandGst;
 };
 
 
-
 exports.getCustomerOrders = async (req, res) => {
   try {
     const orders = await Order.find({ userId: req.params.customerId })
@@ -334,7 +373,6 @@ exports.getCustomerOrders = async (req, res) => {
     return errorResponse(res, error.message);
   }
 };
-
 
 
 exports.getAllOrders = async (req, res) => {
@@ -364,7 +402,8 @@ exports.getAllOrders = async (req, res) => {
         "orderId userId customerId name phone address email customerType poDocumentLogs paymentStageFirst " +
         "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
         "isAdminCreated handlername reasonDescription " +
-        "bookingItems pipelineLogs negotiationLogs createdAt updatedAt"
+        "bookingItems pipelineLogs negotiationLogs createdAt updatedAt " +
+        "customerCategory companyName clientName designation gstNumber"
       );
 
     return successResponse(res, "Orders fetched successfully", {
@@ -379,7 +418,6 @@ exports.getAllOrders = async (req, res) => {
 };
 
 
-
 exports.getOrderById = async (req, res) => {
   try {
     const order = await Order.findOne({ orderId: req.params.orderId });
@@ -391,8 +429,6 @@ exports.getOrderById = async (req, res) => {
     return errorResponse(res, error.message);
   }
 };
-
-
 
 
 exports.getCampaignTypes = async (req, res) => {
@@ -451,10 +487,10 @@ exports.getOrdersByPipeline = async (req, res) => {
         "orderId name phone customerType pipelineStatus orderStatus " +
         "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
         "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
-        "companyName email address poDocumentLogs paymentStageFirst"
+        "companyName clientName designation email address poDocumentLogs paymentStageFirst " +
+        "customerCategory gstNumber"
       );
 
-    // Group by stage
     const grouped = {};
     STAGE_ORDER.forEach((s) => (grouped[s] = []));
     orders.forEach((o) => {
@@ -521,7 +557,6 @@ exports.updateOrderPipeline = async (req, res) => {
       return order.handlerName || "Admin";
     })();
 
-    // ── inProgress ───────────────────────────────────────────────
     if (pipelineStatus === "inProgress") {
       const isStaffAdmin = Number(req.user.isAdmin) === 0;
       if (isStaffAdmin) {
@@ -540,7 +575,6 @@ exports.updateOrderPipeline = async (req, res) => {
       }
     }
 
-    // ── waitingForPO ─────────────────────────────────────────────
     if (pipelineStatus === "waitingForPO") {
       const poFile = req.files?.find((f) => f.fieldname === "poDocument");
       if (poFile) {
@@ -565,38 +599,35 @@ exports.updateOrderPipeline = async (req, res) => {
       }
     }
 
- 
-   
     const isRoutedFromPOToPayment = oldStage === "waitingForPO" && pipelineStatus === "paymentStage1";
 
     if (pipelineStatus === "paymentStage1" && !isRoutedFromPOToPayment) {
-  const proofFile = req.files?.find((f) => f.fieldname === "paymentProofDocument");
-  if (proofFile) {
-    if (!advancePayment)
-      return errorResponse(res, "Advance payment amount is required", null, 400);
-    
+      const proofFile = req.files?.find((f) => f.fieldname === "paymentProofDocument");
+      if (proofFile) {
+        if (!advancePayment)
+          return errorResponse(res, "Advance payment amount is required", null, 400);
 
-    const proofUrl = `/uploads/${path.basename(proofFile.path)}`;
-    order.paymentStageFirst.push({
-      advancePayment: Number(advancePayment),
-      paymentProofDocument: proofUrl,
-      paymentDate: new Date(), 
-      paymentVerification: "Verified", 
-      paymentNotes: (paymentNotes || "").trim(),
-      uploadedBy: movedByFinal,
-      uploadedAt: new Date(),
-    });
-  }
-}
+        const proofUrl = `/uploads/${path.basename(proofFile.path)}`;
+        order.paymentStageFirst.push({
+          advancePayment: Number(advancePayment),
+          paymentProofDocument: proofUrl,
+          paymentDate: new Date(),
+          paymentVerification: "Verified",
+          paymentNotes: (paymentNotes || "").trim(),
+          uploadedBy: movedByFinal,
+          uploadedAt: new Date(),
+        });
+      }
+    }
+
     const isRoutedFromPOToProjectCode = oldStage === "waitingForPO" && pipelineStatus === "projectCodeCreation";
 
     if (pipelineStatus === "projectCodeCreation" && !isRoutedFromPOToProjectCode) {
-      const comingFromPaymentStage = oldStage === "paymentStage1"; 
+      const comingFromPaymentStage = oldStage === "paymentStage1";
       if (order.customerType !== 0 && !comingFromPaymentStage)
         return errorResponse(res, "New customers must go through Payment Stage 1 first", null, 400);
     }
 
-    // ── customerConfirmation ─────────────────────────────────────
     if (pipelineStatus === "customerConfirmation") {
       const subtotal = order.bookingItems.reduce(
         (sum, item) => sum + (item.totalAmount || 0), 0
@@ -624,7 +655,6 @@ exports.updateOrderPipeline = async (req, res) => {
       });
     }
 
-    // ── Update pipeline status + log ─────────────────────────────
     order.pipelineStatus = pipelineStatus;
 
     const logEntry = {
@@ -643,5 +673,3 @@ exports.updateOrderPipeline = async (req, res) => {
     return errorResponse(res, error.message, null, 500);
   }
 };
-
-
