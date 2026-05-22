@@ -1,31 +1,36 @@
-// Middleware/vehicleDetailsUpload.js
+// Middleware/spaceUpload.js
 const multer = require("multer");
 const multerS3 = require("multer-s3");
+const { S3Client } = require("@aws-sdk/client-s3");
 const path = require("path");
 const fs = require("fs");
-const spacesClient = require("../config/spaces");
 
-// Configuration from environment
-const MAX_IMAGE_SIZE = parseInt(process.env.MAX_IMAGE_SIZE) || 3 * 1024 * 1024; // 3MB default
-const MAX_VIDEO_SIZE = parseInt(process.env.MAX_VIDEO_SIZE) || 10 * 1024 * 1024; // 10MB default
-const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE) || 50 * 1024 * 1024; // 50MB default
-const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
-const LOCAL_BASE_URL = process.env.LOCAL_BASE_URL || "http://localhost:3001";
-const PRODUCTION_BASE_URL = process.env.PRODUCTION_BASE_URL || "";
-const NODE_ENV = process.env.NODE_ENV || "development";
+// Configure DigitalOcean Spaces Client
+const spacesClient = new S3Client({
+  region: process.env.DO_SPACES_REGION || "sgp1",
+  endpoint: process.env.DO_SPACES_ENDPOINT || "https://sgp1.digitaloceanspaces.com",
+  credentials: {
+    accessKeyId: process.env.DO_SPACES_KEY,
+    secretAccessKey: process.env.DO_SPACES_SECRET,
+  },
+  forcePathStyle: false,
+});
+
 const BUCKET_NAME = process.env.DO_SPACES_BUCKET || "adinn-space";
 const CDN_BASE_URL = process.env.DO_SPACES_CDN_BASE || "https://adinn-space.sgp1.digitaloceanspaces.com";
+const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
+const NODE_ENV = process.env.NODE_ENV || "development";
 
-// Get base URL based on environment
-const getBaseUrl = () => {
+// Get base URL for local storage
+const getLocalBaseUrl = () => {
   if (NODE_ENV === "production") {
-    return PRODUCTION_BASE_URL;
+    return process.env.PRODUCTION_BASE_URL || "https://your-production-domain.com";
   }
-  return LOCAL_BASE_URL;
+  return process.env.LOCAL_BASE_URL || "http://localhost:3001";
 };
 
-// Ensure upload directories exist (for local storage)
-const createUploadDirs = () => {
+// Ensure local upload directories exist
+const createLocalUploadDirs = () => {
   if (STORAGE_TYPE !== "local") return;
 
   const uploadPath = process.env.LOCAL_UPLOAD_PATH || "public/uploads";
@@ -48,7 +53,7 @@ const createUploadDirs = () => {
   });
 };
 
-createUploadDirs();
+createLocalUploadDirs();
 
 // File filter function
 const fileFilter = (req, file, cb) => {
@@ -62,7 +67,9 @@ const fileFilter = (req, file, cb) => {
 
   if (mimetype && extname) {
     const isVideo = allowedVideoTypes.test(file.mimetype);
-    const maxSize = isVideo ? MAX_VIDEO_SIZE : MAX_IMAGE_SIZE;
+    const maxSize = isVideo
+      ? parseInt(process.env.MAX_VIDEO_SIZE) || 10 * 1024 * 1024
+      : parseInt(process.env.MAX_IMAGE_SIZE) || 3 * 1024 * 1024;
 
     if (file.size > maxSize) {
       const maxSizeMB = maxSize / (1024 * 1024);
@@ -112,7 +119,7 @@ const getFileUrl = (filePath) => {
   }
 
   // Local storage - construct URL
-  const baseUrl = getBaseUrl();
+  const baseUrl = getLocalBaseUrl();
   const relativePath = filePath.replace(process.cwd(), "").replace(/\\/g, "/");
   return `${baseUrl}${relativePath}`;
 };
@@ -122,7 +129,7 @@ let storage;
 let upload;
 
 if (STORAGE_TYPE === "space") {
-  // DigitalOcean Spaces storage using multer-s3
+  // DigitalOcean Spaces storage
   storage = multerS3({
     s3: spacesClient,
     bucket: BUCKET_NAME,
@@ -147,19 +154,18 @@ if (STORAGE_TYPE === "space") {
       cb(null, fullPath);
     },
     acl: "public-read",
-    contentType: multerS3.AUTO_CONTENT_TYPE,
   });
 
   upload = multer({
     storage: storage,
-    limits: { fileSize: MAX_FILE_SIZE },
+    limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 50 * 1024 * 1024 },
     fileFilter: fileFilter,
   });
 } else {
   // Local storage
   upload = multer({
     storage: localStorage,
-    limits: { fileSize: MAX_FILE_SIZE },
+    limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 50 * 1024 * 1024 },
     fileFilter: fileFilter,
   });
 }
@@ -184,3 +190,4 @@ const vehicleUpload = upload.fields([
 module.exports = vehicleUpload;
 module.exports.getFileUrl = getFileUrl;
 module.exports.STORAGE_TYPE = STORAGE_TYPE;
+module.exports.spacesClient = spacesClient;

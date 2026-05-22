@@ -1,11 +1,9 @@
-
-
 const mongoose = require('mongoose');
 
 const packageSchema = new mongoose.Schema({
   vehicleType: {
-    type: String,
-    enum: ['Customizable Vehicle', 'Non-Customizable Vehicle'],
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'VehicleType', 
     required: true,
   },
   vehicleModel: {
@@ -22,7 +20,10 @@ const packageSchema = new mongoose.Schema({
   rtoCharges: { type: Number, required: true },
   perKmCharge: { type: Number, default: 0 },
   isActive: { type: Boolean, default: true },
-  inactiveReason: { type: String, default: '' }, 
+  inactiveReason: { type: String, default: '' },
 }, { timestamps: true });
+
+// Unique combination: vehicleType (ObjectId) + vehicleModel
+packageSchema.index({ vehicleType: 1, vehicleModel: 1 }, { unique: true });
 
 module.exports = mongoose.model('Package', packageSchema);

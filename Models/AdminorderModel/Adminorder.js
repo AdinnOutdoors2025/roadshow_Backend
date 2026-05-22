@@ -39,8 +39,15 @@ const bookingItemSchema = new mongoose.Schema({
   promoterType: String,
   otherPromoterType: String,
   promoterGender: { type: String, default: "" },
-  promoterLanguage: { type: String, default: "" },
+  // promoterLanguage: { type: String, default: "" },
+  promoterLanguage: { type: [String], default: [] },
   promoterQuantity: { type: Number, default: 0 },
+  perDayRentalCost: { type: Number, default: 0 },
+  driverCharges: { type: Number, default: 0 },
+  promoterChargePerDay: { type: Number, default: 0 },
+  rtoCharges: { type: Number, default: 0 },
+  additionalHourCharges: { type: Number, default: 0 },
+  dailyKmcharges: { type: Number, default: 0 },
   campaignImages: [String],
   campaignVideos: [String],
   dailyKmLimit: Number,
@@ -57,6 +64,30 @@ const bookingItemSchema = new mongoose.Schema({
   additionalFields: { type: [additionalChargeSchema], default: [] },
 });
 
+const poDocumentLogSchema = new mongoose.Schema(
+  {
+    poDocument: { type: String, required: true },
+    poDate: { type: Date, required: true },
+    poNotes: { type: String, default: "" },
+    uploadedBy: { type: String },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+
+const paymentStageFirstSchema = new mongoose.Schema(
+  {
+    advancePayment: { type: Number, required: true },
+    paymentProofDocument: { type: String, required: true },
+    paymentDate: { type: Date, required: true },
+    paymentVerification: { type: String, required: true },
+    paymentNotes: { type: String, default: "" },
+    uploadedBy: { type: String },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
 
 const orderSchema = new mongoose.Schema(
   {
@@ -70,7 +101,10 @@ const orderSchema = new mongoose.Schema(
     address: String,
     email: String,
     companyName: String,
+    clientName: String,
     designation: String,
+    gstNumber: String,
+    customerCategory: { type: String, enum: ["individual", "organization"], default: "individual" },
 
     isAdminCreated: { type: Boolean, default: false },
     bookingItems: [bookingItemSchema],
@@ -83,14 +117,33 @@ const orderSchema = new mongoose.Schema(
       default: "Pending",
     },
 
+
     pipelineStatus: {
       type: String,
-      enum: ["newOrder", "proposal", "negotiation", "closedWon", "closedLoss"],
+      enum: [
+        "newOrder",
+        "inProgress",
+        "customerConfirmation",
+        "waitingForPO",
+        "paymentStage1",
+        "projectCodeCreation",
+        "projectExecution",
+        "onRoad",
+        "campaignRunning",
+        "vehicleUnavailable",
+        "clientClosure",
+        "invoiceGeneration",
+        "paymentStage2",
+        "closedWon",
+        "closedLost",
+      ],
       default: "newOrder",
     },
 
-    handlername: String,
+    handlerName: String,
     reasonDescription: String,
+
+
 
     pipelineLogs: [
       {
@@ -98,8 +151,15 @@ const orderSchema = new mongoose.Schema(
         toStage: String,
         movedBy: String,
         movedAt: { type: Date, default: Date.now },
+        handlerName: String,
+
+
       },
     ],
+
+    poDocumentLogs: { type: [poDocumentLogSchema], default: [] },
+    paymentStageFirst: { type: [paymentStageFirstSchema], default: [] },
+
 
     negotiationLogs: [
       {
@@ -107,7 +167,8 @@ const orderSchema = new mongoose.Schema(
         toStage: String,
         movedBy: String,
         movedAt: { type: Date, default: Date.now },
-        amount: Number,
+        discountAmount: Number,
+        discountNotes: { type: String, default: "" },
       },
     ],
 

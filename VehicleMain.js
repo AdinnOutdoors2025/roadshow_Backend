@@ -22,7 +22,7 @@ const newVehicleRoutes = require("./Routes/vehicleDetailsRoutes/vehicleDetails")
 const cartRoutes = require("./Routes/cartRoutes/cart");
 const orderRoutes = require("./Routes/OrderRoutes/orderRoutes");
 const adminAuthRoutes = require('./Routes/Adminauthroutes/adminroutes');
-const employeeAuthRoutes = require('./Routes/Employeeauthroutes/employeeauthroutes');
+// const employeeAuthRoutes = require('./Routes/Employeeauthroutes/employeeauthroutes');
 const vehicleOfferRoutes = require('./Routes/vehicleOfferRoutes/vehicleOffer');
 const EnquiryRoutes = require("./Routes/EnquiryRoutes/Enquiry");
 const dashboardRoutes = require("./Routes/Dashboard/dashboard");
@@ -36,6 +36,10 @@ const vehicleTypeRoutes = require("./Routes/VehicleTypeRoutes");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const fsp = require("node:fs/promises");
+//DIGITAL OCEAN SPACE
+const spacesClient = require("./Middleware/spaceUpload").spacesClient;
+
 
 const storage = multer.diskStorage({
   destination: async function (req, file, cb) {
@@ -67,7 +71,24 @@ const upload = multer({
   limits: { files: 4 },
 });
 
-app.use("/uploads", express.static("uploads"));
+// app.use("/uploads", express.static("uploads"));
+if (process.env.STORAGE_TYPE !== "space") {
+  app.use("/uploads", express.static("public/uploads"));
+  app.use("/public", express.static(path.join(__dirname, "public")));
+}
+
+
+
+/////////by karthi///////
+
+// const uploadsDir = path.join(__dirname, "uploads");
+// if (!fs.existsSync(uploadsDir)) {
+//   fs.mkdirSync(uploadsDir, { recursive: true });
+  
+// }
+
+// app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+/////////by karthi///////
 
 // // Enhanced CORS configuration
 // app.use(cors({
@@ -95,7 +116,8 @@ const allowedOrigins = [
   // "https://frontend-roadshow.vercel.app",
   // "https://frontend-roadshow-97ae.vercel.app",
   // "https://frontend-roadshow-*-your-username.vercel.app",
-  "https://roadshowfrontend.netlify.app"
+  "https://roadshowfrontend.netlify.app",
+  "https://roadshowratecard.netlify.app"
 ];
 
 app.use(
@@ -172,7 +194,7 @@ app.use(vehiclesAvailabilityElectionRoutes);
 app.use(cartRoutes);
 app.use(orderRoutes);
 app.use(adminAuthRoutes);
-app.use(employeeAuthRoutes);
+// app.use(employeeAuthRoutes);
 app.use('/vehicleoffers', vehicleOfferRoutes);
 app.use(EnquiryRoutes);
 app.use(dashboardRoutes);
@@ -195,17 +217,19 @@ cloudinary.config({
 });
 //ORDER MANAGEMENT AND ADD TO CART , ORDER CREATION CODES
 
-const vehicleUpload = multer({
-  storage: storage, // reuse existing storage
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-}).fields([
-  { name: "mainImage", maxCount: 4 },
-  { name: "sideImages", maxCount: 4 },
-  { name: "interiorImages", maxCount: 4 },
-  { name: "ledDisplayImage", maxCount: 4 },
-  { name: "brandingSample", maxCount: 4 },
-  { name: "vehicleVideo", maxCount: 4 },
-]);
+// const vehicleUpload = multer({
+//   storage: storage, // reuse existing storage
+//   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+// }).fields([
+//   { name: "mainImage", maxCount: 4 },
+//   { name: "sideImages", maxCount: 4 },
+//   { name: "interiorImages", maxCount: 4 },
+//   { name: "ledDisplayImage", maxCount: 4 },
+//   { name: "brandingSample", maxCount: 4 },
+//   { name: "vehicleVideo", maxCount: 4 },
+// ]);
+
+const vehicleUpload = require("./Middleware/vehicleDetailsUpload");
 //ORDER MANAGEMENT AND ADD TO CART , ORDER CREATION CODES
 
 // Configure storage for main image upload
@@ -325,4 +349,43 @@ app.post("/delete-video", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+
+
+app.use(cors());
+app.post("/api/update-vehicles-json", async (req, res) => {
+  try {
+    const uploadedJson = req.body;
+
+    if (!Array.isArray(uploadedJson)) {
+      return res.status(400).json({
+        success: false,
+        message: "The uploaded JSON must be an array of vehicles.",
+      });
+    }
+
+    const srcDir = path.resolve(__dirname, "../roadshow-rate-card/src");
+    const vehiclesPath = path.join(srcDir, "vehicles.json");
+    const tempPath = path.join(srcDir, "vehicles.tmp.json");
+
+    console.log("Updating vehicles.json at:", vehiclesPath);
+
+    const jsonText = JSON.stringify(uploadedJson, null, 2);
+
+    await fsp.writeFile(tempPath, jsonText, "utf8");
+    await fsp.rename(tempPath, vehiclesPath);
+
+    return res.json({
+      success: true,
+      message: "src/vehicles.json updated successfully.",
+    });
+  } catch (error) {
+    console.error("Failed to update vehicles.json:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update src/vehicles.json.",
+    });
+  }
 });
