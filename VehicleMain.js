@@ -367,7 +367,7 @@ app.post("/api/update-vehicles-json", async (req, res) => {
       });
     }
 
-    const srcDir = path.resolve(__dirname, "../roadshow-rate-card/src");
+    const srcDir = path.resolve(__dirname, "../Roadshow_Vehicle_RateCard/src");
     const vehiclesPath = path.join(srcDir, "vehicles.json");
     const tempPath = path.join(srcDir, "vehicles.tmp.json");
 
