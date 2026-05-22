@@ -36,7 +36,7 @@ const vehicleTypeRoutes = require("./Routes/vehicleTypeRoutes");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-
+const fsp = require("node:fs/promises");
 //DIGITAL OCEAN SPACE
 const spacesClient = require("./Middleware/spaceUpload").spacesClient;
 
@@ -112,6 +112,8 @@ if (process.env.STORAGE_TYPE !== "space") {
 
 const allowedOrigins = [
   "http://localhost:3000",
+  "http://localhost:5173",
+  "https://roadshowratecard.netlify.app",
   "http://192.168.2.159:3000",
   "https://frontend-roadshow.vercel.app",
   "https://frontend-roadshow-97ae.vercel.app",
@@ -349,4 +351,43 @@ app.post("/delete-video", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+
+
+app.use(cors());
+app.post("/api/update-vehicles-json", async (req, res) => {
+  try {
+    const uploadedJson = req.body;
+
+    if (!Array.isArray(uploadedJson)) {
+      return res.status(400).json({
+        success: false,
+        message: "The uploaded JSON must be an array of vehicles.",
+      });
+    }
+
+    const srcDir = path.resolve(__dirname, "../roadshow-rate-card/src");
+    const vehiclesPath = path.join(srcDir, "vehicles.json");
+    const tempPath = path.join(srcDir, "vehicles.tmp.json");
+
+    console.log("Updating vehicles.json at:", vehiclesPath);
+
+    const jsonText = JSON.stringify(uploadedJson, null, 2);
+
+    await fsp.writeFile(tempPath, jsonText, "utf8");
+    await fsp.rename(tempPath, vehiclesPath);
+
+    return res.json({
+      success: true,
+      message: "src/vehicles.json updated successfully.",
+    });
+  } catch (error) {
+    console.error("Failed to update vehicles.json:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update src/vehicles.json.",
+    });
+  }
 });
