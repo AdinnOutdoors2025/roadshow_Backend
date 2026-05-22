@@ -1,7 +1,6 @@
 const dns = require('dns');
 dns.setServers(['8.8.8.8', '1.1.1.1']); //Added For IP Whitelisting new11
 
-
 const express = require("express");
 const app = express();
 const cors = require("cors");
@@ -39,7 +38,7 @@ const fs = require("fs");
 const fsp = require("node:fs/promises");
 //DIGITAL OCEAN SPACE
 const spacesClient = require("./Middleware/spaceUpload").spacesClient;
-
+const { S3Client, PutObjectCommand,DeleteObjectCommand } = require("@aws-sdk/client-s3");
 
 const storage = multer.diskStorage({
   destination: async function (req, file, cb) {
@@ -356,38 +355,53 @@ app.listen(PORT, () => {
 
 
 app.use(cors());
-app.post("/api/update-vehicles-json", async (req, res) => {
-  try {
-    const uploadedJson = req.body;
 
-    if (!Array.isArray(uploadedJson)) {
+
+
+
+
+app.put("/api/update-vehicles-json", async (req, res) => {
+  const bucketName = "adinn-space";
+  const fileKey = "roadshowRateCard/vehicles.json";
+
+  try {
+    if (!Array.isArray(req.body)) {
       return res.status(400).json({
         success: false,
-        message: "The uploaded JSON must be an array of vehicles.",
+        message: "Uploaded JSON must be an array of vehicles.",
       });
     }
 
-    const srcDir = path.resolve(__dirname, "../Roadshow_Vehicle_RateCard/src");
-    const vehiclesPath = path.join(srcDir, "vehicles.json");
-    const tempPath = path.join(srcDir, "vehicles.tmp.json");
+    // 1. Delete existing vehicles.json
+    await spacesClient.send(
+      new DeleteObjectCommand({
+        Bucket: bucketName,
+        Key: fileKey,
+      })
+    );
 
-    console.log("Updating vehicles.json at:", vehiclesPath);
+    // 2. Upload new vehicles.json
+    await spacesClient.send(
+      new PutObjectCommand({
+        Bucket: bucketName,
+        Key: fileKey,
+        Body: JSON.stringify(req.body, null, 2),
+        ContentType: "application/json",
+        ACL: "public-read",
+        CacheControl: "no-cache, no-store, must-revalidate",
+      })
+    );
 
-    const jsonText = JSON.stringify(uploadedJson, null, 2);
-
-    await fsp.writeFile(tempPath, jsonText, "utf8");
-    await fsp.rename(tempPath, vehiclesPath);
-
-    return res.json({
+    res.json({
       success: true,
-      message: "src/vehicles.json updated successfully.",
+      message: "vehicles.json deleted and uploaded successfully.",
     });
   } catch (error) {
-    console.error("Failed to update vehicles.json:", error);
+    console.error("DigitalOcean Spaces update error:", error);
 
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
-      message: error.message || "Failed to update src/vehicles.json.",
+      message: "Failed to replace vehicles.json in DigitalOcean Spaces.",
     });
   }
 });
