@@ -161,7 +161,7 @@ exports.createAdminOrder = async (req, res) => {
         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
       if (!customerEmail?.trim())
         return errorResponse(res, "Email is required", null, 400);
-     
+
     } else {
       // organization
       if (!companyName?.trim())
@@ -323,11 +323,23 @@ exports.createAdminOrder = async (req, res) => {
       ? (customerName || "").trim()
       : (clientName || "").trim();
 
+
+    // ── gstVerifyDetails parse ──
+    let gstVerifyDetails = [];
+    if (req.body.gstVerifyDetails) {
+      try {
+        gstVerifyDetails = JSON.parse(req.body.gstVerifyDetails);
+      } catch {
+        gstVerifyDetails = [];
+      }
+    }
+
     const order = new Order({
       orderId,
       name: orderName,
       phone: customerPhone.toString().trim(),
       address: customerAddress || "",
+      gstVerifyDetails,
       email: customerEmail || "",
       // 0 = individual, 1 = organization
       customerType: category === "individual" ? 0 : 1,
