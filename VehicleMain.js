@@ -1,7 +1,6 @@
 const dns = require('dns');
 dns.setServers(['8.8.8.8', '1.1.1.1']); //Added For IP Whitelisting new11
 
-
 const express = require("express");
 const app = express();
 const cors = require("cors");
@@ -38,10 +37,10 @@ const promoterroutes = require('./Routes/Promoterroutes/Promoterroutes');
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-
+const fsp = require("node:fs/promises");
 //DIGITAL OCEAN SPACE
 const spacesClient = require("./Middleware/spaceUpload").spacesClient;
-
+const { S3Client, PutObjectCommand,DeleteObjectCommand } = require("@aws-sdk/client-s3");
 
 const storage = multer.diskStorage({
   destination: async function (req, file, cb) {
@@ -114,6 +113,8 @@ if (process.env.STORAGE_TYPE !== "space") {
 
 const allowedOrigins = [
   "http://localhost:3000",
+  "http://localhost:5173",
+  "https://roadshowratecard.netlify.app",
   "http://192.168.2.159:3000",
   "https://frontend-roadshow.vercel.app",
   "https://frontend-roadshow-97ae.vercel.app",
@@ -353,4 +354,58 @@ app.post("/delete-video", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+
+
+app.use(cors());
+
+
+
+
+
+app.put("/api/update-vehicles-json", async (req, res) => {
+  const bucketName = "adinn-space";
+  const fileKey = "roadshowRateCard/vehicles.json";
+
+  try {
+    if (!Array.isArray(req.body)) {
+      return res.status(400).json({
+        success: false,
+        message: "Uploaded JSON must be an array of vehicles.",
+      });
+    }
+
+    // 1. Delete existing vehicles.json
+    await spacesClient.send(
+      new DeleteObjectCommand({
+        Bucket: bucketName,
+        Key: fileKey,
+      })
+    );
+
+    // 2. Upload new vehicles.json
+    await spacesClient.send(
+      new PutObjectCommand({
+        Bucket: bucketName,
+        Key: fileKey,
+        Body: JSON.stringify(req.body, null, 2),
+        ContentType: "application/json",
+        ACL: "public-read",
+        CacheControl: "no-cache, no-store, must-revalidate",
+      })
+    );
+
+    res.json({
+      success: true,
+      message: "vehicles.json deleted and uploaded successfully.",
+    });
+  } catch (error) {
+    console.error("DigitalOcean Spaces update error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to replace vehicles.json in DigitalOcean Spaces.",
+    });
+  }
 });
