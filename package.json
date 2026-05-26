@@ -1,7 +1,8 @@
 {
   "scripts": {
     "start": "node VehicleMain.js",
-    "dev": "nodemon VehicleMain.js"
+    "dev": "nodemon VehicleMain.js",
+    "build": "ls -la && ls -la Routes/ || echo 'Routes folder not found' && npm install"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1052.0",
