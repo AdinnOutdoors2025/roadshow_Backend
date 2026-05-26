@@ -31,6 +31,9 @@ const packageRoutes = require('./Routes/PackageManagementRoutes/packagemanagemen
 const adminOrderRoutes = require("./Routes/AdminorderRoutes/AdminorderRoutes");
 const locationRoutes = require('./Routes/locationRoutes/locationRoutes');
 const vehicleTypeRoutes = require("./Routes/vehicleTypeRoutes");
+const gstDetailRoutes = require('./Routes/GstDetailRoutes/gstDetailRoutes');
+const promoterroutes = require('./Routes/Promoterroutes/Promoterroutes');
+const Driverdetailsroutes = require('./Routes/DriverdetailsRoutes/Driverdetailsroute');
 //Image upload requirements
 const multer = require("multer");
 const path = require("path");
@@ -204,7 +207,9 @@ app.use(ContactEnquiryRoutes);
 app.use('/packages', packageRoutes);
 app.use("/admin", adminOrderRoutes);
 app.use('/locations', locationRoutes);
-
+app.use('/gstdetails', gstDetailRoutes);
+app.use('/promoters', promoterroutes);
+app.use('/drivers', Driverdetailsroutes);
 
 // VEHICLE DETAILS STORED WITH CRUD OPERATIONS
 //IMAGE UPLOAD CLOUDINARY CORRECTED CODE

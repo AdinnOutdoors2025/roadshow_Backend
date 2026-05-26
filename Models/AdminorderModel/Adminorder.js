@@ -12,6 +12,20 @@ const additionalChargeSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const gstVerifyDetailSchema = new mongoose.Schema(
+  {
+    gstDetailId: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: "GstDetail", 
+      required: true 
+    },
+    gst_number: { type: String, required: true },
+    business_name: { type: String, default: "" },
+    verifiedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 
 const bookingItemSchema = new mongoose.Schema({
   packageId: { type: mongoose.Schema.Types.ObjectId, ref: "Package" },
@@ -97,6 +111,7 @@ const orderSchema = new mongoose.Schema(
     customerId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     name: { type: String, required: true },
     phone: { type: String, required: true },
+    gstVerifyDetails: { type: [gstVerifyDetailSchema], default: [] },
     customerType: { type: Number, enum: [0, 1], default: 1 },
     address: String,
     email: String,
