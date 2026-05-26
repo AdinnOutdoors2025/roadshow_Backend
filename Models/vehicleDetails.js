@@ -46,12 +46,25 @@ const registrationVehicleSchema = new mongoose.Schema(
     gpsEnabled: { type: Boolean, default: true },
     activeStatus: { type: Boolean, default: true },
 
-    // Status & Availability
+    // // Status & Availability
+    // statusAvailability: {
+    //   currentStatus: {
+    //     type: String,
+    //     enum: ["Available", "Unavailable", "Maintenance", "Booked", "Running"],
+    //     default: "Available",
+    //   },
+    //   availableFrom: { type: Date, default: null },
+    //   remarks: { type: String, default: "" },
+    // },
     statusAvailability: {
       currentStatus: {
         type: String,
-        enum: ["Available", "Unavailable"],
-        default: "Available",
+        // enum: ["Waiting for Status", "Available", "Unavailable", "Maintenance", "Booked", "Running", "Damaged"],
+        default: "Waiting for Status",
+      },
+      statusPriority: {
+        type: Number,
+        default: 0,  // 0 = Waiting for Status
       },
       availableFrom: { type: Date, default: null },
       remarks: { type: String, default: "" },
@@ -110,33 +123,74 @@ const vehicleSchema = new mongoose.Schema(
     vehicleDescription: { type: String, default: "" },
 
     // Technical Specifications (Shared) - UPDATED with separate Width/Height fields
+    // techSpecs: {
+    //   screenType: { type: String, default: "LED Only" },
+    //   numberOfScreens: { type: String, default: "" },
+
+    //   // Left/Right Screen Size (ft) - Separate W & H
+    //   leftRightScreenWidth: { type: String, default: "" },
+    //   leftRightScreenHeight: { type: String, default: "" },
+
+    //   // Back Screen Size (ft) - Separate W & H
+    //   backScreenWidth: { type: String, default: "" },
+    //   backScreenHeight: { type: String, default: "" },
+
+    //   // Left/Right Resolution (px) - Separate W & H
+    //   leftRightResolutionWidth: { type: String, default: "" },
+    //   leftRightResolutionHeight: { type: String, default: "" },
+
+    //   // Back Resolution (px) - Separate W & H
+    //   backResolutionWidth: { type: String, default: "" },
+    //   backResolutionHeight: { type: String, default: "" },
+
+    //   audioOutput: { type: String, default: "" },
+    //   brightness: { type: String, default: "" },
+    //   displayVersion: { type: String, default: "" },
+    //   // soundQuality: { type: String, default: "" },
+    //   generatorCapacity: { type: String, default: "" },
+    //   additionalFeatures: { type: String, default: "" },
+    // },
+
     techSpecs: {
-      screenType: { type: String, default: "LED Only" },
-      numberOfScreens: { type: String, default: "" },
-
-      // Left/Right Screen Size (ft) - Separate W & H
-      leftRightScreenWidth: { type: String, default: "" },
-      leftRightScreenHeight: { type: String, default: "" },
-
-      // Back Screen Size (ft) - Separate W & H
-      backScreenWidth: { type: String, default: "" },
-      backScreenHeight: { type: String, default: "" },
-
-      // Left/Right Resolution (px) - Separate W & H
-      leftRightResolutionWidth: { type: String, default: "" },
-      leftRightResolutionHeight: { type: String, default: "" },
-
-      // Back Resolution (px) - Separate W & H
-      backResolutionWidth: { type: String, default: "" },
-      backResolutionHeight: { type: String, default: "" },
-
-      audioOutput: { type: String, default: "" },
-      brightness: { type: String, default: "" },
-      displayVersion: { type: String, default: "" },
-      soundQuality: { type: String, default: "" },
-      generatorCapacity: { type: String, default: "" },
-      additionalFeatures: { type: String, default: "" },
-    },
+  screenType: { type: String, default: "LED Only" },
+  numberOfScreens: { type: String, default: "" },
+ 
+  // Left/Right Screen Size (ft) — used when numberOfScreens === "3"
+  leftRightScreenWidth: { type: String, default: "" },
+  leftRightScreenHeight: { type: String, default: "" },
+ 
+  // Back Screen Size (ft) — used when numberOfScreens === "1" or "3"
+  backScreenWidth: { type: String, default: "" },
+  backScreenHeight: { type: String, default: "" },
+ 
+  // Left/Right Resolution (px) — used when numberOfScreens === "3"
+  leftRightResolutionWidth: { type: String, default: "" },
+  leftRightResolutionHeight: { type: String, default: "" },
+ 
+  // Back Resolution (px) — used when numberOfScreens === "1" or "3"
+  backResolutionWidth: { type: String, default: "" },
+  backResolutionHeight: { type: String, default: "" },
+ 
+  // ── NEW FIELDS: Separate Left screen — used when numberOfScreens === "2"
+  leftScreenWidth: { type: String, default: "" },
+  leftScreenHeight: { type: String, default: "" },
+  leftResolutionWidth: { type: String, default: "" },
+  leftResolutionHeight: { type: String, default: "" },
+ 
+  // ── NEW FIELDS: Separate Right screen — used when numberOfScreens === "2"
+  rightScreenWidth: { type: String, default: "" },
+  rightScreenHeight: { type: String, default: "" },
+  rightResolutionWidth: { type: String, default: "" },
+  rightResolutionHeight: { type: String, default: "" },
+ 
+  audioOutput: { type: String, default: "" },
+  brightness: { type: String, default: "" },
+  displayVersion: { type: String, default: "" },
+  generatorCapacity: { type: String, default: "" },
+  additionalFeatures: { type: String, default: "" },
+ 
+  // soundQuality: { type: String, default: "" },  // REMOVED — deprecated 22/05/2026
+},
 
     // // Pricing (Shared)
     // pricing: {
@@ -178,7 +232,7 @@ const vehicleSchema = new mongoose.Schema(
         step4: false,  // Drivers & Maintenance
         step5: false,  // Summary (final submission)
       },
-      },
+    },
     completedOnboarding: { type: Boolean, default: false },
   },
   { timestamps: true }

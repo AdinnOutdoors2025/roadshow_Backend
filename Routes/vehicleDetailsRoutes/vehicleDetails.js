@@ -46,6 +46,8 @@ router.get("/getVehicleGroupByType/:typeId", getVehicleGroupByType);
 // Statistics
 router.get("/statistics", getVehicleStatistics);
 //STEP STATUS
-router.put("/updateVehicleStep/:id", updateVehicleStep);
+// router.put("/updateVehicleStep/:id", updateVehicleStep);
+router.put("/updateVehicleStep/:id", vehicleUpload, updateVehicleStep);
+
 
 module.exports = router;

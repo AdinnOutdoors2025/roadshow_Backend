@@ -347,7 +347,6 @@ app.post("/delete-video", async (req, res) => {
 // ===================== Update order pipeline status
 //ORDER MANAGEMENT AND ADD TO CART , ORDER CREATION CODES
 
-
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
