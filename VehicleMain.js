@@ -120,7 +120,9 @@ const allowedOrigins = [
   // "https://frontend-roadshow-*-your-username.vercel.app",
   "https://roadshowfrontend.netlify.app",
   "https://roadshowratecard.netlify.app",
-  "https://roadshowratecardquotation.netlify.app"
+  "https://roadshowratecardquotation.netlify.app",
+  "https://roadshow-ratecard-quotation.netlify.app",
+  "https://adinn-space.sgp1.cdn.digitaloceanspaces.com/roadshowRateCard/vehicles.json"
 ];
 
 app.use(
