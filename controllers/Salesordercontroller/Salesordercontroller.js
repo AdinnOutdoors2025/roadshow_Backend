@@ -10,6 +10,7 @@ const SALES_STAGE_ORDER = [
   "proposalPriceQuote",
   "negotiationReview",
   "closedWon",
+  "projectCodeCreation",
   "closedLost",
 ];
 
@@ -18,8 +19,8 @@ const SALES_STAGE_ORDER = [
 // ── GET /sales/pipeline ──────────────────────────────────────────────────────
 exports.getSalesPipeline = async (req, res) => {
   try {
-  
-      const orders = await Order.find({ pipelineStatus: "newOrder" })
+
+    const orders = await Order.find({ pipelineStatus: "newOrder" })
       .sort({ createdAt: -1 })
       .lean();
 
@@ -28,7 +29,7 @@ exports.getSalesPipeline = async (req, res) => {
     SALES_STAGE_ORDER.forEach((s) => (grouped[s] = []));
 
     orders.forEach((o) => {
-      
+
       const stage = o.salesPipelineStatus || "enquiry";
       if (grouped[stage]) {
         grouped[stage].push(o);
@@ -38,9 +39,9 @@ exports.getSalesPipeline = async (req, res) => {
     });
 
 
-    console.log('Stages count:', 
-      Object.entries(grouped).map(([k,v]) => `${k}: ${v.length}`).join(', ')
-    );
+    // console.log('Stages count:', 
+    //   Object.entries(grouped).map(([k,v]) => `${k}: ${v.length}`).join(', ')
+    // );
 
     return successResponse(res, "Sales pipeline fetched", {
       grouped,
@@ -54,7 +55,7 @@ exports.getSalesPipeline = async (req, res) => {
 // ── GET /sales/pipeline/:orderId ─────────────────────────────────────────────
 exports.getSalesOrderById = async (req, res) => {
   try {
-   const order = await Order.findOne({ orderId: req.params.orderId });
+    const order = await Order.findOne({ orderId: req.params.orderId });
     if (!order) return errorResponse(res, "Sales order not found", null, 404);
     return successResponse(res, "Sales order fetched", { order });
   } catch (error) {
@@ -70,8 +71,8 @@ exports.updateSalesPipeline = async (req, res) => {
       salesPipelineStatus,
       handlerName,
       notes,
-      amount,             
-      reason,             
+      amount,
+      reason,
       salesPoNotes,
       proposalNotes,
       analysisNotes,
@@ -81,7 +82,7 @@ exports.updateSalesPipeline = async (req, res) => {
     if (!SALES_STAGE_ORDER.includes(salesPipelineStatus))
       return errorResponse(res, "Invalid sales pipeline stage", null, 400);
 
-   const order = await Order.findById(id);
+    const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Sales order not found", null, 404);
 
     const oldStage = order.salesPipelineStatus;
@@ -95,24 +96,24 @@ exports.updateSalesPipeline = async (req, res) => {
 
 
     // ── ENQUIRY → NEED ANALYSIS ──────────────────────────────────────────
-if (salesPipelineStatus === "needAnalysis" && oldStage === "enquiry") {
+    if (salesPipelineStatus === "needAnalysis" && oldStage === "enquiry") {
 
-  if (isStaffAdmin) {
-    order.salesHandlerName = req.user.username;
-  } else {
-    if (!handlerName?.trim()) {
-    
-      return errorResponse(res, "Handler name is required", null, 400);
-    }
+      if (isStaffAdmin) {
+        order.salesHandlerName = req.user.username;
+      } else {
+        if (!handlerName?.trim()) {
 
-    let finalHandler = handlerName.trim();
-    if (finalHandler.startsWith('__superadmin__')) {
-      finalHandler = finalHandler.replace('__superadmin__', '');
+          return errorResponse(res, "Handler name is required", null, 400);
+        }
+
+        let finalHandler = handlerName.trim();
+        if (finalHandler.startsWith('__superadmin__')) {
+          finalHandler = finalHandler.replace('__superadmin__', '');
+        }
+
+        order.salesHandlerName = finalHandler;
+      }
     }
-  
-    order.salesHandlerName = finalHandler;
-  }
-}
 
     // ── NEED ANALYSIS: save documents if uploaded ────────────────────────
     if (salesPipelineStatus === "needAnalysis" || oldStage === "needAnalysis") {
@@ -178,6 +179,21 @@ if (salesPipelineStatus === "needAnalysis" && oldStage === "enquiry") {
       });
     }
 
+    // ── PROJECT CODE CREATION ────────────────────────────────────────────
+    if (salesPipelineStatus === "projectCodeCreation") {
+      const { projectCode, estimationCode } = req.body;
+      if (!projectCode?.trim() || !estimationCode?.trim()) {
+        return errorResponse(res, "Project Code and Estimation Code are required", null, 400);
+      }
+      order.projectCodeCreationArray.push({
+        projectCode: projectCode.trim(),
+        estimationCode: estimationCode.trim(),
+        uploadedBy: order.salesHandlerName || movedBy,
+        uploadedAt: new Date(),
+      });
+    }
+
+
     // ── CLOSED LOST: require reason ──────────────────────────────────────
     if (salesPipelineStatus === "closedLost") {
       if (!reason?.trim())
@@ -216,12 +232,12 @@ exports.uploadStageDocument = async (req, res) => {
     const { id } = req.params;
     const { stage, notes, amount, reason, salesPoNotes, proposalNotes, analysisNotes, negotiationNotes } = req.body;
 
-  const order = await Order.findById(id);
+    const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Sales order not found", null, 404);
 
     const isStaffAdmin = Number(req.user.isAdmin) === 0;
     // const uploadedBy = isStaffAdmin ? req.user.username : (req.user.username || "Admin");
-      const uploadedBy = order.salesHandlerName
+    const uploadedBy = order.salesHandlerName
     const uploadedFiles = req.files || [];
 
     if (stage === "needAnalysis") {
@@ -263,7 +279,7 @@ exports.uploadStageDocument = async (req, res) => {
       });
       const totalNegotiated = order.salesNegotiationArray.reduce((sum, n) => sum + (n.amount || 0), 0);
       order.salesNegotiationFinalAmount = Math.max(order.grandTotal - totalNegotiated, 0);
-    } 
+    }
     // 1
 
     if (stage === "closedWon") {
@@ -277,6 +293,19 @@ exports.uploadStageDocument = async (req, res) => {
         uploadedAt: new Date(),
       });
     }
+
+    if (stage === "projectCodeCreation") {
+  const { projectCode, estimationCode } = req.body;
+  if (!projectCode?.trim() || !estimationCode?.trim()) {
+    return errorResponse(res, "Project Code and Estimation Code are required", null, 400);
+  }
+  order.projectCodeCreationArray.push({
+    projectCode: projectCode.trim(),
+    estimationCode: estimationCode.trim(),
+    uploadedBy,
+    uploadedAt: new Date(),
+  });
+}
 
     await order.save();
     return successResponse(res, "Document uploaded successfully", { order });
