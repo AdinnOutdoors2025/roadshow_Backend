@@ -2,7 +2,7 @@
 
 const path = require("path");
 const Order = require("../../Models/AdminorderModel/Adminorder");
-const User = require("../../Models/User/user");
+const User = require("../../Models/MainLoginSchema");
 const Package = require("../../Models/PackageManagementModel/packagemanagement");
 require("dotenv").config();
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
@@ -24,44 +24,6 @@ async function generateAdminOrderId() {
   return `${prefix}AO#${count + 1}`;
 }
 
-
-exports.createCustomer = async (req, res) => {
-  try {
-    const { name, phone, address, email } = req.body;
-
-    if (!name?.trim())
-      return errorResponse(res, "Customer name is required", null, 400);
-    if (!phone)
-      return errorResponse(res, "Phone number is required", null, 400);
-
-    const phoneStr = phone.toString().trim();
-    if (!/^[6-9]\d{9}$/.test(phoneStr))
-      return errorResponse(res, "Enter a valid 10-digit Indian mobile number", null, 400);
-    if (!address?.trim())
-      return errorResponse(res, "Address is required", null, 400);
-
-    const existingUser = await User.findOne({ phone: phoneStr });
-    if (existingUser) {
-      return successResponse(res, "Customer already exists", {
-        customer: existingUser,
-        alreadyExists: true,
-      }, 200);
-    }
-
-    const customer = new User({
-      name: name.trim(),
-      phone: phoneStr,
-      address: address.trim(),
-      isVerified: true,
-      ...(email && { email: email.trim().toLowerCase() }),
-    });
-    await customer.save();
-
-    return successResponse(res, "Customer created successfully", { customer, alreadyExists: false }, 201);
-  } catch (error) {
-    return errorResponse(res, error.message);
-  }
-};
 
 
 // ── Pricing calculation helper ─────────────────────────────────
@@ -368,19 +330,6 @@ exports.createAdminOrder = async (req, res) => {
       orderId: order.orderId,
       order,
     }, 201);
-  } catch (error) {
-    return errorResponse(res, error.message);
-  }
-};
-
-
-exports.getCustomerOrders = async (req, res) => {
-  try {
-    const orders = await Order.find({ userId: req.params.customerId })
-      .sort({ createdAt: -1 })
-      .select("orderId grandTotal pipelineStatus orderStatus createdAt bookingItems");
-
-    return successResponse(res, "Customer orders fetched successfully", { total: orders.length, orders });
   } catch (error) {
     return errorResponse(res, error.message);
   }

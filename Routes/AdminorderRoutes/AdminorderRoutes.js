@@ -35,8 +35,7 @@ const pipelineUpload = multer({
 }).any();
 
 // ── Routes ──
-router.post("/customers/create", ctrl.createCustomer);
-router.get("/customers/:customerId/orders", ctrl.getCustomerOrders);
+
 
 router.get("/pipeline", protect, ctrl.getOrdersByPipeline);
 router.patch(
@@ -52,5 +51,7 @@ router.post("/orders/create", protect, adminOrderUpload, ctrl.createAdminOrder);
 
 router.get("/campaign-types", ctrl.getCampaignTypes);
 router.post("/campaign-types", ctrl.createCampaignType);
+
+
 
 module.exports = router;
