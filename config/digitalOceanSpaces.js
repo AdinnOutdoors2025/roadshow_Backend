@@ -1,4 +1,5 @@
 // config/digitalOceanSpaces.js
+//test commit
 
 import dotenv from "dotenv";
 import { S3Client } from "@aws-sdk/client-s3";
