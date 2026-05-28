@@ -27,18 +27,17 @@ const upload = multer({
   },
 });
 
-// IMPORTANT: fixed/static routes first
+// Static routes first
 router.get("/next-number", getNextRoadshowQuotationNumber);
 
-// Normal collection routes
+// Collection routes
 router.post("/", createRoadshowQuotation);
 router.get("/", listRoadshowQuotations);
 
-// IMPORTANT: dynamic routes after static routes
+// Dynamic routes last
 router.get("/:quotationId/download-url", getRoadshowQuotationDownloadUrl);
 router.get("/:quotationId", getRoadshowQuotationById);
 router.put("/:quotationId/pdf", upload.single("pdf"), uploadRoadshowQuotationPdf);
-
 
 
 
