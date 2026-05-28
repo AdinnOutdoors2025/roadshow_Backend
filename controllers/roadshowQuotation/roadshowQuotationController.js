@@ -347,7 +347,7 @@ export const getRoadshowQuotationDownloadUrl = async (req, res) => {
 export const listRoadshowQuotations = async (req, res) => {
   try {
     const page = Math.max(Number(req.query.page || 1), 1);
-    const limit = Math.min(Math.max(Number(req.query.limit || 20), 1), 100);
+    const limit = Math.min(Math.max(Number(req.query.limit || 10), 1), 100);
     const skip = (page - 1) * limit;
 
     const search = String(req.query.search || "").trim();
@@ -369,6 +369,12 @@ export const listRoadshowQuotations = async (req, res) => {
           },
         },
         {
+          "clientDetails.campaignName": {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
           "clientDetails.clientName": {
             $regex: search,
             $options: "i",
@@ -376,6 +382,12 @@ export const listRoadshowQuotations = async (req, res) => {
         },
         {
           "preparedByDetails.staffName": {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          "preparedByDetails.staffPhone": {
             $regex: search,
             $options: "i",
           },
@@ -391,7 +403,7 @@ export const listRoadshowQuotations = async (req, res) => {
         .skip(skip)
         .limit(limit)
         .select(
-          "quotationNumber quotationDate quotationDateKey quotationSequence status clientDetails preparedByDetails campaign pricing.grandTotal pdf createdAt updatedAt",
+          "quotationNumber quotationDate quotationDateKey quotationSequence status clientDetails.companyName clientDetails.clientName clientDetails.contactNumber clientDetails.campaignName preparedByDetails.staffName preparedByDetails.staffPhone campaign.campaignName pdf.status pdf.fileName pdf.publicUrl pdf.cdnUrl pdf.uploadedAt createdAt updatedAt",
         )
         .lean(),
 
@@ -406,7 +418,7 @@ export const listRoadshowQuotations = async (req, res) => {
           page,
           limit,
           total,
-          totalPages: Math.ceil(total / limit),
+          totalPages: Math.max(Math.ceil(total / limit), 1),
         },
       },
     });
