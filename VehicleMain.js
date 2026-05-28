@@ -35,6 +35,7 @@ const vehicleTypeRoutes = require("./Routes/vehicleTypeRoutes");
 const gstDetailRoutes = require('./Routes/GstDetailRoutes/gstDetailRoutes');
 const promoterroutes = require('./Routes/Promoterroutes/Promoterroutes');
 const Driverdetailsroutes = require('./Routes/DriverdetailsRoutes/Driverdetailsroute');
+const RoadshowQuotationRoutes  = require('./Routes/roadshowQuotation/roadshowQuotationRoute')
 //Image upload requirements
 const multer = require("multer");
 const path = require("path");
@@ -147,8 +148,8 @@ app.use(
 );
 
 app.use(bodyParser.json());
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use(express.json({ limit: "100mb" }));
+app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
 app.use("/public", express.static(path.join(__dirname, "public")));
 app.use(express.static(path.join(__dirname, "public")));
@@ -212,6 +213,7 @@ app.use('/locations', locationRoutes);
 app.use('/gstdetails', gstDetailRoutes);
 app.use('/promoters', promoterroutes);
 app.use('/drivers', Driverdetailsroutes);
+app.use("/api/roadshow-quotations", RoadshowQuotationRoutes);
 
 // VEHICLE DETAILS STORED WITH CRUD OPERATIONS
 //IMAGE UPLOAD CLOUDINARY CORRECTED CODE
