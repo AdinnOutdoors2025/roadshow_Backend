@@ -116,12 +116,6 @@ const needAnalysisDocSchema = new mongoose.Schema(
   { _id: true }
 );
 
-const projectCodeCreationSchema = new mongoose.Schema({
-  projectCode: { type: String, default: "" },
-  estimationCode: { type: String, default: "" },
-  uploadedBy: { type: String, default: "" },
-  uploadedAt: { type: Date, default: Date.now },
-}, { _id: true });
 
 const proposalDocSchema = new mongoose.Schema(
   {
@@ -173,6 +167,18 @@ const salesPipelineLogSchema = new mongoose.Schema(
     movedAt: { type: Date, default: Date.now },
   },
   { _id: false }
+);
+
+const projectMailLogSchema = new mongoose.Schema(
+  {
+    sentTo:    { type: String, default: "" },
+    sentCc:    { type: String, default: "" },
+    subject:   { type: String, default: "" },
+    sentBy:    { type: String, default: "" },
+    sentAt:    { type: Date, default: Date.now },
+    isResend:  { type: Boolean, default: false },
+  },
+  { _id: true }
 );
 
 // ── Main Order Schema ────────────────────────────────────────────────────────
@@ -271,6 +277,7 @@ const orderSchema = new mongoose.Schema(
         "proposalPriceQuote",
         "negotiationReview",
         "closedWon",
+        "projectCodeCreation",
         "closedLost",
       ],
       default: "enquiry",
@@ -284,9 +291,9 @@ const orderSchema = new mongoose.Schema(
     proposalArray:         { type: [proposalDocSchema],          default: [] },
     salesNegotiationArray: { type: [salesNegotiationDocSchema],  default: [] },
     closedWonArray:        { type: [closedWonDocSchema],         default: [] },
-    projectCodeCreationArray: { type: [projectCodeCreationSchema], default: [] },
     closedLostArray:       { type: [closedLostDocSchema],        default: [] },
     salesPipelineLogs:     { type: [salesPipelineLogSchema],     default: [] },
+    projectMailLogs: { type: [projectMailLogSchema], default: [] },
   },
   { timestamps: true }
 );

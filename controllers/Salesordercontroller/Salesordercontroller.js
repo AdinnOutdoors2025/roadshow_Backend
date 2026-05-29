@@ -1,7 +1,19 @@
+
+
 // controllers/SalesPipelineController/salesPipelineController.js
+require("dotenv").config();
+const axios = require("axios");
 const path = require("path");
+const fs = require("fs");
+const FormData = require("form-data");
 const Order = require("../../Models/AdminorderModel/Adminorder");
+const vehicletypes = require("../../Models/VehicleTypeSchema");
 const { successResponse, errorResponse } = require("../../Utils/response");
+
+const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
+const CDN_BASE_URL =
+  process.env.DO_SPACES_CDN_BASE ||
+  "https://adinn-space.sgp1.digitaloceanspaces.com";
 
 // ── Stage order ─────────────────────────────────────────────────────────────
 const SALES_STAGE_ORDER = [
@@ -14,22 +26,28 @@ const SALES_STAGE_ORDER = [
   "closedLost",
 ];
 
-
+// ── Helper: uploaded file-ஓட path/URL எடுக்க ────────────────────────────────
+// STORAGE_TYPE === "space"  → file.location (full URL from Spaces)
+// STORAGE_TYPE === "local"  → /uploads/filename
+const getFilePath = (file) => {
+  if (!file) return "";
+  if (STORAGE_TYPE === "space") {
+    return file.location || ""; // multer-s3 sets file.location
+  }
+  return `/uploads/${path.basename(file.path)}`;
+};
 
 // ── GET /sales/pipeline ──────────────────────────────────────────────────────
 exports.getSalesPipeline = async (req, res) => {
   try {
-
     const orders = await Order.find({ pipelineStatus: "newOrder" })
       .sort({ createdAt: -1 })
       .lean();
 
-    // Group by stage
     const grouped = {};
     SALES_STAGE_ORDER.forEach((s) => (grouped[s] = []));
 
     orders.forEach((o) => {
-
       const stage = o.salesPipelineStatus || "enquiry";
       if (grouped[stage]) {
         grouped[stage].push(o);
@@ -37,11 +55,6 @@ exports.getSalesPipeline = async (req, res) => {
         grouped["enquiry"].push(o);
       }
     });
-
-
-    // console.log('Stages count:', 
-    //   Object.entries(grouped).map(([k,v]) => `${k}: ${v.length}`).join(', ')
-    // );
 
     return successResponse(res, "Sales pipeline fetched", {
       grouped,
@@ -86,42 +99,34 @@ exports.updateSalesPipeline = async (req, res) => {
     if (!order) return errorResponse(res, "Sales order not found", null, 404);
 
     const oldStage = order.salesPipelineStatus;
-
-    // ── Determine who is moving ──────────────────────────────────────────
     const isStaffAdmin = Number(req.user.isAdmin) === 0;
-    // const movedBy = isStaffAdmin ? req.user.username : (handlerName || req.user.username || "Admin");
-    const movedBy = req.user.username || "Admin";
-
+    const movedBy = order.salesHandlerName || "Admin";
     const uploadedFiles = req.files || [];
-
 
     // ── ENQUIRY → NEED ANALYSIS ──────────────────────────────────────────
     if (salesPipelineStatus === "needAnalysis" && oldStage === "enquiry") {
-
       if (isStaffAdmin) {
         order.salesHandlerName = req.user.username;
       } else {
-        if (!handlerName?.trim()) {
-
+        if (!handlerName?.trim())
           return errorResponse(res, "Handler name is required", null, 400);
-        }
 
         let finalHandler = handlerName.trim();
-        if (finalHandler.startsWith('__superadmin__')) {
-          finalHandler = finalHandler.replace('__superadmin__', '');
+        if (finalHandler.startsWith("__superadmin__")) {
+          finalHandler = finalHandler.replace("__superadmin__", "");
         }
-
         order.salesHandlerName = finalHandler;
       }
     }
 
-    // ── NEED ANALYSIS: save documents if uploaded ────────────────────────
+    // ── NEED ANALYSIS ────────────────────────────────────────────────────
     if (salesPipelineStatus === "needAnalysis" || oldStage === "needAnalysis") {
-      const analysisFile = uploadedFiles.find((f) => f.fieldname === "analysisDocument");
+      const analysisFile = uploadedFiles.find(
+        (f) => f.fieldname === "analysisDocument"
+      );
       if (analysisFile || analysisNotes) {
-        const docPath = analysisFile ? `/uploads/${path.basename(analysisFile.path)}` : "";
         order.needAnalysisArray.push({
-          analysisDocument: docPath,
+          analysisDocument: getFilePath(analysisFile),
           notes: (analysisNotes || "").trim(),
           uploadedBy: order.salesHandlerName,
           uploadedAt: new Date(),
@@ -129,13 +134,17 @@ exports.updateSalesPipeline = async (req, res) => {
       }
     }
 
-    // ── PROPOSAL: save documents if uploaded ────────────────────────────
-    if (salesPipelineStatus === "proposalPriceQuote" || oldStage === "proposalPriceQuote") {
-      const proposalFile = uploadedFiles.find((f) => f.fieldname === "proposalDocument");
+    // ── PROPOSAL ────────────────────────────────────────────────────────
+    if (
+      salesPipelineStatus === "proposalPriceQuote" ||
+      oldStage === "proposalPriceQuote"
+    ) {
+      const proposalFile = uploadedFiles.find(
+        (f) => f.fieldname === "proposalDocument"
+      );
       if (proposalFile || proposalNotes) {
-        const docPath = proposalFile ? `/uploads/${path.basename(proposalFile.path)}` : "";
         order.proposalArray.push({
-          proposalDocument: docPath,
+          proposalDocument: getFilePath(proposalFile),
           notes: (proposalNotes || "").trim(),
           uploadedBy: order.salesHandlerName,
           uploadedAt: new Date(),
@@ -143,66 +152,70 @@ exports.updateSalesPipeline = async (req, res) => {
       }
     }
 
-    // ── NEGOTIATION: save amount + documents ─────────────────────────────
-    if (salesPipelineStatus === "negotiationReview" || oldStage === "negotiationReview") {
-      const negotiationFile = uploadedFiles.find((f) => f.fieldname === "negotiationDocument");
+    // ── NEGOTIATION ──────────────────────────────────────────────────────
+    if (
+      salesPipelineStatus === "negotiationReview" ||
+      oldStage === "negotiationReview"
+    ) {
+      const negotiationFile = uploadedFiles.find(
+        (f) => f.fieldname === "negotiationDocument"
+      );
       const negotiationAmount = Number(amount) || 0;
       if (negotiationFile || negotiationAmount > 0 || negotiationNotes) {
-        const docPath = negotiationFile ? `/uploads/${path.basename(negotiationFile.path)}` : "";
         order.salesNegotiationArray.push({
-          document: docPath,
+          document: getFilePath(negotiationFile),
           notes: (negotiationNotes || "").trim(),
           amount: negotiationAmount,
           uploadedBy: order.salesHandlerName,
           uploadedAt: new Date(),
         });
 
-        // Recalculate negotiation final amount
         const totalNegotiated = order.salesNegotiationArray.reduce(
-          (sum, n) => sum + (n.amount || 0), 0
+          (sum, n) => sum + (n.amount || 0),
+          0
         );
-        order.salesNegotiationFinalAmount = Math.max(order.grandTotal - totalNegotiated, 0);
+        order.salesNegotiationFinalAmount = Math.max(
+          order.grandTotal - totalNegotiated,
+          0
+        );
       }
     }
 
-    // ── CLOSED WON: require PO document ─────────────────────────────────
+    // ── CLOSED WON: PO document required ────────────────────────────────
     if (salesPipelineStatus === "closedWon") {
-      const poFile = uploadedFiles.find((f) => f.fieldname === "salesPoDocument");
+      const poFile = uploadedFiles.find(
+        (f) => f.fieldname === "salesPoDocument"
+      );
       if (!poFile)
-        return errorResponse(res, "Sales PO document is required to close won", null, 400);
-      const docPath = `/uploads/${path.basename(poFile.path)}`;
+        return errorResponse(
+          res,
+          "Sales PO document is required to close won",
+          null,
+          400
+        );
       order.closedWonArray.push({
-        salesPoDocument: docPath,
+        salesPoDocument: getFilePath(poFile),
         salesPoNotes: (salesPoNotes || "").trim(),
         uploadedBy: order.salesHandlerName,
         uploadedAt: new Date(),
       });
     }
 
-    // ── PROJECT CODE CREATION ────────────────────────────────────────────
-    if (salesPipelineStatus === "projectCodeCreation") {
-      const { projectCode, estimationCode } = req.body;
-      if (!projectCode?.trim() || !estimationCode?.trim()) {
-        return errorResponse(res, "Project Code and Estimation Code are required", null, 400);
-      }
-      order.projectCodeCreationArray.push({
-        projectCode: projectCode.trim(),
-        estimationCode: estimationCode.trim(),
-        uploadedBy: order.salesHandlerName || movedBy,
-        uploadedAt: new Date(),
-      });
-    }
-
-
-    // ── CLOSED LOST: require reason ──────────────────────────────────────
+    // ── CLOSED LOST ──────────────────────────────────────────────────────
     if (salesPipelineStatus === "closedLost") {
       if (!reason?.trim())
-        return errorResponse(res, "Reason is required for closing lost", null, 400);
-      const lostFile = uploadedFiles.find((f) => f.fieldname === "closedLostDocument");
-      const docPath = lostFile ? `/uploads/${path.basename(lostFile.path)}` : "";
+        return errorResponse(
+          res,
+          "Reason is required for closing lost",
+          null,
+          400
+        );
+      const lostFile = uploadedFiles.find(
+        (f) => f.fieldname === "closedLostDocument"
+      );
       order.closedLostArray.push({
         reason: reason.trim(),
-        document: docPath,
+        document: getFilePath(lostFile),
         uploadedBy: order.salesHandlerName,
         uploadedAt: new Date(),
       });
@@ -219,31 +232,40 @@ exports.updateSalesPipeline = async (req, res) => {
     });
 
     await order.save();
-
-    return successResponse(res, "Sales pipeline updated successfully", { order });
+    return successResponse(res, "Sales pipeline updated successfully", {
+      order,
+    });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
 };
 
-// ── POST /sales/pipeline/:id/documents ── Upload docs without moving stage ──
+// ── POST /sales/pipeline/:id/documents ──────────────────────────────────────
 exports.uploadStageDocument = async (req, res) => {
   try {
     const { id } = req.params;
-    const { stage, notes, amount, reason, salesPoNotes, proposalNotes, analysisNotes, negotiationNotes } = req.body;
+    const {
+      stage,
+      amount,
+      salesPoNotes,
+      proposalNotes,
+      analysisNotes,
+      negotiationNotes,
+    } = req.body;
 
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Sales order not found", null, 404);
 
-    const isStaffAdmin = Number(req.user.isAdmin) === 0;
-    // const uploadedBy = isStaffAdmin ? req.user.username : (req.user.username || "Admin");
-    const uploadedBy = order.salesHandlerName
+    const uploadedBy = order.salesHandlerName;
     const uploadedFiles = req.files || [];
 
     if (stage === "needAnalysis") {
-      const analysisFile = uploadedFiles.find((f) => f.fieldname === "analysisDocument");
-      const docPath = analysisFile ? `/uploads/${path.basename(analysisFile.path)}` : "";
-      if (!docPath && !analysisNotes) return errorResponse(res, "Provide document or notes", null, 400);
+      const analysisFile = uploadedFiles.find(
+        (f) => f.fieldname === "analysisDocument"
+      );
+      const docPath = getFilePath(analysisFile);
+      if (!docPath && !analysisNotes)
+        return errorResponse(res, "Provide document or notes", null, 400);
       order.needAnalysisArray.push({
         analysisDocument: docPath,
         notes: (analysisNotes || "").trim(),
@@ -253,9 +275,12 @@ exports.uploadStageDocument = async (req, res) => {
     }
 
     if (stage === "proposalPriceQuote") {
-      const proposalFile = uploadedFiles.find((f) => f.fieldname === "proposalDocument");
-      const docPath = proposalFile ? `/uploads/${path.basename(proposalFile.path)}` : "";
-      if (!docPath && !proposalNotes) return errorResponse(res, "Provide document or notes", null, 400);
+      const proposalFile = uploadedFiles.find(
+        (f) => f.fieldname === "proposalDocument"
+      );
+      const docPath = getFilePath(proposalFile);
+      if (!docPath && !proposalNotes)
+        return errorResponse(res, "Provide document or notes", null, 400);
       order.proposalArray.push({
         proposalDocument: docPath,
         notes: (proposalNotes || "").trim(),
@@ -265,11 +290,18 @@ exports.uploadStageDocument = async (req, res) => {
     }
 
     if (stage === "negotiationReview") {
-      const negotiationFile = uploadedFiles.find((f) => f.fieldname === "negotiationDocument");
+      const negotiationFile = uploadedFiles.find(
+        (f) => f.fieldname === "negotiationDocument"
+      );
       const negotiationAmount = Number(amount) || 0;
-      const docPath = negotiationFile ? `/uploads/${path.basename(negotiationFile.path)}` : "";
+      const docPath = getFilePath(negotiationFile);
       if (!docPath && negotiationAmount === 0 && !negotiationNotes)
-        return errorResponse(res, "Provide document, amount, or notes", null, 400);
+        return errorResponse(
+          res,
+          "Provide document, amount, or notes",
+          null,
+          400
+        );
       order.salesNegotiationArray.push({
         document: docPath,
         notes: (negotiationNotes || "").trim(),
@@ -277,39 +309,261 @@ exports.uploadStageDocument = async (req, res) => {
         uploadedBy,
         uploadedAt: new Date(),
       });
-      const totalNegotiated = order.salesNegotiationArray.reduce((sum, n) => sum + (n.amount || 0), 0);
-      order.salesNegotiationFinalAmount = Math.max(order.grandTotal - totalNegotiated, 0);
+      const totalNegotiated = order.salesNegotiationArray.reduce(
+        (sum, n) => sum + (n.amount || 0),
+        0
+      );
+      order.salesNegotiationFinalAmount = Math.max(
+        order.grandTotal - totalNegotiated,
+        0
+      );
     }
-    // 1
 
     if (stage === "closedWon") {
-      const poFile = uploadedFiles.find((f) => f.fieldname === "salesPoDocument");
+      const poFile = uploadedFiles.find(
+        (f) => f.fieldname === "salesPoDocument"
+      );
       if (!poFile) return errorResponse(res, "PO document required", null, 400);
-      const docPath = `/uploads/${path.basename(poFile.path)}`;
       order.closedWonArray.push({
-        salesPoDocument: docPath,
+        salesPoDocument: getFilePath(poFile),
         salesPoNotes: (salesPoNotes || "").trim(),
         uploadedBy,
         uploadedAt: new Date(),
       });
     }
 
-    if (stage === "projectCodeCreation") {
-  const { projectCode, estimationCode } = req.body;
-  if (!projectCode?.trim() || !estimationCode?.trim()) {
-    return errorResponse(res, "Project Code and Estimation Code are required", null, 400);
-  }
-  order.projectCodeCreationArray.push({
-    projectCode: projectCode.trim(),
-    estimationCode: estimationCode.trim(),
-    uploadedBy,
-    uploadedAt: new Date(),
-  });
-}
-
     await order.save();
     return successResponse(res, "Document uploaded successfully", { order });
   } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+
+
+exports.sendProjectMail = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { from, to, cc, additionalNotes, subject } = req.body;
+
+    // 1. Order எடு
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    // 2. Resend ஆ?
+    const isResend = order.projectMailLogs && order.projectMailLogs.length > 0;
+
+    // 3. Calculations
+    const subtotal = order.bookingItems.reduce(
+      (s, i) => s + (i.totalAmount || 0),
+      0
+    );
+    const totalNegotiated = order.salesNegotiationArray.reduce(
+      (s, n) => s + (n.amount || 0),
+      0
+    );
+    const taxable = subtotal;
+    const gstAmt = Math.floor(taxable * 0.18);
+    const finalAmt = taxable + gstAmt;
+
+    // 4. PO Document எடு (closedWonArray-ல இருக்கற latest)
+    const latestPoEntry =
+      order.closedWonArray && order.closedWonArray.length > 0
+        ? order.closedWonArray[order.closedWonArray.length - 1]
+        : null;
+
+    const poDocumentPath = latestPoEntry?.salesPoDocument || "";
+    console.log("poDocumentPath:", poDocumentPath);
+
+
+    // 4.5. VehicleType names lookup
+    const vehicleTypeIds = [
+      ...new Set(
+        order.bookingItems
+          .map((item) => item.vehicleType)
+          .filter(Boolean)
+      ),
+    ];
+
+    const vehicleTypeDocs = await vehicletypes.find({
+      _id: { $in: vehicleTypeIds },
+    });
+
+    const vehicleTypeMap = {};
+    vehicleTypeDocs.forEach((vt) => {
+      vehicleTypeMap[vt._id.toString()] = vt.typeName;
+    });
+
+    // 5. BookingItems format
+    const orders = order.bookingItems.map((item) => ({
+      // vehicleType: item.vehicleType || "",
+      vehicleType: vehicleTypeMap[item.vehicleType?.toString()] || item.vehicleType || "",
+      vehicleModel: item.vehicleModel || "",
+      campaignType:
+        item.campaignType === "Other"
+          ? item.otherCampaignType || "Other"
+          : item.campaignType || "",
+      fromDate: item.fromDate
+        ? new Date(item.fromDate).toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+        : "",
+      toDate: item.toDate
+        ? new Date(item.toDate).toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+        : "",
+      startDate: item.fromDate || "",
+      endDate: item.toDate || "",
+      totalDays: item.totalDays || 0,
+      fromLocation: item.fromLocation || "",
+      toLocation: item.toLocation || "",
+      state: item.state || "",
+      city: item.city || "",
+      quantity: item.quantity || 1,
+      rental: item.rentalCost || 0,
+      rtoCharges: item.rtoCost || 0,
+      extraKm: item.extraKmCost || 0,
+      extraKmCost: item.extraKmCost || 0,
+      extraHours: item.extraHourCost || 0,
+      extraHourCost: item.extraHourCost || 0,
+      promotorCharges: item.promoterCost || 0,
+      additionalCharges:item.additionalNet || 0,
+      subtotal: item.subtotal || 0,
+      totalAmount: item.totalAmount || 0,
+      needPromoter: item.needPromoter || false,
+      promoterType: item.promoterType || "",
+      promoterGender: item.promoterGender || "",
+      promoterLanguage: Array.isArray(item.promoterLanguage)
+        ? item.promoterLanguage.join(", ")
+        : item.promoterLanguage || "",
+      promoterQuantity: item.promoterQuantity || 0,
+    }));
+
+    // 6. FormData build பண்ணு — எப்பவும் form-data-ஆ அனுப்பு
+    const form = new FormData();
+
+    // --- Scalar fields ---
+    const scalarFields = {
+      mailtype: "roadshowprojector",
+      subject:
+        subject ||
+        `Project Code Creation Request - ${order.orderId} - ${order.name}`,
+      customerType: order.customerType,
+      userName: order.name,
+      userEmail: order.email || "",
+      userContactNumber: order.phone,
+      orderId: order.orderId,
+      orderDate: new Date(order.createdAt).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }),
+      gstNumber: order.gstNumber || "",
+      companyName: order.companyName || "",
+      designation: order.designation || "",
+      salesHandlerName: order.salesHandlerName || "",
+      additionalNotes: additionalNotes || "",
+      subtotal,
+      discount: totalNegotiated,
+      taxable,
+      gst: gstAmt,
+      totalAmount: finalAmt,
+    };
+
+    Object.entries(scalarFields).forEach(([key, value]) => {
+      form.append(key, String(value));
+    });
+
+
+    const toArr = Array.isArray(to)
+      ? to.flatMap((e) => e.split(",").map((x) => x.trim())).filter(Boolean)
+      : to.split(",").map((e) => e.trim()).filter(Boolean);
+
+
+    const ccArr = cc
+      ? Array.isArray(cc)
+        ? cc.flatMap((e) => e.split(",").map((x) => x.trim())).filter(Boolean)
+        : cc.split(",").map((e) => e.trim()).filter(Boolean)
+      : [];
+    toArr.forEach((email) => form.append("to[]", email));
+    ccArr.forEach((email) => form.append("cc[]", email));
+
+    // --- orders[] JSON string ---
+    form.append("orders", JSON.stringify(orders));
+
+    // --- PO Document attach ---
+    if (poDocumentPath) {
+      if (poDocumentPath.startsWith("http")) {
+        // Cloud URL → download பண்ணி stream-ஆ attach
+        const fileResponse = await axios.get(poDocumentPath, {
+          responseType: "stream",
+        });
+
+        const fileName = path.basename(new URL(poDocumentPath).pathname);
+
+        form.append("poDocument", fileResponse.data, {
+          filename: fileName,
+          contentType:
+            fileResponse.headers["content-type"] ||
+            "application/octet-stream",
+        });
+      } else {
+        // Local file path → stream-ஆ attach
+        const absolutePath = path.join(
+          __dirname,
+          "../../public",
+          poDocumentPath
+        );
+        if (fs.existsSync(absolutePath)) {
+          form.append(
+            "poDocument",
+            fs.createReadStream(absolutePath),
+            path.basename(absolutePath)
+          );
+        }
+      }
+    }
+
+    // 7. Mail API call
+    const mailResponse = await axios.post(
+      process.env.CODECREATION_API_URL,
+      form,
+      { headers: form.getHeaders() }
+    );
+
+    // 8. Mail log DB-ல் save பண்ணு
+    const sentBy =
+      req.user?.username || order.salesHandlerName || "Admin";
+
+    order.projectMailLogs.push({
+      sentTo: toArr.join(", "),
+      sentCc: ccArr.join(", "),
+      subject:
+        subject ||
+        `Project Code Creation Request - ${order.orderId} - ${order.name}`,
+      sentBy,
+      sentAt: new Date(),
+      isResend,
+    });
+
+    await order.save();
+
+    return successResponse(res, "Project creation mail sent successfully", {
+      isResend,
+      mailLog: order.projectMailLogs[order.projectMailLogs.length - 1],
+      totalSentCount: order.projectMailLogs.length,
+    });
+  } catch (error) {
+    console.error(
+      "sendProjectMail error:",
+      error?.response?.data || error.message
+    );
     return errorResponse(res, error.message, null, 500);
   }
 };
