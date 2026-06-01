@@ -2,7 +2,6 @@
 
 const mongoose = require("mongoose");
 
-// ── Existing sub-schemas (unchanged) ────────────────────────────────────────
 
 const additionalChargeSchema = new mongoose.Schema(
   {
@@ -104,7 +103,7 @@ const paymentStageFirstSchema = new mongoose.Schema(
   { _id: true }
 );
 
-// ── NEW: Sales pipeline sub-schemas (flat) ───────────────────────────────────
+
 
 const needAnalysisDocSchema = new mongoose.Schema(
   {
@@ -165,9 +164,19 @@ const salesPipelineLogSchema = new mongoose.Schema(
     movedBy: { type: String, default: "" },
     handlerName: { type: String, default: "" },
     movedAt: { type: Date, default: Date.now },
+    notes: { type: String, default: "" },
   },
   { _id: false }
 );
+
+
+
+const projectCodeSchema = new mongoose.Schema({
+  projectCode:    { type: String, required: true },
+  estimationCode: { type: String, required: true },
+  savedBy:        { type: String, default: "" },
+  savedAt:        { type: Date, default: Date.now },
+}, { _id: true });
 
 const projectMailLogSchema = new mongoose.Schema(
   {
@@ -181,7 +190,7 @@ const projectMailLogSchema = new mongoose.Schema(
   { _id: true }
 );
 
-// ── Main Order Schema ────────────────────────────────────────────────────────
+
 
 const orderSchema = new mongoose.Schema(
   {
@@ -216,7 +225,7 @@ const orderSchema = new mongoose.Schema(
       default: "Pending",
     },
 
-    // ── Admin pipeline ────────────────────────────────────────────────────
+ 
     pipelineStatus: {
       type: String,
       enum: [
@@ -268,7 +277,7 @@ const orderSchema = new mongoose.Schema(
 
     grandNegotiationTotal: { type: Number, default: null },
 
-    // ── Sales pipeline (flat fields — no nested object) ───────────────────
+  
     salesPipelineStatus: {
       type: String,
       enum: [
@@ -293,6 +302,7 @@ const orderSchema = new mongoose.Schema(
     closedWonArray:        { type: [closedWonDocSchema],         default: [] },
     closedLostArray:       { type: [closedLostDocSchema],        default: [] },
     salesPipelineLogs:     { type: [salesPipelineLogSchema],     default: [] },
+    projectCodeArray: { type: [projectCodeSchema], default: [] },
     projectMailLogs: { type: [projectMailLogSchema], default: [] },
   },
   { timestamps: true }

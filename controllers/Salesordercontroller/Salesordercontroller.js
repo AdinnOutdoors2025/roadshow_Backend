@@ -1,6 +1,4 @@
 
-
-// controllers/SalesPipelineController/salesPipelineController.js
 require("dotenv").config();
 const axios = require("axios");
 const path = require("path");
@@ -15,7 +13,6 @@ const CDN_BASE_URL =
   process.env.DO_SPACES_CDN_BASE ||
   "https://adinn-space.sgp1.digitaloceanspaces.com";
 
-// ── Stage order ─────────────────────────────────────────────────────────────
 const SALES_STAGE_ORDER = [
   "enquiry",
   "needAnalysis",
@@ -26,18 +23,15 @@ const SALES_STAGE_ORDER = [
   "closedLost",
 ];
 
-// ── Helper: uploaded file-ஓட path/URL எடுக்க ────────────────────────────────
-// STORAGE_TYPE === "space"  → file.location (full URL from Spaces)
-// STORAGE_TYPE === "local"  → /uploads/filename
 const getFilePath = (file) => {
   if (!file) return "";
   if (STORAGE_TYPE === "space") {
-    return file.location || ""; // multer-s3 sets file.location
+    return file.location || "";
   }
   return `/uploads/${path.basename(file.path)}`;
 };
 
-// ── GET /sales/pipeline ──────────────────────────────────────────────────────
+
 exports.getSalesPipeline = async (req, res) => {
   try {
     const orders = await Order.find({ pipelineStatus: "newOrder" })
@@ -65,7 +59,7 @@ exports.getSalesPipeline = async (req, res) => {
   }
 };
 
-// ── GET /sales/pipeline/:orderId ─────────────────────────────────────────────
+
 exports.getSalesOrderById = async (req, res) => {
   try {
     const order = await Order.findOne({ orderId: req.params.orderId });
@@ -76,7 +70,7 @@ exports.getSalesOrderById = async (req, res) => {
   }
 };
 
-// ── PATCH /sales/pipeline/:id ────────────────────────────────────────────────
+
 exports.updateSalesPipeline = async (req, res) => {
   try {
     const { id } = req.params;
@@ -100,10 +94,11 @@ exports.updateSalesPipeline = async (req, res) => {
 
     const oldStage = order.salesPipelineStatus;
     const isStaffAdmin = Number(req.user.isAdmin) === 0;
-    const movedBy = order.salesHandlerName || "Admin";
+    // const movedBy = order.salesHandlerName || "Admin";
+    const movedBy = req.user?.username || order.salesHandlerName || "Admin";
     const uploadedFiles = req.files || [];
 
-    // ── ENQUIRY → NEED ANALYSIS ──────────────────────────────────────────
+
     if (salesPipelineStatus === "needAnalysis" && oldStage === "enquiry") {
       if (isStaffAdmin) {
         order.salesHandlerName = req.user.username;
@@ -119,7 +114,7 @@ exports.updateSalesPipeline = async (req, res) => {
       }
     }
 
-    // ── NEED ANALYSIS ────────────────────────────────────────────────────
+
     if (salesPipelineStatus === "needAnalysis" || oldStage === "needAnalysis") {
       const analysisFile = uploadedFiles.find(
         (f) => f.fieldname === "analysisDocument"
@@ -134,7 +129,7 @@ exports.updateSalesPipeline = async (req, res) => {
       }
     }
 
-    // ── PROPOSAL ────────────────────────────────────────────────────────
+
     if (
       salesPipelineStatus === "proposalPriceQuote" ||
       oldStage === "proposalPriceQuote"
@@ -152,7 +147,7 @@ exports.updateSalesPipeline = async (req, res) => {
       }
     }
 
-    // ── NEGOTIATION ──────────────────────────────────────────────────────
+
     if (
       salesPipelineStatus === "negotiationReview" ||
       oldStage === "negotiationReview"
@@ -181,7 +176,7 @@ exports.updateSalesPipeline = async (req, res) => {
       }
     }
 
-    // ── CLOSED WON: PO document required ────────────────────────────────
+
     if (salesPipelineStatus === "closedWon") {
       const poFile = uploadedFiles.find(
         (f) => f.fieldname === "salesPoDocument"
@@ -201,7 +196,6 @@ exports.updateSalesPipeline = async (req, res) => {
       });
     }
 
-    // ── CLOSED LOST ──────────────────────────────────────────────────────
     if (salesPipelineStatus === "closedLost") {
       if (!reason?.trim())
         return errorResponse(
@@ -221,7 +215,6 @@ exports.updateSalesPipeline = async (req, res) => {
       });
     }
 
-    // ── Update stage & log ───────────────────────────────────────────────
     order.salesPipelineStatus = salesPipelineStatus;
     order.salesPipelineLogs.push({
       fromStage: oldStage,
@@ -240,7 +233,6 @@ exports.updateSalesPipeline = async (req, res) => {
   }
 };
 
-// ── POST /sales/pipeline/:id/documents ──────────────────────────────────────
 exports.uploadStageDocument = async (req, res) => {
   try {
     const { id } = req.params;
@@ -347,14 +339,12 @@ exports.sendProjectMail = async (req, res) => {
     const { id } = req.params;
     const { from, to, cc, additionalNotes, subject } = req.body;
 
-    // 1. Order எடு
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-    // 2. Resend ஆ?
     const isResend = order.projectMailLogs && order.projectMailLogs.length > 0;
 
-    // 3. Calculations
+
     const subtotal = order.bookingItems.reduce(
       (s, i) => s + (i.totalAmount || 0),
       0
@@ -367,17 +357,14 @@ exports.sendProjectMail = async (req, res) => {
     const gstAmt = Math.floor(taxable * 0.18);
     const finalAmt = taxable + gstAmt;
 
-    // 4. PO Document எடு (closedWonArray-ல இருக்கற latest)
+
     const latestPoEntry =
       order.closedWonArray && order.closedWonArray.length > 0
         ? order.closedWonArray[order.closedWonArray.length - 1]
         : null;
 
     const poDocumentPath = latestPoEntry?.salesPoDocument || "";
-    console.log("poDocumentPath:", poDocumentPath);
 
-
-    // 4.5. VehicleType names lookup
     const vehicleTypeIds = [
       ...new Set(
         order.bookingItems
@@ -395,9 +382,9 @@ exports.sendProjectMail = async (req, res) => {
       vehicleTypeMap[vt._id.toString()] = vt.typeName;
     });
 
-    // 5. BookingItems format
+
     const orders = order.bookingItems.map((item) => ({
-      // vehicleType: item.vehicleType || "",
+
       vehicleType: vehicleTypeMap[item.vehicleType?.toString()] || item.vehicleType || "",
       vehicleModel: item.vehicleModel || "",
       campaignType:
@@ -433,7 +420,7 @@ exports.sendProjectMail = async (req, res) => {
       extraHours: item.extraHourCost || 0,
       extraHourCost: item.extraHourCost || 0,
       promotorCharges: item.promoterCost || 0,
-      additionalCharges:item.additionalNet || 0,
+      additionalCharges: item.additionalNet || 0,
       subtotal: item.subtotal || 0,
       totalAmount: item.totalAmount || 0,
       needPromoter: item.needPromoter || false,
@@ -445,10 +432,9 @@ exports.sendProjectMail = async (req, res) => {
       promoterQuantity: item.promoterQuantity || 0,
     }));
 
-    // 6. FormData build பண்ணு — எப்பவும் form-data-ஆ அனுப்பு
+
     const form = new FormData();
 
-    // --- Scalar fields ---
     const scalarFields = {
       mailtype: "roadshowprojector",
       subject:
@@ -494,13 +480,12 @@ exports.sendProjectMail = async (req, res) => {
     toArr.forEach((email) => form.append("to[]", email));
     ccArr.forEach((email) => form.append("cc[]", email));
 
-    // --- orders[] JSON string ---
+
     form.append("orders", JSON.stringify(orders));
 
-    // --- PO Document attach ---
+
     if (poDocumentPath) {
       if (poDocumentPath.startsWith("http")) {
-        // Cloud URL → download பண்ணி stream-ஆ attach
         const fileResponse = await axios.get(poDocumentPath, {
           responseType: "stream",
         });
@@ -514,7 +499,6 @@ exports.sendProjectMail = async (req, res) => {
             "application/octet-stream",
         });
       } else {
-        // Local file path → stream-ஆ attach
         const absolutePath = path.join(
           __dirname,
           "../../public",
@@ -530,14 +514,27 @@ exports.sendProjectMail = async (req, res) => {
       }
     }
 
-    // 7. Mail API call
+
     const mailResponse = await axios.post(
       process.env.CODECREATION_API_URL,
       form,
       { headers: form.getHeaders() }
     );
 
-    // 8. Mail log DB-ல் save பண்ணு
+
+    if (
+      mailResponse.data?.status !== "success"
+    ) {
+      return errorResponse(
+        res,
+        mailResponse.data?.message || "Mail sending failed",
+        null,
+        500
+      );
+    }
+
+
+
     const sentBy =
       req.user?.username || order.salesHandlerName || "Admin";
 
