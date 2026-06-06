@@ -74,5 +74,7 @@ router.get("/pipeline/order/:orderId", protect, ctrl.getSalesOrderById);
 router.patch("/pipeline/:id", protect, salesUpload, ctrl.updateSalesPipeline);
 router.post("/pipeline/:id/documents", protect, salesUpload, ctrl.uploadStageDocument);
 router.post("/pipeline/:id/send-project-mail", ctrl.sendProjectMail);
+router.post("/pipeline/:id/save-project-code", ctrl.saveProjectCode);
+router.patch("/pipeline/:id/enquiry-name", protect, ctrl.saveEnquiryName);
 
 module.exports = router;

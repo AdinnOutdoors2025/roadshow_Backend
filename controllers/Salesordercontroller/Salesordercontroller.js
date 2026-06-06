@@ -34,7 +34,7 @@ const getFilePath = (file) => {
 
 exports.getSalesPipeline = async (req, res) => {
   try {
-    const orders = await Order.find({ pipelineStatus: "newOrder" })
+    const orders = await Order.find({ pipelineStatus: "todo" })
       .sort({ createdAt: -1 })
       .lean();
 
@@ -93,6 +93,19 @@ exports.updateSalesPipeline = async (req, res) => {
     if (!order) return errorResponse(res, "Sales order not found", null, 404);
 
     const oldStage = order.salesPipelineStatus;
+
+   
+    const LOCKED_BACK_STAGES = ["enquiry", "needAnalysis"];
+    const oldIndex = SALES_STAGE_ORDER.indexOf(oldStage);
+    const newIndex = SALES_STAGE_ORDER.indexOf(salesPipelineStatus);
+    if (LOCKED_BACK_STAGES.includes(salesPipelineStatus) && newIndex < oldIndex) {
+      return errorResponse(
+        res,
+        `Cannot move back to "${salesPipelineStatus}" stage once the order has progressed.`,
+        null,
+        400
+      );
+    }
     const isStaffAdmin = Number(req.user.isAdmin) === 0;
     // const movedBy = order.salesHandlerName || "Admin";
     const movedBy = req.user?.username || order.salesHandlerName || "Admin";
@@ -250,6 +263,30 @@ exports.uploadStageDocument = async (req, res) => {
 
     const uploadedBy = order.salesHandlerName;
     const uploadedFiles = req.files || [];
+
+
+    if (stage === "enquiry") {
+      const enquiryFile = uploadedFiles.find(
+        (f) => f.fieldname === "enquiryDocument"
+      );
+      const enquiryNotes = req.body.enquiryNotes || "";
+      const enquiryName = req.body.enquiryName || "";
+      const docPath = getFilePath(enquiryFile);
+      if (!docPath && !enquiryNotes)
+        return errorResponse(res, "Provide document or notes", null, 400);
+     
+      if (enquiryName.trim()) {
+        order.enquiryName = enquiryName.trim();
+      }
+      order.enquiryArray.push({
+        document: docPath,
+        notes: enquiryNotes.trim(),
+        uploadedBy: enquiryName.trim() || "Guest",
+        uploadedAt: new Date(),
+      });
+    }
+
+   
 
     if (stage === "needAnalysis") {
       const analysisFile = uploadedFiles.find(
@@ -549,6 +586,17 @@ exports.sendProjectMail = async (req, res) => {
       isResend,
     });
 
+    order.salesPipelineLogs.push({
+      fromStage: order.salesPipelineStatus,
+      toStage: order.salesPipelineStatus,
+      movedBy: sentBy,
+      handlerName: order.salesHandlerName || "",
+      movedAt: new Date(),
+      notes: isResend
+        ? `Project mail resent to ${toArr.join(", ")}`
+        : `Project mail sent to ${toArr.join(", ")}`,
+    });
+
     await order.save();
 
     return successResponse(res, "Project creation mail sent successfully", {
@@ -561,6 +609,71 @@ exports.sendProjectMail = async (req, res) => {
       "sendProjectMail error:",
       error?.response?.data || error.message
     );
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.saveProjectCode = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { projectCode, estimationCode } = req.body;
+
+    if (!projectCode?.trim())
+      return errorResponse(res, "Project code is required", null, 400);
+    if (!estimationCode?.trim())
+      return errorResponse(res, "Estimation code is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const savedBy = req.user?.username || order.salesHandlerName || "Admin";
+
+    order.projectCodeArray.push({
+      projectCode:    projectCode.trim(),
+      estimationCode: estimationCode.trim(),
+      savedBy,
+      savedAt: new Date(),
+    });
+
+    order.salesPipelineLogs.push({
+      fromStage:   order.salesPipelineStatus,
+      toStage:     order.salesPipelineStatus,
+      movedBy:     savedBy,
+      handlerName: order.salesHandlerName || "",
+      movedAt:     new Date(),
+      notes: `Project Code: ${projectCode.trim()} | Estimation Code: ${estimationCode.trim()}`,
+    });
+
+    await order.save();
+
+    return successResponse(res, "Project code saved successfully", {
+      projectCodeArray: order.projectCodeArray,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.saveEnquiryName = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { enquiryName } = req.body;
+
+    if (!enquiryName?.trim())
+      return errorResponse(res, "Enquiry name is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    order.enquiryName = enquiryName.trim();
+    await order.save();
+
+    return successResponse(res, "Enquiry name saved", {
+      enquiryName: order.enquiryName,
+    });
+  } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
 };

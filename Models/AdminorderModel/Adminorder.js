@@ -1,7 +1,7 @@
 
 
-const mongoose = require("mongoose");
 
+const mongoose = require("mongoose");
 
 const additionalChargeSchema = new mongoose.Schema(
   {
@@ -79,32 +79,76 @@ const bookingItemSchema = new mongoose.Schema({
   additionalFields: { type: [additionalChargeSchema], default: [] },
 });
 
-const poDocumentLogSchema = new mongoose.Schema(
+// ── NEW: Project Execution Document Schema ─────────────────────────────────
+const projectExecutionDocSchema = new mongoose.Schema(
   {
-    poDocument: { type: String, required: true },
-    poDate: { type: Date, required: true },
-    poNotes: { type: String, default: "" },
-    uploadedBy: { type: String },
-    uploadedAt: { type: Date, default: Date.now },
-  },
-  { _id: true }
-);
-
-const paymentStageFirstSchema = new mongoose.Schema(
-  {
-    advancePayment: { type: Number, required: true },
-    paymentProofDocument: { type: String, required: true },
-    paymentDate: { type: Date, required: true },
-    paymentVerification: { type: String, required: true },
-    paymentNotes: { type: String, default: "" },
-    uploadedBy: { type: String },
+    document: { type: String, default: "" },
+    notes: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
     uploadedAt: { type: Date, default: Date.now },
   },
   { _id: true }
 );
 
 
+const todoDocSchema = new mongoose.Schema(
+  {
+    document: { type: String, default: "" },     
+    notes: { type: String, default: "" },         
+    uploadedBy: { type: String, default: "" },    
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }  
+);
 
+
+const projectCodeSchema = new mongoose.Schema(
+  {
+    projectCode: { type: String, required: true },
+    estimationCode: { type: String, required: true },
+    savedBy: { type: String, default: "" },
+    savedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+const onRoadCommentSchema = new mongoose.Schema(
+  {
+    document: { type: String, default: "" },
+    notes: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+
+
+const projectMailLogSchema = new mongoose.Schema(
+  {
+    sentTo: { type: String, default: "" },
+    sentCc: { type: String, default: "" },
+    subject: { type: String, default: "" },
+    sentBy: { type: String, default: "" },
+    sentAt: { type: Date, default: Date.now },
+    isResend: { type: Boolean, default: false },
+  },
+  { _id: true }
+);
+
+const enquiryDocSchema = new mongoose.Schema(
+  {
+    document: { type: String, default: "" },
+    notes: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+
+
+// ── Sales Pipeline Schemas (kept as-is) ───────────────────────────────────
 const needAnalysisDocSchema = new mongoose.Schema(
   {
     analysisDocument: { type: String, default: "" },
@@ -114,6 +158,7 @@ const needAnalysisDocSchema = new mongoose.Schema(
   },
   { _id: true }
 );
+
 
 
 const proposalDocSchema = new mongoose.Schema(
@@ -169,38 +214,16 @@ const salesPipelineLogSchema = new mongoose.Schema(
   { _id: false }
 );
 
-
-
-const projectCodeSchema = new mongoose.Schema({
-  projectCode:    { type: String, required: true },
-  estimationCode: { type: String, required: true },
-  savedBy:        { type: String, default: "" },
-  savedAt:        { type: Date, default: Date.now },
-}, { _id: true });
-
-const projectMailLogSchema = new mongoose.Schema(
-  {
-    sentTo:    { type: String, default: "" },
-    sentCc:    { type: String, default: "" },
-    subject:   { type: String, default: "" },
-    sentBy:    { type: String, default: "" },
-    sentAt:    { type: Date, default: Date.now },
-    isResend:  { type: Boolean, default: false },
-  },
-  { _id: true }
-);
-
-
-
 const orderSchema = new mongoose.Schema(
   {
     orderId: { type: String, unique: true },
-
     userId: { type: String, required: false },
     customerId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     name: { type: String, required: true },
     phone: { type: String, required: true },
     gstVerifyDetails: { type: [gstVerifyDetailSchema], default: [] },
+
+    // 0 = individual, 1 = organization
     customerType: { type: Number, enum: [0, 1], default: 1 },
     address: String,
     email: String,
@@ -225,15 +248,12 @@ const orderSchema = new mongoose.Schema(
       default: "Pending",
     },
 
- 
+    // ── Admin Pipeline ────────────────────────────────────────────
+    // SIMPLIFIED: todo → projectCodeCreation → projectExecution → onRoad → ...
     pipelineStatus: {
       type: String,
       enum: [
-        "newOrder",
-        "inProgress",
-        "customerConfirmation",
-        "waitingForPO",
-        "paymentStage1",
+        "todo",
         "projectCodeCreation",
         "projectExecution",
         "onRoad",
@@ -245,10 +265,11 @@ const orderSchema = new mongoose.Schema(
         "closedWon",
         "closedLost",
       ],
-      default: "newOrder",
+      default: "todo",
     },
 
     handlerName: String,
+    todoUploadedBy: { type: String, default: "" },
     reasonDescription: String,
 
     pipelineLogs: [
@@ -258,11 +279,9 @@ const orderSchema = new mongoose.Schema(
         movedBy: String,
         movedAt: { type: Date, default: Date.now },
         handlerName: String,
+        notes: { type: String, default: "" },
       },
     ],
-
-    poDocumentLogs: { type: [poDocumentLogSchema], default: [] },
-    paymentStageFirst: { type: [paymentStageFirstSchema], default: [] },
 
     negotiationLogs: [
       {
@@ -277,7 +296,35 @@ const orderSchema = new mongoose.Schema(
 
     grandNegotiationTotal: { type: Number, default: null },
 
-  
+
+    projectExecutionArray: { type: [projectExecutionDocSchema], default: [] },
+    todoArray: { type: [todoDocSchema], default: [] }, 
+
+    onRoadExecutionArray: [
+      {
+        document: { type: String, default: "" },
+        notes: { type: String, default: "" },
+        gatepassPhoto: { type: String, required: false, default: "" },
+        vehicleFrontPhoto: { type: String, default: "" },
+        vehicleBackPhoto: { type: String, default: "" },
+        vehicleLeftPhoto: { type: String, default: "" },
+        vehicleRightPhoto: { type: String, default: "" },
+        driverName: { type: String, required: true, default: "" },
+        driverPhone: { type: String, required: true, default: "" },
+        driverAlternatePhone: { type: String, default: "" },
+        vehicleRegistrationNumber: { type: String, required: true, default: "" },
+        uploadedBy: { type: String, default: "" },
+        uploadedAt: { type: Date, default: Date.now },
+      }
+    ],
+
+    // ── Project Code ──────────────────────────────────────────────
+
+    onRoadCommentsArray: { type: [onRoadCommentSchema], default: [] },
+    projectCodeArray: { type: [projectCodeSchema], default: [] },
+    projectMailLogs: { type: [projectMailLogSchema], default: [] },
+
+    // ── Sales Pipeline (unchanged) ────────────────────────────────
     salesPipelineStatus: {
       type: String,
       enum: [
@@ -291,19 +338,16 @@ const orderSchema = new mongoose.Schema(
       ],
       default: "enquiry",
     },
-
+    enquiryName: { type: String, default: "" },
     salesHandlerName: { type: String, default: "" },
-
     salesNegotiationFinalAmount: { type: Number, default: null },
-
-    needAnalysisArray:     { type: [needAnalysisDocSchema],     default: [] },
-    proposalArray:         { type: [proposalDocSchema],          default: [] },
-    salesNegotiationArray: { type: [salesNegotiationDocSchema],  default: [] },
-    closedWonArray:        { type: [closedWonDocSchema],         default: [] },
-    closedLostArray:       { type: [closedLostDocSchema],        default: [] },
-    salesPipelineLogs:     { type: [salesPipelineLogSchema],     default: [] },
-    projectCodeArray: { type: [projectCodeSchema], default: [] },
-    projectMailLogs: { type: [projectMailLogSchema], default: [] },
+    enquiryArray: { type: [enquiryDocSchema], default: [] },
+    needAnalysisArray: { type: [needAnalysisDocSchema], default: [] },
+    proposalArray: { type: [proposalDocSchema], default: [] },
+    salesNegotiationArray: { type: [salesNegotiationDocSchema], default: [] },
+    closedWonArray: { type: [closedWonDocSchema], default: [] },
+    closedLostArray: { type: [closedLostDocSchema], default: [] },
+    salesPipelineLogs: { type: [salesPipelineLogSchema], default: [] },
   },
   { timestamps: true }
 );
