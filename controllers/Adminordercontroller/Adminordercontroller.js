@@ -1,15 +1,16 @@
 
 
+
+/* eslint-disable */
 const path = require("path");
 const Order = require("../../Models/AdminorderModel/Adminorder");
-const User = require("../../Models/MainLoginSchema");
 const Package = require("../../Models/PackageManagementModel/packagemanagement");
 require("dotenv").config();
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const { successResponse, errorResponse } = require("../../Utils/response");
 
 
-// Format: 20260503AO#1
+
 async function generateAdminOrderId() {
   const today = new Date();
   const year = today.getFullYear();
@@ -24,9 +25,7 @@ async function generateAdminOrderId() {
   return `${prefix}AO#${count + 1}`;
 }
 
-
-
-// ── Pricing calculation helper ─────────────────────────────────
+// ── Pricing Calculation ────────────────────────────────────────────────────
 function calcPricingBackend(pkg, v) {
   const from = new Date(v.fromDate);
   const to = new Date(v.toDate);
@@ -54,8 +53,7 @@ function calcPricingBackend(pkg, v) {
   }, 0);
 
   const subtotal =
-    rentalCost + promoterCost + rtoCost +
-    extraKmCost + extraHourCost + additionalAdds;
+    rentalCost + promoterCost + rtoCost + extraKmCost + extraHourCost + additionalAdds;
 
   const MAX_DISCOUNT_PCT = parseFloat(process.env.MAX_DISCOUNT_PERCENT || "15");
   const maxDiscountAmount = Math.floor(subtotal * (MAX_DISCOUNT_PCT / 100));
@@ -70,7 +68,6 @@ function calcPricingBackend(pkg, v) {
 
   const additionalNet = additionalAdds - additionalCuts;
   const totalAmount = Math.max(subtotal - additionalCuts, 0);
-  const taxableAmount = totalAmount;
 
   return {
     totalDays,
@@ -91,66 +88,64 @@ function calcPricingBackend(pkg, v) {
     additionalCuts,
     additionalNet,
     subtotal,
-    taxableAmount,
+    taxableAmount: totalAmount,
     totalAmount,
   };
 }
 
+
+const STAGE_ORDER = [
+  "todo",
+  "projectExecution",
+  "onRoad",
+  "campaignRunning",
+  "vehicleUnavailable",
+  "clientClosure",
+  "invoiceGeneration",
+  "paymentStage2",
+  "closedWon",
+  "closedLost",
+];
+
+// ── Helper: file URL ───────────────────────────────────────────────────────
+function getFileUrl(file) {
+  if (!file) return null;
+  if (file.location) return file.location; 
+  return `/uploads/${path.basename(file.path)}`;
+}
+
+
 exports.createAdminOrder = async (req, res) => {
   try {
     const {
-      customerName,
-      customerPhone,
-      customerAddress,
-      customerEmail,
-      // ── NEW fields ──
-      customerCategory,
-      companyName,
-      clientName,
-      designation,
-      gstNumber,
+      customerName, customerPhone, customerAddress, customerEmail,
+      customerCategory, companyName, clientName, designation, gstNumber,
     } = req.body;
 
-    // ── Validate required fields based on category ──
     const category = customerCategory || "individual";
 
     if (category === "individual") {
-      if (!customerName?.trim())
-        return errorResponse(res, "Customer name is required", null, 400);
-      if (!customerPhone)
-        return errorResponse(res, "Phone number is required", null, 400);
+      if (!customerName?.trim()) return errorResponse(res, "Customer name is required", null, 400);
+      if (!customerPhone) return errorResponse(res, "Phone number is required", null, 400);
       if (!/^[6-9]\d{9}$/.test(customerPhone.toString().trim()))
         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
-      if (!customerEmail?.trim())
-        return errorResponse(res, "Email is required", null, 400);
-
+      if (!customerEmail?.trim()) return errorResponse(res, "Email is required", null, 400);
     } else {
-      // organization
-      if (!companyName?.trim())
-        return errorResponse(res, "Company name is required", null, 400);
-      if (!clientName?.trim())
-        return errorResponse(res, "Client name is required", null, 400);
-      if (!designation?.trim())
-        return errorResponse(res, "Designation is required", null, 400);
-      if (!customerPhone)
-        return errorResponse(res, "Phone number is required", null, 400);
+      if (!companyName?.trim()) return errorResponse(res, "Company name is required", null, 400);
+      if (!clientName?.trim()) return errorResponse(res, "Client name is required", null, 400);
+      if (!designation?.trim()) return errorResponse(res, "Designation is required", null, 400);
+      if (!customerPhone) return errorResponse(res, "Phone number is required", null, 400);
       if (!/^[6-9]\d{9}$/.test(customerPhone.toString().trim()))
         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
-      if (!customerEmail?.trim())
-        return errorResponse(res, "Email is required", null, 400);
-      if (!gstNumber?.trim())
-        return errorResponse(res, "GST number is required", null, 400);
+      if (!customerEmail?.trim()) return errorResponse(res, "Email is required", null, 400);
+      if (!gstNumber?.trim()) return errorResponse(res, "GST number is required", null, 400);
     }
 
-    // ── Parse vehicles ──
     const vehicles = [];
     let idx = 0;
     while (req.body[`vehicle_${idx}`] !== undefined) {
-      try {
-        vehicles.push(JSON.parse(req.body[`vehicle_${idx}`]));
-      } catch {
-        return errorResponse(res, `vehicle_${idx} is not valid JSON`, null, 400);
-      }
+      try { vehicles.push(JSON.parse(req.body[`vehicle_${idx}`])); }
+      catch { return errorResponse(res, `vehicle_${idx} is not valid JSON`, null, 400); }
       idx++;
     }
 
@@ -161,10 +156,8 @@ exports.createAdminOrder = async (req, res) => {
 
     for (let i = 0; i < vehicles.length; i++) {
       const v = vehicles[i];
-
       const missing = [];
       if (!v.packageId) missing.push("packageId");
-      // if (!v.bookingFor) missing.push("bookingFor");
       if (!v.campaignType) missing.push("campaignType");
       if (v.campaignType === "Other" && !v.otherCampaignType) missing.push("otherCampaignType");
       if (!v.fromDate) missing.push("fromDate");
@@ -174,7 +167,6 @@ exports.createAdminOrder = async (req, res) => {
       if (!v.fromLocation) missing.push("fromLocation");
       if (!v.toLocation) missing.push("toLocation");
       if (!v.quantity || Number(v.quantity) < 1) missing.push("quantity");
-      // if (v.bookingFor === "Agency" && !v.gstNumber?.trim()) missing.push("gstNumber (required for Agency)");
       if (missing.length > 0)
         return errorResponse(res, `Vehicle ${i + 1}: Missing fields — ${missing.join(", ")}`, null, 400);
 
@@ -185,8 +177,6 @@ exports.createAdminOrder = async (req, res) => {
       if (!pkg) return errorResponse(res, `Vehicle ${i + 1}: Package not found`, null, 404);
       if (!pkg.isActive) return errorResponse(res, `Vehicle ${i + 1}: Package "${pkg.vehicleModel}" is inactive`, null, 400);
 
-      // if (v.needPromoter && !pkg.promoterAvailable)
-      //   return errorResponse(res, `Vehicle ${i + 1}: Promoter not available for "${pkg.vehicleModel}"`, null, 400);
       if (v.needPromoter && !v.promoterType)
         return errorResponse(res, `Vehicle ${i + 1}: promoterType required`, null, 400);
       if (v.needPromoter && v.promoterType === "Other" && !v.otherPromoterType)
@@ -206,35 +196,32 @@ exports.createAdminOrder = async (req, res) => {
         const ct = await CampaignType.findById(v.campaignType).catch(() => null);
         if (ct) { campaignTypeRef = ct._id; campaignTypeName = ct.name; }
       } else if (v.campaignType === "Other" && v.otherCampaignType?.trim()) {
-        let ct = await CampaignType.findOne({ name: { $regex: `^${v.otherCampaignType.trim()}$`, $options: "i" } });
+        let ct = await CampaignType.findOne({
+          name: { $regex: `^${v.otherCampaignType.trim()}$`, $options: "i" },
+        });
         if (!ct) ct = await CampaignType.create({ name: v.otherCampaignType.trim() });
         campaignTypeRef = ct._id;
         campaignTypeName = ct.name;
       }
 
-      const vehicleGstNumber = v.bookingFor === "Agency" ? (v.gstNumber || "").trim() : "";
-
       const uploadedFiles = req.files || [];
       const campaignImages = uploadedFiles
         .filter((f) => f.fieldname === `campaignImages_${i}`)
-        .map((f) => `/uploads/${path.basename(f.path)}`);
+        .map((f) => getFileUrl(f));
       const campaignVideos = uploadedFiles
         .filter((f) => f.fieldname === `campaignVideos_${i}`)
-        .map((f) => `/uploads/${path.basename(f.path)}`);
-
-      console.log(`Vehicle ${i + 1} — Images:`, campaignImages, "Videos:", campaignVideos);
+        .map((f) => getFileUrl(f));
 
       bookingItems.push({
         packageId: pkg._id,
         vehicleType: pkg.vehicleType,
         vehicleModel: pkg.vehicleModel,
         bookingFor: v.bookingFor,
-        gstNumber: vehicleGstNumber,
+        gstNumber: v.bookingFor === "Agency" ? (v.gstNumber || "").trim() : "",
         campaignType: campaignTypeName,
         campaignTypeRef,
         otherCampaignType: v.campaignType === "Other" ? (v.otherCampaignType || "") : "",
         promoterGender: v.needPromoter ? (v.promoterGender || "") : "",
-        // promoterLanguage: v.needPromoter ? (v.promoterLanguage || "") : "",
         promoterLanguage: v.needPromoter ? (v.promoterLanguage || []) : [],
         promoterQuantity: v.needPromoter ? (Number(v.promoterQuantity) || 0) : 0,
         fromDate: new Date(v.fromDate),
@@ -276,24 +263,15 @@ exports.createAdminOrder = async (req, res) => {
     const taxableAmount = bookingItems.reduce((s, item) => s + item.totalAmount, 0);
     const grandGst = Math.floor(taxableAmount * 0.18);
     const grandTotal = taxableAmount + grandGst;
-
     const orderId = await generateAdminOrderId();
 
-    // ── Determine display name ──
-    // individual → customerName, organization → clientName
-    const orderName = category === "individual"
-      ? (customerName || "").trim()
-      : (clientName || "").trim();
+    const orderName =
+      category === "individual" ? (customerName || "").trim() : (clientName || "").trim();
 
-
-    // ── gstVerifyDetails parse ──
     let gstVerifyDetails = [];
     if (req.body.gstVerifyDetails) {
-      try {
-        gstVerifyDetails = JSON.parse(req.body.gstVerifyDetails);
-      } catch {
-        gstVerifyDetails = [];
-      }
+      try { gstVerifyDetails = JSON.parse(req.body.gstVerifyDetails); }
+      catch { gstVerifyDetails = []; }
     }
 
     const order = new Order({
@@ -303,7 +281,6 @@ exports.createAdminOrder = async (req, res) => {
       address: customerAddress || "",
       gstVerifyDetails,
       email: customerEmail || "",
-      // 0 = individual, 1 = organization
       customerType: category === "individual" ? 0 : 1,
       customerCategory: category,
       companyName: category === "organization" ? (companyName || "").trim() : "",
@@ -315,21 +292,19 @@ exports.createAdminOrder = async (req, res) => {
       grandTotal,
       grandGst,
       orderStatus: "Pending",
-      pipelineStatus: "newOrder",
-      pipelineLogs: [{
-        fromStage: null,
-        toStage: "newOrder",
-        movedBy: "Admin",
-        movedAt: new Date(),
-      }],
+      pipelineStatus: "todo",
+      pipelineLogs: [
+        {
+          fromStage: null,
+          toStage: "todo",
+          movedBy: "Admin",
+          movedAt: new Date(),
+        },
+      ],
     });
 
     await order.save();
-
-    return successResponse(res, "Admin order created successfully", {
-      orderId: order.orderId,
-      order,
-    }, 201);
+    return successResponse(res, "Admin order created successfully", { orderId: order.orderId, order }, 201);
   } catch (error) {
     return errorResponse(res, error.message);
   }
@@ -339,7 +314,6 @@ exports.createAdminOrder = async (req, res) => {
 exports.getAllOrders = async (req, res) => {
   try {
     const { pipelineStatus, orderStatus, search, page = 1, limit = 50 } = req.query;
-
     const filter = {};
     if (pipelineStatus && pipelineStatus !== "all") filter.pipelineStatus = pipelineStatus;
     if (orderStatus && orderStatus !== "all") filter.orderStatus = orderStatus;
@@ -351,27 +325,21 @@ exports.getAllOrders = async (req, res) => {
         { phone: { $regex: q, $options: "i" } },
       ];
     }
-
     const skip = (Number(page) - 1) * Number(limit);
     const total = await Order.countDocuments(filter);
-
     const orders = await Order.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit))
       .select(
-        "orderId userId customerId name phone address email customerType poDocumentLogs paymentStageFirst " +
+        "orderId name phone address email customerType " +
         "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
-        "isAdminCreated handlername reasonDescription " +
-        "bookingItems pipelineLogs negotiationLogs createdAt updatedAt " +
-        "customerCategory companyName clientName designation gstNumber"
+        "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
+        "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
+       "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray projectMailLogs todoArray todoUploadedBy "
       );
-
     return successResponse(res, "Orders fetched successfully", {
-      total,
-      page: Number(page),
-      totalPages: Math.ceil(total / Number(limit)),
-      orders,
+      total, page: Number(page), totalPages: Math.ceil(total / Number(limit)), orders,
     });
   } catch (error) {
     return errorResponse(res, error.message);
@@ -382,16 +350,14 @@ exports.getAllOrders = async (req, res) => {
 exports.getOrderById = async (req, res) => {
   try {
     const order = await Order.findOne({ orderId: req.params.orderId });
-    if (!order)
-      return errorResponse(res, "Order not found", null, 404);
-
+    if (!order) return errorResponse(res, "Order not found", null, 404);
     return successResponse(res, "Order fetched successfully", { order });
   } catch (error) {
     return errorResponse(res, error.message);
   }
 };
 
-
+// ── Campaign Types ─────────────────────────────────────────────────────────
 exports.getCampaignTypes = async (req, res) => {
   try {
     const types = await CampaignType.find().sort({ createdAt: -1 });
@@ -401,19 +367,12 @@ exports.getCampaignTypes = async (req, res) => {
   }
 };
 
-
 exports.createCampaignType = async (req, res) => {
   try {
     const { name } = req.body;
-    if (!name?.trim())
-      return errorResponse(res, "Campaign type name required", null, 400);
-
-    const existing = await CampaignType.findOne({
-      name: { $regex: `^${name.trim()}$`, $options: "i" },
-    });
-    if (existing)
-      return successResponse(res, "Campaign type already exists", { type: existing, alreadyExists: true });
-
+    if (!name?.trim()) return errorResponse(res, "Campaign type name required", null, 400);
+    const existing = await CampaignType.findOne({ name: { $regex: `^${name.trim()}$`, $options: "i" } });
+    if (existing) return successResponse(res, "Campaign type already exists", { type: existing, alreadyExists: true });
     const type = await CampaignType.create({ name: name.trim() });
     return successResponse(res, "Campaign type created successfully", { type }, 201);
   } catch (error) {
@@ -421,23 +380,6 @@ exports.createCampaignType = async (req, res) => {
   }
 };
 
-const STAGE_ORDER = [
-  "todo",
-  "inProgress",
-  "customerConfirmation",
-  "waitingForPO",
-  "paymentStage1",
-  "projectCodeCreation",
-  "projectExecution",
-  "onRoad",
-  "campaignRunning",
-  "vehicleUnavailable",
-  "clientClosure",
-  "invoiceGeneration",
-  "paymentStage2",
-  "closedWon",
-  "closedLost",
-];
 
 
 exports.getOrdersByPipeline = async (req, res) => {
@@ -448,43 +390,39 @@ exports.getOrdersByPipeline = async (req, res) => {
         "orderId name phone customerType pipelineStatus orderStatus " +
         "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
         "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
-        "companyName clientName designation email address poDocumentLogs paymentStageFirst " +
-        "customerCategory gstNumber"
+        "companyName clientName designation email address gstNumber customerCategory " +
+      "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy "
       );
+
+    const filteredOrders = orders.filter(
+      (o) => o.projectCodeArray && o.projectCodeArray.length === 1
+    );
 
     const grouped = {};
     STAGE_ORDER.forEach((s) => (grouped[s] = []));
-    orders.forEach((o) => {
+
+    filteredOrders.forEach((o) => {
       const stage = o.pipelineStatus || "todo";
-      if (grouped[stage]) grouped[stage].push(o);
+      const targetStage = stage === "newOrder" ? "todo" : stage;
+      if (grouped[targetStage]) grouped[targetStage].push(o);
       else grouped["todo"].push(o);
     });
 
-    return successResponse(res, "Pipeline orders fetched", { grouped, stages: STAGE_ORDER });
+    return successResponse(res, "Pipeline orders fetched", { 
+      grouped, 
+      stages: STAGE_ORDER,
+      totalFilteredOrders: filteredOrders.length 
+    });
   } catch (error) {
     return errorResponse(res, error.message);
   }
 };
 
+
 exports.updateOrderPipeline = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const {
-      pipelineStatus: rawPipelineStatus,
-      handlerName,
-      customerType,
-      discountType,
-      discountValue,
-      discountNotes,
-      poDate,
-      poNotes,
-      advancePayment,
-      paymentDate,
-      paymentVerification,
-      paymentNotes,
-    } = req.body;
-
-    let pipelineStatus = rawPipelineStatus;
+    const { pipelineStatus, handlerName } = req.body;
 
     if (!STAGE_ORDER.includes(pipelineStatus))
       return errorResponse(res, "Invalid pipeline stage", null, 400);
@@ -493,127 +431,34 @@ exports.updateOrderPipeline = async (req, res) => {
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
     const oldStage = order.pipelineStatus;
+    const isStaff = Number(req.user.isAdmin) === 0;
 
-    if (pipelineStatus !== "inProgress" && pipelineStatus !== "closedLost") {
-      const hasInProgress = order.pipelineLogs.some(
-        log => log.toStage === "inProgress"
+
+  const LOCKED_BACK_STAGES = ["todo", "projectExecution"];
+    const oldIndex = STAGE_ORDER.indexOf(oldStage);
+    const newIndex = STAGE_ORDER.indexOf(pipelineStatus);
+    if (LOCKED_BACK_STAGES.includes(pipelineStatus) && newIndex < oldIndex) {
+      return errorResponse(
+        res,
+        `Cannot move back to "${pipelineStatus}" stage once the order has progressed.`,
+        null,
+        400
       );
-      if (!hasInProgress && order.pipelineStatus === "todo") {
-        return errorResponse(
-          res,
-          "Order must pass through 'In Progress' stage first",
-          null,
-          400
-        );
-      }
     }
+  
+    const movedBy = req.user?.username || order.handlerName || "Admin";
 
-    const movedByFinal = (() => {
-      if (Number(req.user.isAdmin) === 0) {
-        return req.user.username;
-      }
-      if (pipelineStatus === "inProgress") {
-        return "Admin";
-      }
-      return order.handlerName || "Admin";
-    })();
-
-    if (pipelineStatus === "inProgress") {
-      const isStaffAdmin = Number(req.user.isAdmin) === 0;
-      if (isStaffAdmin) {
+    
+      if (oldStage === "todo" && pipelineStatus === "projectExecution") {
+      if (isStaff) {
+       
         order.handlerName = req.user.username;
       } else {
+       
         if (!handlerName?.trim())
           return errorResponse(res, "Handler name is required", null, 400);
         order.handlerName = handlerName.trim();
       }
-      if (order.customerType === null || order.customerType === undefined) {
-        if (customerType === undefined || customerType === null)
-          return errorResponse(res, "Customer type is required", null, 400);
-        if (![0, 1].includes(Number(customerType)))
-          return errorResponse(res, "customerType must be 0 or 1", null, 400);
-        order.customerType = Number(customerType);
-      }
-    }
-
-    if (pipelineStatus === "waitingForPO") {
-      const poFile = req.files?.find((f) => f.fieldname === "poDocument");
-      if (poFile) {
-        if (!poDate)
-          return errorResponse(res, "PO date is required", null, 400);
-
-        const poUrl = `/uploads/${path.basename(poFile.path)}`;
-        order.poDocumentLogs.push({
-          poDocument: poUrl,
-          poDate: new Date(poDate),
-          poNotes: (poNotes || "").trim(),
-          uploadedBy: movedByFinal,
-          uploadedAt: new Date(),
-        });
-
-        const { moveToStage } = req.body;
-        if (moveToStage === "projectCodeCreation") {
-          pipelineStatus = "projectCodeCreation";
-        } else if (moveToStage === "paymentStage1") {
-          pipelineStatus = "paymentStage1";
-        }
-      }
-    }
-
-    const isRoutedFromPOToPayment = oldStage === "waitingForPO" && pipelineStatus === "paymentStage1";
-
-    if (pipelineStatus === "paymentStage1" && !isRoutedFromPOToPayment) {
-      const proofFile = req.files?.find((f) => f.fieldname === "paymentProofDocument");
-      if (proofFile) {
-        if (!advancePayment)
-          return errorResponse(res, "Advance payment amount is required", null, 400);
-
-        const proofUrl = `/uploads/${path.basename(proofFile.path)}`;
-        order.paymentStageFirst.push({
-          advancePayment: Number(advancePayment),
-          paymentProofDocument: proofUrl,
-          paymentDate: new Date(),
-          paymentVerification: "Verified",
-          paymentNotes: (paymentNotes || "").trim(),
-          uploadedBy: movedByFinal,
-          uploadedAt: new Date(),
-        });
-      }
-    }
-
-    const isRoutedFromPOToProjectCode = oldStage === "waitingForPO" && pipelineStatus === "projectCodeCreation";
-
-    if (pipelineStatus === "projectCodeCreation" && !isRoutedFromPOToProjectCode) {
-      const comingFromPaymentStage = oldStage === "paymentStage1";
-      if (order.customerType !== 0 && !comingFromPaymentStage)
-        return errorResponse(res, "New customers must go through Payment Stage 1 first", null, 400);
-    }
-
-    if (pipelineStatus === "customerConfirmation") {
-      const subtotal = order.bookingItems.reduce(
-        (sum, item) => sum + (item.totalAmount || 0), 0
-      );
-      let discountAmount = 0;
-      if (discountValue != null && discountValue !== "") {
-        if (discountType === "percent") {
-          const pct = Math.min(Number(discountValue) || 0, 100);
-          discountAmount = Math.floor((subtotal * pct) / 100);
-        } else {
-          discountAmount = Number(discountValue) || 0;
-        }
-      }
-      const previousTotalDiscount = (order.negotiationLogs || []).reduce(
-        (sum, log) => sum + (log.discountAmount || 0), 0
-      );
-      order.grandNegotiationTotal = subtotal - (previousTotalDiscount + discountAmount);
-      order.negotiationLogs.push({
-        fromStage: oldStage,
-        toStage: pipelineStatus,
-        movedBy: movedByFinal,
-        movedAt: new Date(),
-        discountAmount,
-        discountNotes: (discountNotes || "").trim(),
-      });
     }
 
     order.pipelineStatus = pipelineStatus;
@@ -621,15 +466,197 @@ exports.updateOrderPipeline = async (req, res) => {
     const logEntry = {
       fromStage: oldStage,
       toStage: pipelineStatus,
-      movedBy: movedByFinal,
+      movedBy,
       movedAt: new Date(),
     };
-    if (pipelineStatus === "inProgress") logEntry.handlerName = order.handlerName;
+
+    if (
+      pipelineStatus === "projectExecution"
+    ) {
+      logEntry.handlerName = order.handlerName || "";
+    }
 
     order.pipelineLogs.push(logEntry);
     await order.save();
 
     return successResponse(res, "Pipeline stage updated successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.uploadStageDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stage, notes } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    // const uploadedBy =
+    //   Number(req.user.isAdmin) === 0
+    //     ? req.user.username
+    //     : order.handlerName || req.user?.username || "Admin";
+
+    const uploadedBy =
+      (order.pipelineStatus === "todo" ? order.todoUploadedBy : null) ||
+      // req.body.uploadedBy?.trim() ||
+      (Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin");
+
+    const docFile = (req.files || []).find((f) => f.fieldname === "document");
+    const docUrl = docFile ? getFileUrl(docFile) : "";
+
+
+     if (stage === "todo" || order.pipelineStatus === "todo") {
+      if (docUrl || notes?.trim()) {
+        order.todoArray.push({
+          document: docUrl,
+          notes: (notes || "").trim(),
+          uploadedBy,
+          uploadedAt: new Date(),
+        });
+      }
+    }
+
+
+   
+    if (stage === "projectExecution" || order.pipelineStatus === "projectExecution") {
+   
+      if (docUrl || notes?.trim()) {
+        order.projectExecutionArray.push({
+          document: docUrl,
+          notes: (notes || "").trim(),
+          uploadedBy,
+          uploadedAt: new Date(),
+        });
+      }
+    }
+
+   if (stage === "onRoad" || order.pipelineStatus === "onRoad") {
+      if (docUrl || notes?.trim()) {
+        order.onRoadCommentsArray.push({
+          document: docUrl,
+          notes: (notes || "").trim(),
+          uploadedBy,
+          uploadedAt: new Date(),
+        });
+      }
+    }
+
+    await order.save();
+    return successResponse(res, "Document uploaded successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.submitOnRoadDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { 
+      driverName, 
+      driverPhone, 
+      driverAlternatePhone, 
+      vehicleRegistrationNumber 
+    } = req.body;
+
+    if (!driverName?.trim()) {
+      return errorResponse(res, "Driver name is required", null, 400);
+    }
+    if (!driverPhone?.trim()) {
+      return errorResponse(res, "Driver phone number is required", null, 400);
+    }
+    if (!vehicleRegistrationNumber?.trim()) {
+      return errorResponse(res, "Vehicle registration number is required", null, 400);
+    }
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return errorResponse(res, "Order not found", null, 404);
+    }
+
+    // ── File handling ────────────────────────────────────
+    const getFileUrl = (fieldName) => {
+      const file = (req.files || []).find(f => f.fieldname === fieldName);
+      if (!file) return "";
+      if (file.location) return file.location; 
+      return `/uploads/${path.basename(file.path)}`; 
+    };
+
+    const gatepassPhoto = getFileUrl("gatepassPhoto");
+    const vehicleFrontPhoto = getFileUrl("vehicleFrontPhoto");
+    const vehicleBackPhoto = getFileUrl("vehicleBackPhoto");
+    const vehicleLeftPhoto = getFileUrl("vehicleLeftPhoto");
+    const vehicleRightPhoto = getFileUrl("vehicleRightPhoto");
+
+    // const uploadedBy = req.user?.username || order.handlerName || "Admin";
+
+      const uploadedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+  
+    order.onRoadExecutionArray.push({
+      gatepassPhoto,
+      vehicleFrontPhoto,
+      vehicleBackPhoto,
+      vehicleLeftPhoto,
+      vehicleRightPhoto,
+      driverName: driverName.trim(),
+      driverPhone: driverPhone.trim(),
+      driverAlternatePhone: driverAlternatePhone?.trim() || "",
+      vehicleRegistrationNumber: vehicleRegistrationNumber.trim(),
+      uploadedBy,
+      uploadedAt: new Date(),
+    });
+
+  
+    const oldStage = order.pipelineStatus;
+    order.pipelineStatus = "onRoad";
+    
+    const logEntry = {
+      fromStage: oldStage,
+      toStage: "onRoad",
+      movedBy: uploadedBy,
+      movedAt: new Date(),
+    };
+    order.pipelineLogs.push(logEntry);
+    
+    await order.save();
+
+    return successResponse(res, "On Road details submitted and stage moved successfully", { 
+      order,
+      latestOnRoadEntry: order.onRoadExecutionArray[order.onRoadExecutionArray.length - 1]
+    });
+    
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.saveTodoUploadedBy = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { todoUploadedBy } = req.body;
+
+    if (!todoUploadedBy?.trim())
+      return errorResponse(res, "Name is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    order.todoUploadedBy = todoUploadedBy.trim();
+    await order.save();
+
+    return successResponse(res, "Todo uploader name saved", {
+      todoUploadedBy: order.todoUploadedBy,
+    });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
