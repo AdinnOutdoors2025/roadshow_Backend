@@ -411,3 +411,47 @@ app.put("/api/update-vehicles-json", async (req, res) => {
     });
   }
 });
+
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
+
+const awsUpload = multer({
+  storage: multer.memoryStorage(),
+});
+
+app.post("/uploadaws", awsUpload.single("file"), async (req, res) => {
+  try {
+    const file = req.file;
+
+    const fileName = `${Date.now()}-${file.originalname}`;
+
+    const command = new PutObjectCommand({
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: `uploads/${fileName}`,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+    });
+
+    await s3.send(command);
+
+    const fileUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/uploads/${fileName}`;
+
+    res.json({
+      success: true,
+      fileUrl,
+    });
+
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+})
