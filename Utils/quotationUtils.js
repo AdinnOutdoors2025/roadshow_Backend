@@ -7,21 +7,22 @@ import RoadshowQuotation from "../Models/RoadshowQuotationModel.js";
 import {
   spacesClient,
   DO_SPACES_BUCKET,
-   DO_SPACES_CDN_URL,
-
+  DO_SPACES_CDN_URL,
 } from "../config/digitalOceanSpaces.js";
 
-export const getCurrentIndiaDateParts = () => {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
+export const ROADSHOW_ESTIMATE_NUMBER_REGEX = /^EST-\d{5}$/;
 
-  const year = parts.find((part) => part.type === "year")?.value;
-  const month = parts.find((part) => part.type === "month")?.value;
-  const day = parts.find((part) => part.type === "day")?.value;
+const ROADSHOW_ESTIMATE_START_NUMBER = 30000;
+const ROADSHOW_ESTIMATE_MAX_NUMBER = 99999;
+
+export const getCurrentIndiaDateParts = () => {
+  const indiaDate = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
+  );
+
+  const year = indiaDate.getFullYear();
+  const month = String(indiaDate.getMonth() + 1).padStart(2, "0");
+  const day = String(indiaDate.getDate()).padStart(2, "0");
 
   return {
     dateOnly: `${year}-${month}-${day}`,
@@ -29,12 +30,55 @@ export const getCurrentIndiaDateParts = () => {
   };
 };
 
+export const normalizeRoadshowQuotationNumber = (value = "") => {
+  return String(value || "").trim().toUpperCase();
+};
+
+export const isValidRoadshowQuotationNumber = (value = "") => {
+  return ROADSHOW_ESTIMATE_NUMBER_REGEX.test(
+    normalizeRoadshowQuotationNumber(value),
+  );
+};
+
+const formatRoadshowEstimateNumber = (quotationSequence) => {
+  return `EST-${String(quotationSequence).padStart(5, "0")}`;
+};
+
+export const generateUniqueRoadshowQuotationNumber = async () => {
+  const existingQuotationCount = await RoadshowQuotation.countDocuments({
+    quotationNumber: ROADSHOW_ESTIMATE_NUMBER_REGEX,
+  });
+
+  let quotationSequence =
+    ROADSHOW_ESTIMATE_START_NUMBER + existingQuotationCount + 1;
+
+  while (quotationSequence <= ROADSHOW_ESTIMATE_MAX_NUMBER) {
+    const quotationNumber = formatRoadshowEstimateNumber(quotationSequence);
+
+    const existingQuotation = await RoadshowQuotation.exists({
+      quotationNumber,
+    });
+
+    if (!existingQuotation) {
+      return {
+        quotationNumber,
+        quotationSequence,
+        randomCode: String(quotationSequence).padStart(5, "0"),
+      };
+    }
+
+    quotationSequence += 1;
+  }
+
+  throw new Error(
+    "Unable to generate a unique quotation number. EST number limit reached.",
+  );
+};
+
 export const sanitizeFileNamePart = (value = "") => {
-  const cleaned = String(value)
+  const cleaned = String(value || "")
     .trim()
-    .replace(/\.pdf$/i, "")
-    .replace(/[^a-zA-Z0-9-_]+/g, "-")
-    .replace(/-+/g, "-")
+    .replace(/[^a-z0-9]+/gi, "-")
     .replace(/^-+|-+$/g, "")
     .toLowerCase();
 
@@ -52,98 +96,23 @@ export const getPublicPdfUrl = (spaceKey) => {
 export const getNextRoadshowQuotationNumberWithoutIncrement = async () => {
   const { dateOnly, dateKey } = getCurrentIndiaDateParts();
 
-  const counterKey = `ADINN-RS-${dateKey}`;
-
-  const [counter, latestQuotation] = await Promise.all([
-    Counter.findOne({
-      key: counterKey,
-    })
-      .select("sequence")
-      .lean(),
-
-    RoadshowQuotation.findOne({
-      quotationDateKey: dateKey,
-    })
-      .sort({
-        quotationSequence: -1,
-      })
-      .select("quotationSequence")
-      .lean(),
-  ]);
-
-  const counterSequence = counter?.sequence || 0;
-  const latestQuotationSequence = latestQuotation?.quotationSequence || 0;
-
-  const currentSequence = Math.max(counterSequence, latestQuotationSequence);
-  const nextSequence = currentSequence + 1;
+  const { quotationNumber, quotationSequence, randomCode } =
+    await generateUniqueRoadshowQuotationNumber();
 
   return {
     quotationDate: dateOnly,
     quotationDateKey: dateKey,
-    nextSequence,
-    nextQuotationNumber: `ADINN-RS-${dateKey}#${nextSequence}`,
+    nextSequence: quotationSequence,
+    quotationSequence,
+    randomCode,
+    nextQuotationNumber: quotationNumber,
+    quotationNumber,
   };
 };
 
-export const generateRoadshowQuotationNumber = async (dateKey) => {
-  const counterKey = `ADINN-RS-${dateKey}`;
-
-  const existingCounter = await Counter.findOne({
-    key: counterKey,
-  });
-
-  if (!existingCounter) {
-    const latestQuotation = await RoadshowQuotation.findOne({
-      quotationDateKey: dateKey,
-    })
-      .sort({
-        quotationSequence: -1,
-      })
-      .select("quotationSequence")
-      .lean();
-
-    const latestSequence = latestQuotation?.quotationSequence || 0;
-
-    try {
-      await Counter.updateOne(
-        {
-          key: counterKey,
-        },
-        {
-          $setOnInsert: {
-            key: counterKey,
-            sequence: latestSequence,
-          },
-        },
-        {
-          upsert: true,
-        },
-      );
-    } catch (error) {
-      if (error?.code !== 11000) {
-        throw error;
-      }
-    }
-  }
-
-  const counter = await Counter.findOneAndUpdate(
-    {
-      key: counterKey,
-    },
-    {
-      $inc: {
-        sequence: 1,
-      },
-    },
-    {
-      new: true,
-      upsert: true,
-      setDefaultsOnInsert: true,
-    },
-  );
-
-  const quotationSequence = counter.sequence;
-  const quotationNumber = `ADINN-RS-${dateKey}#${quotationSequence}`;
+export const generateRoadshowQuotationNumber = async () => {
+  const { quotationNumber, quotationSequence } =
+    await generateUniqueRoadshowQuotationNumber();
 
   return {
     quotationNumber,
