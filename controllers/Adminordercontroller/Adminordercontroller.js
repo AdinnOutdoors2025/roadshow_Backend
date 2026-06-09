@@ -110,7 +110,7 @@ const STAGE_ORDER = [
 // ── Helper: file URL ───────────────────────────────────────────────────────
 function getFileUrl(file) {
   if (!file) return null;
-  if (file.location) return file.location; 
+  if (file.location) return file.location;
   return `/uploads/${path.basename(file.path)}`;
 }
 
@@ -336,7 +336,7 @@ exports.getAllOrders = async (req, res) => {
         "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
         "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
         "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
-       "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray projectMailLogs todoArray todoUploadedBy "
+        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray projectMailLogs todoArray todoUploadedBy onRoadHistory  "
       );
     return successResponse(res, "Orders fetched successfully", {
       total, page: Number(page), totalPages: Math.ceil(total / Number(limit)), orders,
@@ -345,6 +345,10 @@ exports.getAllOrders = async (req, res) => {
     return errorResponse(res, error.message);
   }
 };
+
+
+
+
 
 
 exports.getOrderById = async (req, res) => {
@@ -391,7 +395,7 @@ exports.getOrdersByPipeline = async (req, res) => {
         "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
         "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
         "companyName clientName designation email address gstNumber customerCategory " +
-      "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy "
+        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy onRoadHistory "
       );
 
     const filteredOrders = orders.filter(
@@ -408,10 +412,10 @@ exports.getOrdersByPipeline = async (req, res) => {
       else grouped["todo"].push(o);
     });
 
-    return successResponse(res, "Pipeline orders fetched", { 
-      grouped, 
+    return successResponse(res, "Pipeline orders fetched", {
+      grouped,
       stages: STAGE_ORDER,
-      totalFilteredOrders: filteredOrders.length 
+      totalFilteredOrders: filteredOrders.length
     });
   } catch (error) {
     return errorResponse(res, error.message);
@@ -434,7 +438,7 @@ exports.updateOrderPipeline = async (req, res) => {
     const isStaff = Number(req.user.isAdmin) === 0;
 
 
-  const LOCKED_BACK_STAGES = ["todo", "projectExecution"];
+    const LOCKED_BACK_STAGES = ["todo", "projectExecution"];
     const oldIndex = STAGE_ORDER.indexOf(oldStage);
     const newIndex = STAGE_ORDER.indexOf(pipelineStatus);
     if (LOCKED_BACK_STAGES.includes(pipelineStatus) && newIndex < oldIndex) {
@@ -445,16 +449,16 @@ exports.updateOrderPipeline = async (req, res) => {
         400
       );
     }
-  
+
     const movedBy = req.user?.username || order.handlerName || "Admin";
 
-    
-      if (oldStage === "todo" && pipelineStatus === "projectExecution") {
+
+    if (oldStage === "todo" && pipelineStatus === "projectExecution") {
       if (isStaff) {
-       
+
         order.handlerName = req.user.username;
       } else {
-       
+
         if (!handlerName?.trim())
           return errorResponse(res, "Handler name is required", null, 400);
         order.handlerName = handlerName.trim();
@@ -510,7 +514,7 @@ exports.uploadStageDocument = async (req, res) => {
     const docUrl = docFile ? getFileUrl(docFile) : "";
 
 
-     if (stage === "todo" || order.pipelineStatus === "todo") {
+    if (stage === "todo" || order.pipelineStatus === "todo") {
       if (docUrl || notes?.trim()) {
         order.todoArray.push({
           document: docUrl,
@@ -522,9 +526,9 @@ exports.uploadStageDocument = async (req, res) => {
     }
 
 
-   
+
     if (stage === "projectExecution" || order.pipelineStatus === "projectExecution") {
-   
+
       if (docUrl || notes?.trim()) {
         order.projectExecutionArray.push({
           document: docUrl,
@@ -535,7 +539,7 @@ exports.uploadStageDocument = async (req, res) => {
       }
     }
 
-   if (stage === "onRoad" || order.pipelineStatus === "onRoad") {
+    if (stage === "onRoad" || order.pipelineStatus === "onRoad") {
       if (docUrl || notes?.trim()) {
         order.onRoadCommentsArray.push({
           document: docUrl,
@@ -557,11 +561,11 @@ exports.uploadStageDocument = async (req, res) => {
 exports.submitOnRoadDetails = async (req, res) => {
   try {
     const { id } = req.params;
-    const { 
-      driverName, 
-      driverPhone, 
-      driverAlternatePhone, 
-      vehicleRegistrationNumber 
+    const {
+      driverName,
+      driverPhone,
+      driverAlternatePhone,
+      vehicleRegistrationNumber
     } = req.body;
 
     if (!driverName?.trim()) {
@@ -583,8 +587,8 @@ exports.submitOnRoadDetails = async (req, res) => {
     const getFileUrl = (fieldName) => {
       const file = (req.files || []).find(f => f.fieldname === fieldName);
       if (!file) return "";
-      if (file.location) return file.location; 
-      return `/uploads/${path.basename(file.path)}`; 
+      if (file.location) return file.location;
+      return `/uploads/${path.basename(file.path)}`;
     };
 
     const gatepassPhoto = getFileUrl("gatepassPhoto");
@@ -595,12 +599,12 @@ exports.submitOnRoadDetails = async (req, res) => {
 
     // const uploadedBy = req.user?.username || order.handlerName || "Admin";
 
-      const uploadedBy =
+    const uploadedBy =
       Number(req.user.isAdmin) === 0
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
-  
+
     order.onRoadExecutionArray.push({
       gatepassPhoto,
       vehicleFrontPhoto,
@@ -615,10 +619,23 @@ exports.submitOnRoadDetails = async (req, res) => {
       uploadedAt: new Date(),
     });
 
-  
+
+
+    order.onRoadHistory.push({
+      action: "created",
+      driverName: driverName.trim(),
+      driverPhone: driverPhone.trim(),
+      driverAlternatePhone: driverAlternatePhone?.trim() || "",
+      vehicleRegistrationNumber: vehicleRegistrationNumber.trim(),
+      changedFields: {},
+      changedBy: uploadedBy,
+      changedAt: new Date(),
+    });
+
+
     const oldStage = order.pipelineStatus;
     order.pipelineStatus = "onRoad";
-    
+
     const logEntry = {
       fromStage: oldStage,
       toStage: "onRoad",
@@ -626,14 +643,14 @@ exports.submitOnRoadDetails = async (req, res) => {
       movedAt: new Date(),
     };
     order.pipelineLogs.push(logEntry);
-    
+
     await order.save();
 
-    return successResponse(res, "On Road details submitted and stage moved successfully", { 
+    return successResponse(res, "On Road details submitted and stage moved successfully", {
       order,
       latestOnRoadEntry: order.onRoadExecutionArray[order.onRoadExecutionArray.length - 1]
     });
-    
+
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
@@ -657,6 +674,66 @@ exports.saveTodoUploadedBy = async (req, res) => {
     return successResponse(res, "Todo uploader name saved", {
       todoUploadedBy: order.todoUploadedBy,
     });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.editOnRoadDetails = async (req, res) => {
+  try {
+    const { id, entryId } = req.params;
+    const {
+      driverName,
+      driverPhone,
+      driverAlternatePhone,
+      vehicleRegistrationNumber,
+    } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+   
+    const entry = order.onRoadExecutionArray.id(entryId);
+    if (!entry) return errorResponse(res, "Entry not found", null, 404);
+
+    const uploadedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+   
+    const changedFields = {};
+    if (driverName?.trim() && driverName.trim() !== entry.driverName)
+      changedFields.driverName = { old: entry.driverName, new: driverName.trim() };
+    if (driverPhone?.trim() && driverPhone.trim() !== entry.driverPhone)
+      changedFields.driverPhone = { old: entry.driverPhone, new: driverPhone.trim() };
+    if (driverAlternatePhone !== undefined && driverAlternatePhone !== entry.driverAlternatePhone)
+      changedFields.driverAlternatePhone = { old: entry.driverAlternatePhone, new: driverAlternatePhone };
+    if (vehicleRegistrationNumber?.trim() && vehicleRegistrationNumber.trim() !== entry.vehicleRegistrationNumber)
+      changedFields.vehicleRegistrationNumber = { old: entry.vehicleRegistrationNumber, new: vehicleRegistrationNumber.trim() };
+
+    
+    if (driverName?.trim()) entry.driverName = driverName.trim();
+    if (driverPhone?.trim()) entry.driverPhone = driverPhone.trim();
+    if (driverAlternatePhone !== undefined) entry.driverAlternatePhone = driverAlternatePhone;
+    if (vehicleRegistrationNumber?.trim())
+      entry.vehicleRegistrationNumber = vehicleRegistrationNumber.trim().toUpperCase();
+
+  
+    order.onRoadHistory.push({
+      action: "edited",
+      driverName: entry.driverName,
+      driverPhone: entry.driverPhone,
+      driverAlternatePhone: entry.driverAlternatePhone,
+      vehicleRegistrationNumber: entry.vehicleRegistrationNumber,
+      changedFields,
+      changedBy: uploadedBy,
+      changedAt: new Date(),
+    });
+
+    await order.save();
+    return successResponse(res, "On Road details updated successfully", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }

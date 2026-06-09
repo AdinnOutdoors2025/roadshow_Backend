@@ -79,7 +79,7 @@ const bookingItemSchema = new mongoose.Schema({
   additionalFields: { type: [additionalChargeSchema], default: [] },
 });
 
-// ── NEW: Project Execution Document Schema ─────────────────────────────────
+
 const projectExecutionDocSchema = new mongoose.Schema(
   {
     document: { type: String, default: "" },
@@ -122,6 +122,17 @@ const onRoadCommentSchema = new mongoose.Schema(
   { _id: true }
 );
 
+
+const onRoadHistorySchema = new mongoose.Schema({
+  action: { type: String, enum: ["created", "edited"], default: "created" },
+  changedFields: { type: Object, default: {} }, 
+  driverName: String,
+  driverPhone: String,
+  driverAlternatePhone: String,
+  vehicleRegistrationNumber: String,
+  changedBy: { type: String, default: "" },
+  changedAt: { type: Date, default: Date.now },
+}, { _id: true });
 
 
 const projectMailLogSchema = new mongoose.Schema(
@@ -317,6 +328,8 @@ const orderSchema = new mongoose.Schema(
         uploadedAt: { type: Date, default: Date.now },
       }
     ],
+
+    onRoadHistory: { type: [onRoadHistorySchema], default: [] },
 
     // ── Project Code ──────────────────────────────────────────────
 
