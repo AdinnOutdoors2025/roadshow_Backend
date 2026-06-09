@@ -1,50 +1,87 @@
-const multer = require("multer");
+
+
 const path = require("path");
-const fs = require("fs"); 
+const fs = require("fs");
 const express = require("express");
+const multer = require("multer");
+const multerS3 = require("multer-s3");
 const router = express.Router();
+
 const ctrl = require("../../controllers/Adminordercontroller/Adminordercontroller");
 const { adminOrderUpload } = require("../../Middleware/orderImageupload");
-const { protect } = require('../../Middleware/rolemiddleware');
+const { protect } = require("../../Middleware/rolemiddleware");
+const spacesClient = require("../../config/spaces");
 
-const pipelineStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, "../../public/uploads");
-    if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath, { recursive: true });
-    }
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
-});
+const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
+const BUCKET_NAME = process.env.DO_SPACES_BUCKET || "adinn-space";
 
-const fileFilter = (req, file, cb) => {
-  const allowedMimes = ['application/pdf'];
-  if (allowedMimes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only PDF files are allowed!'), false);
-  }
+
+const pipelineFileFilter = (req, file, cb) => {
+  const allowed = [
+    "application/pdf",
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+  ];
+  if (allowed.includes(file.mimetype)) cb(null, true);
+  else cb(new Error("Only PDF and image files are allowed!"), false);
 };
 
+
+let pipelineStorage;
+
+if (STORAGE_TYPE === "space") {
+  pipelineStorage = multerS3({
+    s3: spacesClient,
+    bucket: BUCKET_NAME,
+    acl: "public-read",
+    metadata: (req, file, cb) => {
+      cb(null, { fieldname: file.fieldname });
+    },
+    key: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      const ext = path.extname(file.originalname);
+      const filename = `admin-${file.fieldname}-${uniqueSuffix}${ext}`;
+      cb(null, `admin-pipeline/${filename}`);
+    },
+  });
+} else {
+  pipelineStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      const uploadPath = path.join(__dirname, "../../public/uploads");
+      if (!fs.existsSync(uploadPath)) {
+        fs.mkdirSync(uploadPath, { recursive: true });
+      }
+      cb(null, uploadPath);
+    },
+    filename: (req, file, cb) => {
+      cb(null, `admin-${Date.now()}-${file.originalname}`);
+    },
+  });
+}
 
 const pipelineUpload = multer({
   storage: pipelineStorage,
   limits: { fileSize: 20 * 1024 * 1024 },
-  fileFilter: fileFilter,
+  fileFilter: pipelineFileFilter,
 }).any();
 
-// ── Routes ──
-router.post("/customers/create", ctrl.createCustomer);
-router.get("/customers/:customerId/orders", ctrl.getCustomerOrders);
-
+// ── Routes ─────────────────────────────────────────────────────────────────
 router.get("/pipeline", protect, ctrl.getOrdersByPipeline);
-router.patch(
-  "/pipeline/:orderId",
+router.patch("/pipeline/:orderId", protect, pipelineUpload, ctrl.updateOrderPipeline);
+
+
+router.post(
+  "/pipeline/:id/documents",
   protect,
   pipelineUpload,
-  ctrl.updateOrderPipeline
+  ctrl.uploadStageDocument
 );
+
+router.patch("/pipeline/:id/todo-uploader", protect, ctrl.saveTodoUploadedBy);
+
+router.post("/pipeline/:id/onroad-details", protect, pipelineUpload, ctrl.submitOnRoadDetails);
 
 router.get("/orders", protect, ctrl.getAllOrders);
 router.get("/orders/:orderId", ctrl.getOrderById);

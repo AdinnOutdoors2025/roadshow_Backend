@@ -16,6 +16,9 @@ import {
   getPublicPdfUrl,
   generateRoadshowQuotationNumber,
   getNextRoadshowQuotationNumberWithoutIncrement,
+  normalizeRoadshowQuotationNumber,
+  isValidRoadshowQuotationNumber
+  
 } from "../../Utils/quotationUtils.js";
 
 export const getNextRoadshowQuotationNumber = async (req, res) => {
@@ -39,7 +42,6 @@ export const getNextRoadshowQuotationNumber = async (req, res) => {
 
 export const createRoadshowQuotation = async (req, res) => {
   try {
-    
     const payload = req.body;
 
     const clientCompanyName = payload?.clientDetails?.companyName?.trim();
@@ -60,13 +62,47 @@ export const createRoadshowQuotation = async (req, res) => {
       });
     }
 
+    const requestedQuotationNumber = normalizeRoadshowQuotationNumber(
+      payload?.quotationNumber ||
+        payload?.quotation?.displayedProposalNumber ||
+        "",
+    );
+
+    if (!requestedQuotationNumber) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Quotation number is required. Please refresh and generate a quotation number.",
+      });
+    }
+
+    if (!isValidRoadshowQuotationNumber(requestedQuotationNumber)) {
+      return res.status(400).json({
+        success: false,
+         message: "Invalid quotation number format. Expected format: EST-30001",
+      });
+    }
+
+    const existingQuotation = await RoadshowQuotation.exists({
+      quotationNumber: requestedQuotationNumber,
+    });
+
+    if (existingQuotation) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Quotation number already exists. Please refresh and try again.",
+      });
+    }
+
     const { dateOnly, dateKey } = getCurrentIndiaDateParts();
 
-    const { quotationNumber, quotationSequence } =
-      await generateRoadshowQuotationNumber(dateKey);
+    const quotationSequence = Number(
+      requestedQuotationNumber.replace("EST-", ""),
+    );
 
     const quotation = await RoadshowQuotation.create({
-      quotationNumber,
+      quotationNumber: requestedQuotationNumber,
       quotationDate: dateOnly,
       quotationDateKey: dateKey,
       quotationSequence,
@@ -79,7 +115,7 @@ export const createRoadshowQuotation = async (req, res) => {
 
       quotation: {
         ...(payload.quotation || {}),
-        displayedProposalNumber: quotationNumber,
+        displayedProposalNumber: requestedQuotationNumber,
       },
 
       clientDetails: payload.clientDetails || {},
@@ -107,9 +143,10 @@ export const createRoadshowQuotation = async (req, res) => {
 
       rawPayload: {
         ...payload,
+        quotationNumber: requestedQuotationNumber,
         quotation: {
           ...(payload.quotation || {}),
-          displayedProposalNumber: quotationNumber,
+          displayedProposalNumber: requestedQuotationNumber,
         },
       },
 
@@ -135,7 +172,8 @@ export const createRoadshowQuotation = async (req, res) => {
     if (error?.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "Quotation number already exists. Please try again.",
+        message:
+          "Quotation number already exists. Please refresh and try again.",
       });
     }
 
