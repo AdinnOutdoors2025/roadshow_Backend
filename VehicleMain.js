@@ -35,6 +35,7 @@ const vehicleTypeRoutes = require("./Routes/vehicleTypeRoutes");
 const gstDetailRoutes = require('./Routes/GstDetailRoutes/gstDetailRoutes');
 const promoterroutes = require('./Routes/Promoterroutes/Promoterroutes');
 const Driverdetailsroutes = require('./Routes/DriverdetailsRoutes/Driverdetailsroute');
+const RoadshowQuotationRoutes  = require('./Routes/roadshowQuotation/roadshowQuotationRoute')
 //Image upload requirements
 const multer = require("multer");
 const path = require("path");
@@ -147,8 +148,8 @@ app.use(
 );
 
 app.use(bodyParser.json());
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use(express.json({ limit: "100mb" }));
+app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
 app.use("/public", express.static(path.join(__dirname, "public")));
 app.use(express.static(path.join(__dirname, "public")));
@@ -212,6 +213,7 @@ app.use('/locations', locationRoutes);
 app.use('/gstdetails', gstDetailRoutes);
 app.use('/promoters', promoterroutes);
 app.use('/drivers', Driverdetailsroutes);
+app.use("/api/roadshow-quotations", RoadshowQuotationRoutes);
 
 // VEHICLE DETAILS STORED WITH CRUD OPERATIONS
 //IMAGE UPLOAD CLOUDINARY CORRECTED CODE
@@ -354,7 +356,6 @@ app.post("/delete-video", async (req, res) => {
 // ===================== Update order pipeline status
 //ORDER MANAGEMENT AND ADD TO CART , ORDER CREATION CODES
 
-
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
@@ -412,3 +413,47 @@ app.put("/api/update-vehicles-json", async (req, res) => {
     });
   }
 });
+
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
+
+const awsUpload = multer({
+  storage: multer.memoryStorage(),
+});
+
+app.post("/uploadaws", awsUpload.single("file"), async (req, res) => {
+  try {
+    const file = req.file;
+
+    const fileName = `${Date.now()}-${file.originalname}`;
+
+    const command = new PutObjectCommand({
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: `uploads/${fileName}`,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+    });
+
+    await s3.send(command);
+
+    const fileUrl = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/uploads/${fileName}`;
+
+    res.json({
+      success: true,
+      fileUrl,
+    });
+
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+})
