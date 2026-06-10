@@ -33,6 +33,7 @@ const bookingItemSchema = new mongoose.Schema({
   vehicleImage: String,
   bookingFor: String,
   campaignType: String,
+  campaignName: { type: String, default: "" },
   otherCampaignType: String,
   gstNumber: { type: String, default: "" },
   campaignTypeRef: {

@@ -159,6 +159,7 @@ exports.createAdminOrder = async (req, res) => {
       const missing = [];
       if (!v.packageId) missing.push("packageId");
       if (!v.campaignType) missing.push("campaignType");
+      if (!v.campaignName?.trim()) missing.push("campaignName");
       if (v.campaignType === "Other" && !v.otherCampaignType) missing.push("otherCampaignType");
       if (!v.fromDate) missing.push("fromDate");
       if (!v.toDate) missing.push("toDate");
@@ -219,6 +220,7 @@ exports.createAdminOrder = async (req, res) => {
         bookingFor: v.bookingFor,
         gstNumber: v.bookingFor === "Agency" ? (v.gstNumber || "").trim() : "",
         campaignType: campaignTypeName,
+        campaignName: (v.campaignName || "").trim(),
         campaignTypeRef,
         otherCampaignType: v.campaignType === "Other" ? (v.otherCampaignType || "") : "",
         promoterGender: v.needPromoter ? (v.promoterGender || "") : "",
