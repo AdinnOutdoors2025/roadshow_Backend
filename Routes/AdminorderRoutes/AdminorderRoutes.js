@@ -82,10 +82,11 @@ router.post(
 router.patch("/pipeline/:id/todo-uploader", protect, ctrl.saveTodoUploadedBy);
 
 router.post("/pipeline/:id/onroad-details", protect, pipelineUpload, ctrl.submitOnRoadDetails);
+router.patch("/pipeline/:id/onroad-status/:entryId", protect, ctrl.updateOnRoadStatus);
 
 router.put("/pipeline/:id/onroad-details/:entryId", protect, ctrl.editOnRoadDetails);
 
-router.get("/orders", protect, ctrl.getAllOrders);
+router.get("/orders", protect, ctrl.getAllOrders);  
 router.get("/orders/:orderId", ctrl.getOrderById);
 router.post("/orders/create", protect, adminOrderUpload, ctrl.createAdminOrder);
 

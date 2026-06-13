@@ -33,6 +33,7 @@ const bookingItemSchema = new mongoose.Schema({
   vehicleImage: String,
   bookingFor: String,
   campaignType: String,
+  campaignName: { type: String, default: "" },
   otherCampaignType: String,
   gstNumber: { type: String, default: "" },
   campaignTypeRef: {
@@ -158,8 +159,6 @@ const enquiryDocSchema = new mongoose.Schema(
 );
 
 
-
-// ── Sales Pipeline Schemas (kept as-is) ───────────────────────────────────
 const needAnalysisDocSchema = new mongoose.Schema(
   {
     analysisDocument: { type: String, default: "" },
@@ -260,7 +259,7 @@ const orderSchema = new mongoose.Schema(
     },
 
     // ── Admin Pipeline ────────────────────────────────────────────
-    // SIMPLIFIED: todo → projectCodeCreation → projectExecution → onRoad → ...
+   
     pipelineStatus: {
       type: String,
       enum: [
@@ -311,24 +310,21 @@ const orderSchema = new mongoose.Schema(
     projectExecutionArray: { type: [projectExecutionDocSchema], default: [] },
     todoArray: { type: [todoDocSchema], default: [] }, 
 
-    onRoadExecutionArray: [
-      {
-        document: { type: String, default: "" },
-        notes: { type: String, default: "" },
-        gatepassPhoto: { type: String, required: false, default: "" },
-        vehicleFrontPhoto: { type: String, default: "" },
-        vehicleBackPhoto: { type: String, default: "" },
-        vehicleLeftPhoto: { type: String, default: "" },
-        vehicleRightPhoto: { type: String, default: "" },
-        driverName: { type: String, required: true, default: "" },
-        driverPhone: { type: String, required: true, default: "" },
-        driverAlternatePhone: { type: String, default: "" },
-        vehicleRegistrationNumber: { type: String, required: true, default: "" },
-        uploadedBy: { type: String, default: "" },
-        uploadedAt: { type: Date, default: Date.now },
-      }
-    ],
 
+
+onRoadExecutionArray: [
+  {
+    vehicleIndex: { type: Number, required: true },  
+    driverName: { type: String, required: true, default: "" },
+    driverPhone: { type: String, required: true, default: "" },
+    vehicleRegistrationNumber: { type: String, required: true, default: "" },
+    gatepassPhoto: { type: String, default: "" },  
+    onRoadStatus: { type: Number, enum: [0, 1], default: 0 },  
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  }
+],
+    
     onRoadHistory: { type: [onRoadHistorySchema], default: [] },
 
     // ── Project Code ──────────────────────────────────────────────
