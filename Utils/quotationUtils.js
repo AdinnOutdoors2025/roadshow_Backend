@@ -8,6 +8,7 @@ import {
   spacesClient,
   DO_SPACES_BUCKET,
   DO_SPACES_CDN_URL,
+  DO_SPACES_REGION,
 } from "../config/digitalOceanSpaces.js";
 
 export const ROADSHOW_ESTIMATE_NUMBER_REGEX = /^EST-\d{5}$/;

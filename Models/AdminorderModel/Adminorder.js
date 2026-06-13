@@ -35,6 +35,7 @@ const bookingItemSchema = new mongoose.Schema({
   vehicleImage: String,
   bookingFor: String,
   campaignType: String,
+  campaignName: { type: String, default: "" },
   otherCampaignType: String,
   gstNumber: { type: String, default: "" },
   campaignTypeRef: { type: mongoose.Schema.Types.ObjectId, ref: "CampaignType", default: null },
@@ -79,7 +80,7 @@ const bookingItemSchema = new mongoose.Schema({
   additionalFields: { type: [additionalChargeSchema], default: [] },
 });
 
-// ── NEW: Project Execution Document Schema ─────────────────────────────────
+
 const projectExecutionDocSchema = new mongoose.Schema(
   {
     document: { type: String, default: "" },
@@ -123,6 +124,17 @@ const onRoadCommentSchema = new mongoose.Schema(
 );
 
 
+const onRoadHistorySchema = new mongoose.Schema({
+  action: { type: String, enum: ["created", "edited"], default: "created" },
+  changedFields: { type: Object, default: {} }, 
+  driverName: String,
+  driverPhone: String,
+  driverAlternatePhone: String,
+  vehicleRegistrationNumber: String,
+  changedBy: { type: String, default: "" },
+  changedAt: { type: Date, default: Date.now },
+}, { _id: true });
+
 
 const projectMailLogSchema = new mongoose.Schema(
   {
@@ -147,8 +159,6 @@ const enquiryDocSchema = new mongoose.Schema(
 );
 
 
-
-// ── Sales Pipeline Schemas (kept as-is) ───────────────────────────────────
 const needAnalysisDocSchema = new mongoose.Schema(
   {
     analysisDocument: { type: String, default: "" },
@@ -244,6 +254,8 @@ const orderSchema = new mongoose.Schema(
       default: "Pending",
     },
 
+    // ── Admin Pipeline ────────────────────────────────────────────
+   
     pipelineStatus: {
       type: String,
       enum: [
@@ -296,23 +308,22 @@ const orderSchema = new mongoose.Schema(
     projectExecutionArray: { type: [projectExecutionDocSchema], default: [] },
     todoArray: { type: [todoDocSchema], default: [] }, 
 
-    onRoadExecutionArray: [
-      {
-        document: { type: String, default: "" },
-        notes: { type: String, default: "" },
-        gatepassPhoto: { type: String, required: false, default: "" },
-        vehicleFrontPhoto: { type: String, default: "" },
-        vehicleBackPhoto: { type: String, default: "" },
-        vehicleLeftPhoto: { type: String, default: "" },
-        vehicleRightPhoto: { type: String, default: "" },
-        driverName: { type: String, required: true, default: "" },
-        driverPhone: { type: String, required: true, default: "" },
-        driverAlternatePhone: { type: String, default: "" },
-        vehicleRegistrationNumber: { type: String, required: true, default: "" },
-        uploadedBy: { type: String, default: "" },
-        uploadedAt: { type: Date, default: Date.now },
-      }
-    ],
+
+
+onRoadExecutionArray: [
+  {
+    vehicleIndex: { type: Number, required: true },  
+    driverName: { type: String, required: true, default: "" },
+    driverPhone: { type: String, required: true, default: "" },
+    vehicleRegistrationNumber: { type: String, required: true, default: "" },
+    gatepassPhoto: { type: String, default: "" },  
+    onRoadStatus: { type: Number, enum: [0, 1], default: 0 },  
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  }
+],
+    
+    onRoadHistory: { type: [onRoadHistorySchema], default: [] },
 
     // ── Project Code ──────────────────────────────────────────────
 
