@@ -17,6 +17,26 @@ const QuoteLineItemSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    actualRate: {
+      type: Number,
+      default: 0,
+    },
+    finalRate: {
+      type: Number,
+      default: 0,
+    },
+    discountRate: {
+      type: Number,
+      default: 0,
+    },
+    actualAmount: {
+      type: Number,
+      default: 0,
+    },
+    discountAmount: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     _id: false,
@@ -66,9 +86,32 @@ const RoadshowQuotationSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["saved", "pdf_uploaded", "failed"],
+      enum: [
+        "saved",
+        "pdf_uploaded",
+        "waiting_for_approval",
+        "approved",
+        "failed",
+      ],
       default: "saved",
       index: true,
+    },
+
+    approval: {
+      required: {
+        type: Boolean,
+        default: false,
+      },
+      status: {
+        type: String,
+        enum: ["not_required", "waiting_for_approval", "approved"],
+        default: "not_required",
+        index: true,
+      },
+      requestedAt: Date,
+      requestedBy: String,
+      approvedAt: Date,
+      approvedBy: String,
     },
 
     company: {
@@ -101,6 +144,18 @@ const RoadshowQuotationSchema = new mongoose.Schema(
         required: true,
         trim: true,
         index: true,
+      },
+
+      gstNumber: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+
+      billingAddress: {
+        type: String,
+        default: "",
+        trim: true,
       },
 
       contactNumber: {
@@ -162,6 +217,12 @@ const RoadshowQuotationSchema = new mongoose.Schema(
         trim: true,
       },
 
+      gstNumber: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+
       staff: {
         name: {
           type: String,
@@ -182,8 +243,19 @@ const RoadshowQuotationSchema = new mongoose.Schema(
       campaignLocation: String,
       region: String,
       regionLabel: String,
+      otherStateName: String,
       selectedCategory: String,
       selectedVehicleId: String,
+      selectedVehicleVariantId: String,
+      selectedVehicleVariantLabel: String,
+      selectedVehicleVariantKmPerDay: Number,
+      selectedVehicleVariantDailyKmLabel: String,
+      selectedVehicleVariantPricePerDay: Number,
+      selectedVehicleVariantMasterPricePerDay: Number,
+      selectedVehicleVariantLeastSellingPricingPerDay: Number,
+      selectedVehicleVariantExtraKm: String,
+      selectedVehicleVariantExtraHour: String,
+      selectedVehicleVariantMinimumDays: Number,
 
       quantity: {
         type: Number,
@@ -191,6 +263,11 @@ const RoadshowQuotationSchema = new mongoose.Schema(
       },
 
       promoterQuantity: {
+        type: Number,
+        default: 1,
+      },
+
+      promoterDays: {
         type: Number,
         default: 1,
       },
@@ -205,6 +282,26 @@ const RoadshowQuotationSchema = new mongoose.Schema(
         default: 60,
       },
 
+      extraKm: {
+        type: Number,
+        default: 0,
+      },
+
+      extraKmRate: {
+        type: Number,
+        default: 0,
+      },
+
+      extraHours: {
+        type: Number,
+        default: 0,
+      },
+
+      extraHourRate: {
+        type: Number,
+        default: 0,
+      },
+
       minimumDays: {
         type: Number,
         default: 10,
@@ -217,7 +314,7 @@ const RoadshowQuotationSchema = new mongoose.Schema(
 
       rtoPermissionValidityDays: {
         type: Number,
-        default: 28,
+        default: 30,
       },
 
       rtoBillingMonths: {
@@ -229,6 +326,8 @@ const RoadshowQuotationSchema = new mongoose.Schema(
     vehicle: {
       selectedCategory: String,
       selectedVehicleId: String,
+      selectedVehicleVariantId: String,
+      selectedVehicleVariantSnapshot: Mixed,
       selectedVehicleSnapshot: Mixed,
     },
 
@@ -244,7 +343,22 @@ const RoadshowQuotationSchema = new mongoose.Schema(
           default: 0,
         },
 
+        vehicleDiscountAmount: {
+          type: Number,
+          default: 0,
+        },
+
+        vehicleFinalRate: {
+          type: Number,
+          default: 0,
+        },
+
         brandingCost: {
+          type: Number,
+          default: 0,
+        },
+
+        brandingCostDiscount: {
           type: Number,
           default: 0,
         },
@@ -252,6 +366,21 @@ const RoadshowQuotationSchema = new mongoose.Schema(
         rtoPermission: {
           type: Number,
           default: 0,
+        },
+
+        rtoPermissionDiscount: {
+          type: Number,
+          default: 0,
+        },
+
+        rtoPermissionDiscountBillingMonths: {
+          type: Number,
+          default: 1,
+        },
+
+        approvalRequired: {
+          type: Boolean,
+          default: false,
         },
 
         promoterCost: {
@@ -278,9 +407,39 @@ const RoadshowQuotationSchema = new mongoose.Schema(
           type: Number,
           default: 0,
         },
+
+        extraKm: {
+          type: Number,
+          default: 0,
+        },
+
+        extraKmRate: {
+          type: Number,
+          default: 0,
+        },
+
+        extraHours: {
+          type: Number,
+          default: 0,
+        },
+
+        extraHourRate: {
+          type: Number,
+          default: 0,
+        },
       },
 
       quoteLineItems: [QuoteLineItemSchema],
+
+      actualSubtotal: {
+        type: Number,
+        default: 0,
+      },
+
+      totalDiscountAmount: {
+        type: Number,
+        default: 0,
+      },
 
       subtotal: {
         type: Number,
@@ -352,6 +511,11 @@ const RoadshowQuotationSchema = new mongoose.Schema(
       },
 
       signature: {
+        enabled: {
+          type: Boolean,
+          default: false,
+        },
+
         hasSignature: {
           type: Boolean,
           default: false,
@@ -393,7 +557,6 @@ const RoadshowQuotationSchema = new mongoose.Schema(
       spaceKey: String,
       region: String,
       endpoint: String,
-      cdnUrl: String,
       publicUrl: String,
       cdnUrl: String,
 

@@ -21,6 +21,40 @@ import {
   
 } from "../../Utils/quotationUtils.js";
 
+const ROADSHOW_APPROVAL_PASSWORD =
+  process.env.ROADSHOW_QUOTATION_APPROVAL_PASSWORD || "Adinn@#123";
+
+const ALLOWED_ROADSHOW_QUOTATION_STATUSES = new Set([
+  "saved",
+  "pdf_uploaded",
+  "waiting_for_approval",
+  "approved",
+  "failed",
+]);
+
+const normalizeRoadshowQuotationStatus = (value = "") => {
+  const status = String(value || "").trim();
+
+  return ALLOWED_ROADSHOW_QUOTATION_STATUSES.has(status) ? status : "saved";
+};
+
+const sanitizeWaitingApprovalQuotationForResponse = (quotation) => {
+  if (!quotation) return quotation;
+
+  const data = typeof quotation.toObject === "function" ? quotation.toObject() : { ...quotation };
+
+  if (data.status === "waiting_for_approval" && data.pdf) {
+    data.pdf = {
+      ...data.pdf,
+      publicUrl: undefined,
+      cdnUrl: undefined,
+      downloadUrl: undefined,
+    };
+  }
+
+  return data;
+};
+
 export const getNextRoadshowQuotationNumber = async (req, res) => {
   try {
     const nextQuotation = await getNextRoadshowQuotationNumberWithoutIncrement();
@@ -101,6 +135,14 @@ export const createRoadshowQuotation = async (req, res) => {
       requestedQuotationNumber.replace("EST-", ""),
     );
 
+    const requestedStatus = normalizeRoadshowQuotationStatus(payload?.status);
+    const requestedApproval = payload?.approval || {};
+    const approvalRequired = Boolean(
+      requestedApproval?.required ||
+        payload?.pricing?.pricingDetails?.approvalRequired ||
+        requestedStatus === "waiting_for_approval",
+    );
+
     const quotation = await RoadshowQuotation.create({
       quotationNumber: requestedQuotationNumber,
       quotationDate: dateOnly,
@@ -110,6 +152,7 @@ export const createRoadshowQuotation = async (req, res) => {
       payloadVersion: payload.payloadVersion || "roadshow-quotation-v1",
       source: payload.source || "roadshow_quotation_generator",
       quotationType: payload.quotationType || "roadshow_campaign",
+      status: requestedStatus,
 
       company: payload.company || {},
 
@@ -140,6 +183,17 @@ export const createRoadshowQuotation = async (req, res) => {
       addOns: payload.addOns || {},
       assets: payload.assets || {},
       termsAndConditions: payload.termsAndConditions || [],
+
+      approval: {
+        required: approvalRequired,
+        status: approvalRequired ? "waiting_for_approval" : "not_required",
+        requestedAt: approvalRequired
+          ? requestedApproval?.requestedAt || new Date()
+          : undefined,
+        requestedBy: payload?.preparedByDetails?.staffName || "",
+        approvedAt: undefined,
+        approvedBy: "",
+      },
 
       rawPayload: {
         ...payload,
@@ -247,7 +301,13 @@ export const uploadRoadshowQuotationPdf = async (req, res) => {
 
     const publicUrl = getPublicPdfUrl(spaceKey);
 
-    quotation.status = "pdf_uploaded";
+    if (
+      !["waiting_for_approval", "approved"].includes(
+        String(quotation.status || ""),
+      )
+    ) {
+      quotation.status = "pdf_uploaded";
+    }
 
     quotation.pdf = {
       status: "uploaded",
@@ -273,6 +333,8 @@ export const uploadRoadshowQuotationPdf = async (req, res) => {
 
     await quotation.save();
 
+    const isWaitingForApproval = quotation.status === "waiting_for_approval";
+
     return res.json({
       success: true,
       message: "Quotation PDF uploaded publicly successfully",
@@ -282,9 +344,9 @@ export const uploadRoadshowQuotationPdf = async (req, res) => {
         fileName: finalFileName,
         bucket: DO_SPACES_BUCKET,
         spaceKey,
-        publicUrl,
-        cdnUrl: publicUrl,
-        downloadUrl: publicUrl,
+        publicUrl: isWaitingForApproval ? undefined : publicUrl,
+        cdnUrl: isWaitingForApproval ? undefined : publicUrl,
+        downloadUrl: isWaitingForApproval ? undefined : publicUrl,
       },
     });
   } catch (error) {
@@ -320,7 +382,7 @@ export const getRoadshowQuotationById = async (req, res) => {
 
     return res.json({
       success: true,
-      data: quotation,
+      data: sanitizeWaitingApprovalQuotationForResponse(quotation),
     });
   } catch (error) {
     console.error("Get roadshow quotation error:", error);
@@ -353,6 +415,13 @@ export const getRoadshowQuotationDownloadUrl = async (req, res) => {
       });
     }
 
+    if (quotation.status === "waiting_for_approval") {
+      return res.status(403).json({
+        success: false,
+        message: "PDF download is available only after admin approval",
+      });
+    }
+
     if (!quotation.pdf?.publicUrl) {
       return res.status(404).json({
         success: false,
@@ -378,6 +447,73 @@ export const getRoadshowQuotationDownloadUrl = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Unable to get public PDF URL",
+      error: error.message,
+    });
+  }
+};
+
+export const approveRoadshowQuotation = async (req, res) => {
+  try {
+    const { quotationId } = req.params;
+    const { password } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(quotationId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid quotation id",
+      });
+    }
+
+    if (String(password || "") !== ROADSHOW_APPROVAL_PASSWORD) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid approval password",
+      });
+    }
+
+    const quotation = await RoadshowQuotation.findById(quotationId);
+
+    if (!quotation) {
+      return res.status(404).json({
+        success: false,
+        message: "Quotation not found",
+      });
+    }
+
+    if (quotation.status !== "waiting_for_approval") {
+      return res.status(400).json({
+        success: false,
+        message: "Only waiting for approval quotations can be approved",
+      });
+    }
+
+    quotation.status = "approved";
+    quotation.approval = {
+      ...(quotation.approval || {}),
+      required: true,
+      status: "approved",
+      approvedAt: new Date(),
+      approvedBy: req.get("x-admin-name") || "Admin",
+    };
+
+    await quotation.save();
+
+    return res.json({
+      success: true,
+      message: "Quotation approved successfully",
+      data: {
+        quotationId: quotation._id,
+        quotationNumber: quotation.quotationNumber,
+        status: quotation.status,
+        approval: quotation.approval,
+      },
+    });
+  } catch (error) {
+    console.error("Approve roadshow quotation error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to approve quotation",
       error: error.message,
     });
   }
@@ -443,17 +579,19 @@ export const listRoadshowQuotations = async (req, res) => {
         .skip(skip)
         .limit(limit)
         .select(
-          "quotationNumber quotationDate quotationDateKey quotationSequence status clientDetails.companyName clientDetails.clientName clientDetails.contactNumber clientDetails.campaignName preparedByDetails.staffName preparedByDetails.staffPhone campaign.campaignName pdf.status pdf.fileName pdf.publicUrl pdf.cdnUrl pdf.uploadedAt createdAt updatedAt",
+          "quotationNumber quotationDate quotationDateKey quotationSequence status clientDetails.companyName clientDetails.clientName clientDetails.contactNumber clientDetails.campaignName preparedByDetails.staffName preparedByDetails.staffPhone campaign.campaignName pricing.totalDiscountAmount pricing.grandTotal pricing.pricingDetails.brandingCostDiscount pricing.pricingDetails.rtoPermissionDiscount approval pdf.status pdf.fileName pdf.publicUrl pdf.cdnUrl pdf.uploadedAt createdAt updatedAt",
         )
         .lean(),
 
       RoadshowQuotation.countDocuments(filter),
     ]);
 
+    const sanitizedItems = items.map(sanitizeWaitingApprovalQuotationForResponse);
+
     return res.json({
       success: true,
       data: {
-        items,
+        items: sanitizedItems,
         pagination: {
           page,
           limit,

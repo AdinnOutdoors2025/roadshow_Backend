@@ -2,12 +2,13 @@ const express = require("express");
 const multer = require("multer");
 
 const {
-   createRoadshowQuotation,
-  uploadRoadshowQuotationPdf,
-  getRoadshowQuotationById,
-  getRoadshowQuotationDownloadUrl,
-  getNextRoadshowQuotationNumber,
+    getNextRoadshowQuotationNumber,
+  createRoadshowQuotation,
   listRoadshowQuotations,
+  getRoadshowQuotationById,
+  uploadRoadshowQuotationPdf,
+  getRoadshowQuotationDownloadUrl,
+  approveRoadshowQuotation,
 } = require("../../controllers/roadshowQuotation/roadshowQuotationController");
 
 const router = express.Router();
@@ -34,11 +35,13 @@ router.get("/next-number", getNextRoadshowQuotationNumber);
 router.post("/", createRoadshowQuotation);
 router.get("/", listRoadshowQuotations);
 
-// Dynamic routes last
+// Specific dynamic routes before generic :quotationId
 router.get("/:quotationId/download-url", getRoadshowQuotationDownloadUrl);
-router.get("/:quotationId", getRoadshowQuotationById);
+router.patch("/:quotationId/approve", approveRoadshowQuotation);
 router.put("/:quotationId/pdf", upload.single("pdf"), uploadRoadshowQuotationPdf);
 
+// Generic dynamic routes last
+router.get("/:quotationId", getRoadshowQuotationById);
 
 
 module.exports = router;
