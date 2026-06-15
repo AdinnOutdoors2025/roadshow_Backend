@@ -575,39 +575,71 @@ exports.uploadStageDocument = async (req, res) => {
 };
 
 
+
 exports.submitOnRoadDetails = async (req, res) => {
-  const { id } = req.params;
-  const { vehicleIndex, driverName, driverPhone, 
-          vehicleRegistrationNumber, onRoadStatus } = req.body;
+  try {
+    const { id } = req.params;
+    const { vehicleIndex, driverName, driverPhone,
+            vehicleRegistrationNumber } = req.body;
 
-  const order = await Order.findById(id);
+    if (!driverName?.trim())
+      return errorResponse(res, "Driver name is required", null, 400);
+    if (!driverPhone?.trim())
+      return errorResponse(res, "Driver phone is required", null, 400);
+    if (!vehicleRegistrationNumber?.trim())
+      return errorResponse(res, "Vehicle registration number is required", null, 400);
 
-      const uploadedBy =
-      (order.pipelineStatus === "todo" ? order.todoUploadedBy : null) ||
-      // req.body.uploadedBy?.trim() ||
-      (Number(req.user.isAdmin) === 0
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const uploadedBy =
+      Number(req.user.isAdmin) === 0
         ? req.user.username
-        : order.handlerName || req.user?.username || "Admin");
+        : order.handlerName || req.user?.username || "Admin";
+
+   
+    const gatepassFile = (req.files || []).find(f => f.fieldname === "gatepassPhoto");
+    const photoUrl = gatepassFile ? getFileUrl(gatepassFile) : "";
+
+   
+    order.onRoadExecutionArray.push({
+      vehicleIndex: Number(vehicleIndex),
+      driverName: driverName.trim(),
+      driverPhone: driverPhone.trim(),
+      vehicleRegistrationNumber: vehicleRegistrationNumber.trim().toUpperCase(),
+      gatepassPhoto: photoUrl,
+      onRoadStatus: 0,
+      uploadedBy,
+      uploadedAt: new Date()
+    });
+
   
- 
-  const gatepassPhoto = (req.files || []).find(f => f.fieldname === "gatepassPhoto");
-  const photoUrl = gatepassPhoto ? getFileUrl(gatepassPhoto) : "";
+   
+    const vIdx = Number(vehicleIndex);
+    const bookingItem = order.bookingItems[vIdx];
+    const requiredQty = bookingItem?.quantity || 1;
 
-  order.onRoadExecutionArray.push({
-    vehicleIndex: Number(vehicleIndex),
-    driverName: driverName.trim(),
-    driverPhone: driverPhone.trim(),
-    vehicleRegistrationNumber: vehicleRegistrationNumber.trim(),
-    gatepassPhoto: photoUrl,
-    onRoadStatus: Number(onRoadStatus) || 0,
-    uploadedBy: uploadedBy,
-    uploadedAt: new Date()
-  });
+   
+    const savedForThisVehicle = order.onRoadExecutionArray.filter(
+      e => e.vehicleIndex === vIdx
+    );
 
-  await order.save();
-  return successResponse(res, "Driver details saved", { order });
+    if (savedForThisVehicle.length >= requiredQty) {
+      order.onRoadExecutionArray.forEach(e => {
+        if (e.vehicleIndex === vIdx) {
+          e.onRoadStatus = 1;
+        }
+      });
+    }
+
+
+    await order.save();
+    return successResponse(res, "Driver details saved", { order });
+
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
 };
-
 
 exports.updateOnRoadStatus = async (req, res) => {
   const { id, entryId } = req.params;
@@ -684,7 +716,7 @@ exports.editOnRoadDetails = async (req, res) => {
     if (vehicleRegistrationNumber?.trim())
       entry.vehicleRegistrationNumber = vehicleRegistrationNumber.trim().toUpperCase();
 
-  
+    
     order.onRoadHistory.push({
       action: "edited",
       driverName: entry.driverName,
