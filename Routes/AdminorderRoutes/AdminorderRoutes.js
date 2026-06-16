@@ -79,6 +79,10 @@ router.post(
   ctrl.uploadStageDocument
 );
 
+
+router.post("/pipeline/:id/onroad-issue", protect, pipelineUpload, ctrl.addOnRoadIssue);
+router.patch("/pipeline/:id/onroad-issue/:issueId/resolve", protect, pipelineUpload, ctrl.resolveOnRoadIssue);
+
 router.patch("/pipeline/:id/todo-uploader", protect, ctrl.saveTodoUploadedBy);
 
 router.post("/pipeline/:id/onroad-details", protect, pipelineUpload, ctrl.submitOnRoadDetails);

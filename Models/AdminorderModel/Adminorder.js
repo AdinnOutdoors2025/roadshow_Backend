@@ -1,6 +1,5 @@
 
 
-
 const mongoose = require("mongoose");
 
 const additionalChargeSchema = new mongoose.Schema(
@@ -134,6 +133,25 @@ const onRoadHistorySchema = new mongoose.Schema({
   changedBy: { type: String, default: "" },
   changedAt: { type: Date, default: Date.now },
 }, { _id: true });
+
+
+
+
+const onRoadIssueSchema = new mongoose.Schema({
+  vehicleIndex: { type: Number, required: true },
+  driverName: { type: String, default: "" },
+  vehicleRegNo: { type: String, default: "" },
+  issueDescription: { type: String, required: true },
+  issuePhoto: { type: String, default: "" },       
+  status: { type: String, enum: ["open", "resolved"], default: "open" },
+  resolveDescription: { type: String, default: "" },
+  resolvePhoto: { type: String, default: "" },     
+  reportedBy: { type: String, default: "" },
+  reportedAt: { type: Date, default: Date.now },
+  resolvedBy: { type: String, default: "" },
+  resolvedAt: { type: Date, default: null },
+}, { _id: true });
+
 
 
 const projectMailLogSchema = new mongoose.Schema(
@@ -326,6 +344,7 @@ const orderSchema = new mongoose.Schema(
     ],
 
     onRoadHistory: { type: [onRoadHistorySchema], default: [] },
+    onRoadIssues: { type: [onRoadIssueSchema], default: [] },
 
     // ── Project Code ──────────────────────────────────────────────
 

@@ -338,7 +338,7 @@ exports.getAllOrders = async (req, res) => {
         "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
         "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
         "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
-        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray projectMailLogs todoArray todoUploadedBy onRoadHistory  "
+        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues  "
       );
     return successResponse(res, "Orders fetched successfully", {
       total, page: Number(page), totalPages: Math.ceil(total / Number(limit)), orders,
@@ -397,7 +397,7 @@ exports.getOrdersByPipeline = async (req, res) => {
         "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
         "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
         "companyName clientName designation email address gstNumber customerCategory " +
-        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy onRoadHistory "
+        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy onRoadHistory onRoadIssues "
       );
 
     const filteredOrders = orders.filter(
@@ -640,6 +640,87 @@ exports.submitOnRoadDetails = async (req, res) => {
     return errorResponse(res, error.message, null, 500);
   }
 };
+
+
+exports.addOnRoadIssue = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vehicleIndex, issueDescription } = req.body;
+
+    if (!issueDescription?.trim())
+      return errorResponse(res, "Issue description is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const entry = order.onRoadExecutionArray.find(
+      (e) => e.vehicleIndex === Number(vehicleIndex) && e.onRoadStatus === 1
+    );
+
+    const reportedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+
+    const photoFile = (req.files || []).find(f => f.fieldname === "issuePhoto");
+    const photoUrl = photoFile ? getFileUrl(photoFile) : "";
+
+    order.onRoadIssues.push({
+      vehicleIndex: Number(vehicleIndex),
+      driverName: entry?.driverName || "",
+      vehicleRegNo: entry?.vehicleRegistrationNumber || "",
+      issueDescription: issueDescription.trim(),
+      issuePhoto: photoUrl,       
+      status: "open",
+      reportedBy,
+      reportedAt: new Date(),
+    });
+
+    await order.save();
+    return successResponse(res, "Issue reported successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.resolveOnRoadIssue = async (req, res) => {
+  try {
+    const { id, issueId } = req.params;
+    const { resolveDescription } = req.body;
+
+    if (!resolveDescription?.trim())
+      return errorResponse(res, "Resolve description is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const issue = order.onRoadIssues.id(issueId);
+    if (!issue) return errorResponse(res, "Issue not found", null, 404);
+
+    const resolvedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+  
+    const photoFile = (req.files || []).find(f => f.fieldname === "resolvePhoto");
+    const photoUrl = photoFile ? getFileUrl(photoFile) : "";
+
+    issue.status = "resolved";
+    issue.resolveDescription = resolveDescription.trim();
+    issue.resolvePhoto = photoUrl;   
+    issue.resolvedBy = resolvedBy;
+    issue.resolvedAt = new Date();
+
+    await order.save();
+    return successResponse(res, "Issue resolved successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
 
 exports.updateOnRoadStatus = async (req, res) => {
   const { id, entryId } = req.params;
