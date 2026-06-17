@@ -645,7 +645,8 @@ exports.submitOnRoadDetails = async (req, res) => {
 exports.addOnRoadIssue = async (req, res) => {
   try {
     const { id } = req.params;
-    const { vehicleIndex, issueDescription } = req.body;
+   
+    const { vehicleIndex, issueDescription, vehicleRegistrationNumber } = req.body;
 
     if (!issueDescription?.trim())
       return errorResponse(res, "Issue description is required", null, 400);
@@ -653,25 +654,32 @@ exports.addOnRoadIssue = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-    const entry = order.onRoadExecutionArray.find(
-      (e) => e.vehicleIndex === Number(vehicleIndex) && e.onRoadStatus === 1
-    );
+  
+    let entry;
+    if (vehicleRegistrationNumber?.trim()) {
+      entry = order.onRoadExecutionArray.find(
+        (e) => e.vehicleRegistrationNumber === vehicleRegistrationNumber.trim().toUpperCase()
+      );
+    } else {
+      entry = order.onRoadExecutionArray.find(
+        (e) => e.vehicleIndex === Number(vehicleIndex) && e.onRoadStatus === 1
+      );
+    }
 
     const reportedBy =
       Number(req.user.isAdmin) === 0
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
-
     const photoFile = (req.files || []).find(f => f.fieldname === "issuePhoto");
     const photoUrl = photoFile ? getFileUrl(photoFile) : "";
 
     order.onRoadIssues.push({
-      vehicleIndex: Number(vehicleIndex),
+      vehicleIndex: entry ? entry.vehicleIndex : Number(vehicleIndex),
       driverName: entry?.driverName || "",
-      vehicleRegNo: entry?.vehicleRegistrationNumber || "",
+      vehicleRegNo: entry?.vehicleRegistrationNumber || vehicleRegistrationNumber || "",
       issueDescription: issueDescription.trim(),
-      issuePhoto: photoUrl,       
+      issuePhoto: photoUrl,
       status: "open",
       reportedBy,
       reportedAt: new Date(),
@@ -683,7 +691,6 @@ exports.addOnRoadIssue = async (req, res) => {
     return errorResponse(res, error.message, null, 500);
   }
 };
-
 
 exports.resolveOnRoadIssue = async (req, res) => {
   try {
