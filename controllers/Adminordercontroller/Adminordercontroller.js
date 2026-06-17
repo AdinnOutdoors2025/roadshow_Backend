@@ -460,7 +460,7 @@ if (oldStage === "projectExecution" && pipelineStatus === "onRoad") {
   if (!hasActiveDriver) {
     return errorResponse(
       res, 
-      "Please complete at least one vehicle driver details and enable On Road status",
+      "Please complete at least one vehicle Model details and enable On Road status",
       null, 
       400
     );

@@ -94,7 +94,7 @@ exports.updateSalesPipeline = async (req, res) => {
 
     const oldStage = order.salesPipelineStatus;
 
-   
+
     const LOCKED_BACK_STAGES = ["enquiry", "needAnalysis"];
     const oldIndex = SALES_STAGE_ORDER.indexOf(oldStage);
     const newIndex = SALES_STAGE_ORDER.indexOf(salesPipelineStatus);
@@ -110,6 +110,28 @@ exports.updateSalesPipeline = async (req, res) => {
     // const movedBy = order.salesHandlerName || "Admin";
     const movedBy = req.user?.username || order.salesHandlerName || "Admin";
     const uploadedFiles = req.files || [];
+
+
+    if (order.salesPipelineStatus === "projectCodeCreation") {
+      if (salesPipelineStatus === "closedLost") {
+        const mailLogsCount = (order.projectMailLogs || []).length;
+        if (mailLogsCount > 0) {
+          return errorResponse(
+            res,
+            "Mail already sent for this order. Cannot move to Closed Lost.",
+            null,
+            400
+          );
+        }
+      } else {
+        return errorResponse(
+          res,
+          "Cannot move back from Project Code Creation stage.",
+          null,
+          400
+        );
+      }
+    }
 
 
     if (salesPipelineStatus === "needAnalysis" && oldStage === "enquiry") {
@@ -274,7 +296,7 @@ exports.uploadStageDocument = async (req, res) => {
       const docPath = getFilePath(enquiryFile);
       if (!docPath && !enquiryNotes)
         return errorResponse(res, "Provide document or notes", null, 400);
-     
+
       if (enquiryName.trim()) {
         order.enquiryName = enquiryName.trim();
       }
@@ -286,7 +308,7 @@ exports.uploadStageDocument = async (req, res) => {
       });
     }
 
-   
+
 
     if (stage === "needAnalysis") {
       const analysisFile = uploadedFiles.find(
@@ -630,18 +652,18 @@ exports.saveProjectCode = async (req, res) => {
     const savedBy = req.user?.username || order.salesHandlerName || "Admin";
 
     order.projectCodeArray.push({
-      projectCode:    projectCode.trim(),
+      projectCode: projectCode.trim(),
       estimationCode: estimationCode.trim(),
       savedBy,
       savedAt: new Date(),
     });
 
     order.salesPipelineLogs.push({
-      fromStage:   order.salesPipelineStatus,
-      toStage:     order.salesPipelineStatus,
-      movedBy:     savedBy,
+      fromStage: order.salesPipelineStatus,
+      toStage: order.salesPipelineStatus,
+      movedBy: savedBy,
       handlerName: order.salesHandlerName || "",
-      movedAt:     new Date(),
+      movedAt: new Date(),
       notes: `Project Code: ${projectCode.trim()} | Estimation Code: ${estimationCode.trim()}`,
     });
 
