@@ -1,6 +1,5 @@
 
 
-
 const mongoose = require("mongoose");
 
 const additionalChargeSchema = new mongoose.Schema(
@@ -94,12 +93,12 @@ const projectExecutionDocSchema = new mongoose.Schema(
 
 const todoDocSchema = new mongoose.Schema(
   {
-    document: { type: String, default: "" },     
-    notes: { type: String, default: "" },         
-    uploadedBy: { type: String, default: "" },    
+    document: { type: String, default: "" },
+    notes: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
     uploadedAt: { type: Date, default: Date.now },
   },
-  { _id: true }  
+  { _id: true }
 );
 
 
@@ -126,7 +125,7 @@ const onRoadCommentSchema = new mongoose.Schema(
 
 const onRoadHistorySchema = new mongoose.Schema({
   action: { type: String, enum: ["created", "edited"], default: "created" },
-  changedFields: { type: Object, default: {} }, 
+  changedFields: { type: Object, default: {} },
   driverName: String,
   driverPhone: String,
   driverAlternatePhone: String,
@@ -134,6 +133,38 @@ const onRoadHistorySchema = new mongoose.Schema({
   changedBy: { type: String, default: "" },
   changedAt: { type: Date, default: Date.now },
 }, { _id: true });
+
+const onRoadUnavailableHistorySchema = new mongoose.Schema({
+  vehicleIndex: { type: Number, required: true },
+  vehicleRegNo: { type: String, default: "" },
+  driverName: { type: String, default: "" },
+  reason: { type: String, default: "" },
+  photo: { type: String, default: "" },
+  status: { type: String, enum: ["unavailable", "available"], default: "unavailable" },
+  reportedBy: { type: String, default: "" },
+  reportedAt: { type: Date, default: Date.now },
+  resolvedBy: { type: String, default: "" },
+  resolvedAt: { type: Date, default: null },
+  resolveDescription: { type: String, default: "" },
+  resolvePhoto: { type: String, default: "" },
+}, { _id: true });
+
+
+const onRoadIssueSchema = new mongoose.Schema({
+  vehicleIndex: { type: Number, required: true },
+  driverName: { type: String, default: "" },
+  vehicleRegNo: { type: String, default: "" },
+  issueDescription: { type: String, required: true },
+  issuePhoto: { type: String, default: "" },
+  status: { type: String, enum: ["open", "resolved"], default: "open" },
+  resolveDescription: { type: String, default: "" },
+  resolvePhoto: { type: String, default: "" },
+  reportedBy: { type: String, default: "" },
+  reportedAt: { type: Date, default: Date.now },
+  resolvedBy: { type: String, default: "" },
+  resolvedAt: { type: Date, default: null },
+}, { _id: true });
+
 
 
 const projectMailLogSchema = new mongoose.Schema(
@@ -147,6 +178,18 @@ const projectMailLogSchema = new mongoose.Schema(
   },
   { _id: true }
 );
+
+const onRoadDriverHistorySchema = new mongoose.Schema({
+  vehicleIndex: { type: Number, required: true },
+  action: { type: String, enum: ["created", "updated"], default: "created" },
+  driverName: { type: String, default: "" },
+  driverPhone: { type: String, default: "" },
+  vehicleRegistrationNumber: { type: String, default: "" },
+  gatepassPhoto: { type: String, default: "" },
+  changedBy: { type: String, default: "" },
+  changedAt: { type: Date, default: Date.now },
+  changedFields: { type: Object, default: {} },
+}, { _id: true });
 
 const enquiryDocSchema = new mongoose.Schema(
   {
@@ -259,7 +302,7 @@ const orderSchema = new mongoose.Schema(
     },
 
     // ── Admin Pipeline ────────────────────────────────────────────
-   
+
     pipelineStatus: {
       type: String,
       enum: [
@@ -308,24 +351,28 @@ const orderSchema = new mongoose.Schema(
 
 
     projectExecutionArray: { type: [projectExecutionDocSchema], default: [] },
-    todoArray: { type: [todoDocSchema], default: [] }, 
+    todoArray: { type: [todoDocSchema], default: [] },
 
 
 
-onRoadExecutionArray: [
-  {
-    vehicleIndex: { type: Number, required: true },  
-    driverName: { type: String, required: true, default: "" },
-    driverPhone: { type: String, required: true, default: "" },
-    vehicleRegistrationNumber: { type: String, required: true, default: "" },
-    gatepassPhoto: { type: String, default: "" },  
-    onRoadStatus: { type: Number, enum: [0, 1], default: 0 },  
-    uploadedBy: { type: String, default: "" },
-    uploadedAt: { type: Date, default: Date.now },
-  }
-],
-    
+    onRoadExecutionArray: [
+      {
+        vehicleIndex: { type: Number, required: true },
+        driverName: { type: String, required: true, default: "" },
+        driverPhone: { type: String, required: true, default: "" },
+        vehicleRegistrationNumber: { type: String, required: true, default: "" },
+        gatepassPhoto: { type: String, default: "" },
+        onRoadStatus: { type: Number, enum: [0, 1], default: 0 },
+        uploadedBy: { type: String, default: "" },
+        uploadedAt: { type: Date, default: Date.now },
+        unavailableStatus: { type: Boolean, default: false },
+        unavailableReason: { type: String, default: "" },
+      }
+    ],
+    onRoadUnavailableHistory: { type: [onRoadUnavailableHistorySchema], default: [] },
     onRoadHistory: { type: [onRoadHistorySchema], default: [] },
+    onRoadIssues: { type: [onRoadIssueSchema], default: [] },
+    onRoadDriverHistory: { type: [onRoadDriverHistorySchema], default: [] },
 
     // ── Project Code ──────────────────────────────────────────────
 
