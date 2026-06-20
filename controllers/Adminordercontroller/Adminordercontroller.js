@@ -313,43 +313,148 @@ exports.createAdminOrder = async (req, res) => {
 };
 
 
+// exports.getAllOrders = async (req, res) => {
+//   try {
+//     const { pipelineStatus, orderStatus, search, page = 1, limit = 50 } = req.query;
+//     const filter = {};
+//     if (pipelineStatus && pipelineStatus !== "all") filter.pipelineStatus = pipelineStatus;
+//     if (orderStatus && orderStatus !== "all") filter.orderStatus = orderStatus;
+//     if (search && search.trim().length >= 2) {
+//       const q = search.trim();
+//       filter.$or = [
+//         { orderId: { $regex: q, $options: "i" } },
+//         { name: { $regex: q, $options: "i" } },
+//         { phone: { $regex: q, $options: "i" } },
+//       ];
+//     }
+//     const skip = (Number(page) - 1) * Number(limit);
+//     const total = await Order.countDocuments(filter);
+//     const orders = await Order.find(filter)
+//       .sort({ createdAt: -1 })
+//       .skip(skip)
+//       .limit(Number(limit))
+//       .select(
+//         "orderId name phone address email customerType " +
+//         "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
+//         "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
+//         "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
+//         "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues  "
+//       );
+//     return successResponse(res, "Orders fetched successfully", {
+//       total, page: Number(page), totalPages: Math.ceil(total / Number(limit)), orders,
+//     });
+//   } catch (error) {
+//     return errorResponse(res, error.message);
+//   }
+// };
+
+
 exports.getAllOrders = async (req, res) => {
   try {
-    const { pipelineStatus, orderStatus, search, page = 1, limit = 50 } = req.query;
+    const {
+      page = 1,
+      limit = 10,
+      pipelineStatus,
+      orderStatus,
+      search,
+      vehicleType,
+      durationFrom,
+      durationTo,
+      createdFrom,
+      createdTo,
+    } = req.query;
+
     const filter = {};
-    if (pipelineStatus && pipelineStatus !== "all") filter.pipelineStatus = pipelineStatus;
-    if (orderStatus && orderStatus !== "all") filter.orderStatus = orderStatus;
-    if (search && search.trim().length >= 2) {
+
+    // Pipeline Status
+    if (pipelineStatus && pipelineStatus !== "all") {
+      filter.pipelineStatus = pipelineStatus;
+    }
+
+    // Order Status
+    if (orderStatus && orderStatus !== "all") {
+      filter.orderStatus = orderStatus;
+    }
+
+    // Vehicle Type filter (bookingItems array inside)
+    if (vehicleType && vehicleType !== "all") {
+      filter["bookingItems.vehicleType"] = vehicleType;
+    }
+
+    // Duration overlap filter
+    if (durationFrom || durationTo) {
+      if (durationFrom) {
+        filter["bookingItems.toDate"] = {
+          $gte: new Date(durationFrom + "T00:00:00.000Z"),
+        };
+      }
+      if (durationTo) {
+        filter["bookingItems.fromDate"] = {
+          ...filter["bookingItems.fromDate"],
+          $lte: new Date(durationTo + "T23:59:59.999Z"),
+        };
+      }
+    }
+
+    // Created At filter
+    if (createdFrom || createdTo) {
+      filter.createdAt = {};
+      if (createdFrom) {
+        filter.createdAt.$gte = new Date(createdFrom + "T00:00:00.000Z");
+      }
+      if (createdTo) {
+        filter.createdAt.$lte = new Date(createdTo + "T23:59:59.999Z");
+      }
+    }
+
+    // Search — orderId, name, phone, city, state
+    if (search && search.trim().length >= 1) {
       const q = search.trim();
-      filter.$or = [
+      const orConditions = [
         { orderId: { $regex: q, $options: "i" } },
         { name: { $regex: q, $options: "i" } },
         { phone: { $regex: q, $options: "i" } },
+        { "bookingItems.city": { $regex: q, $options: "i" } },
+        { "bookingItems.state": { $regex: q, $options: "i" } },
       ];
+      // If search is a number, also match grandTotal
+      if (!isNaN(Number(q))) {
+        orConditions.push({ grandTotal: Number(q) });
+        orConditions.push({ grandNegotiationTotal: Number(q) });
+      }
+      filter.$or = orConditions;
     }
-    const skip = (Number(page) - 1) * Number(limit);
+
+    const pageNum = Math.max(1, Number(page));
+    const limitNum = Math.min(200, Math.max(1, Number(limit)));
+    const skip = (pageNum - 1) * limitNum;
+
     const total = await Order.countDocuments(filter);
+
     const orders = await Order.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(Number(limit))
+      .limit(limitNum)
       .select(
         "orderId name phone address email customerType " +
         "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
         "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
         "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
-        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues  "
+        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray " +
+        "projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory"
       );
+
     return successResponse(res, "Orders fetched successfully", {
-      total, page: Number(page), totalPages: Math.ceil(total / Number(limit)), orders,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum),
+      orders,
     });
   } catch (error) {
     return errorResponse(res, error.message);
   }
 };
-
-
-
 
 
 
@@ -397,7 +502,8 @@ exports.getOrdersByPipeline = async (req, res) => {
         "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
         "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
         "companyName clientName designation email address gstNumber customerCategory " +
-        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy onRoadHistory onRoadIssues "
+        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy " +
+        "onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory"
       );
 
     const filteredOrders = orders.filter(
@@ -412,7 +518,7 @@ exports.getOrdersByPipeline = async (req, res) => {
       const targetStage = stage === "newOrder" ? "todo" : stage;
       if (grouped[targetStage]) grouped[targetStage].push(o);
       else grouped["todo"].push(o);
-    });
+    }); 
 
     return successResponse(res, "Pipeline orders fetched", {
       grouped,
@@ -601,8 +707,7 @@ exports.submitOnRoadDetails = async (req, res) => {
     const gatepassFile = (req.files || []).find(f => f.fieldname === "gatepassPhoto");
     const photoUrl = gatepassFile ? getFileUrl(gatepassFile) : "";
 
-   
-    order.onRoadExecutionArray.push({
+    const newEntry = {
       vehicleIndex: Number(vehicleIndex),
       driverName: driverName.trim(),
       driverPhone: driverPhone.trim(),
@@ -611,6 +716,20 @@ exports.submitOnRoadDetails = async (req, res) => {
       onRoadStatus: 0,
       uploadedBy,
       uploadedAt: new Date()
+    };
+    order.onRoadExecutionArray.push(newEntry);
+
+    // History push
+    order.onRoadDriverHistory.push({
+      vehicleIndex: Number(vehicleIndex),
+      action: "created",
+      driverName: driverName.trim(),
+      driverPhone: driverPhone.trim(),
+      vehicleRegistrationNumber: vehicleRegistrationNumber.trim().toUpperCase(),
+      gatepassPhoto: photoUrl,
+      changedBy: uploadedBy,
+      changedAt: new Date(),
+      changedFields: {},
     });
 
   
@@ -636,6 +755,53 @@ exports.submitOnRoadDetails = async (req, res) => {
     await order.save();
     return successResponse(res, "Driver details saved", { order });
 
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+exports.updateOnRoadDriver = async (req, res) => {
+  try {
+    const { id, entryId } = req.params;
+    const { driverName, driverPhone, vehicleRegistrationNumber } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const entry = order.onRoadExecutionArray.id(entryId);
+    if (!entry) return errorResponse(res, "Entry not found", null, 404);
+
+    const changedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const changedFields = {};
+    if (driverName?.trim() && driverName.trim() !== entry.driverName)
+      changedFields.driverName = { old: entry.driverName, new: driverName.trim() };
+    if (driverPhone?.trim() && driverPhone.trim() !== entry.driverPhone)
+      changedFields.driverPhone = { old: entry.driverPhone, new: driverPhone.trim() };
+    if (vehicleRegistrationNumber?.trim() && vehicleRegistrationNumber.trim().toUpperCase() !== entry.vehicleRegistrationNumber)
+      changedFields.vehicleRegistrationNumber = { old: entry.vehicleRegistrationNumber, new: vehicleRegistrationNumber.trim().toUpperCase() };
+
+    if (driverName?.trim()) entry.driverName = driverName.trim();
+    if (driverPhone?.trim()) entry.driverPhone = driverPhone.trim();
+    if (vehicleRegistrationNumber?.trim())
+      entry.vehicleRegistrationNumber = vehicleRegistrationNumber.trim().toUpperCase();
+
+    order.onRoadDriverHistory.push({
+      vehicleIndex: entry.vehicleIndex,
+      action: "updated",
+      driverName: entry.driverName,
+      driverPhone: entry.driverPhone,
+      vehicleRegistrationNumber: entry.vehicleRegistrationNumber,
+      changedBy,
+      changedAt: new Date(),
+      changedFields,
+    });
+
+    await order.save();
+    return successResponse(res, "Driver details updated", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
@@ -818,6 +984,97 @@ exports.editOnRoadDetails = async (req, res) => {
 
     await order.save();
     return successResponse(res, "On Road details updated successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.markVehicleUnavailable = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vehicleIndex, vehicleRegistrationNumber, reason } = req.body;
+
+    if (!reason?.trim())
+      return errorResponse(res, "Reason is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const entry = order.onRoadExecutionArray.find(
+      (e) => e.vehicleRegistrationNumber === vehicleRegistrationNumber?.trim()?.toUpperCase()
+    );
+    if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
+
+    const reportedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const photoFile = (req.files || []).find(f => f.fieldname === "unavailablePhoto");
+    const photoUrl = photoFile ? getFileUrl(photoFile) : "";
+
+    entry.unavailableStatus = true;
+    entry.unavailableReason = reason.trim();
+
+    order.onRoadUnavailableHistory.push({
+      vehicleIndex: entry.vehicleIndex,
+      vehicleRegNo: entry.vehicleRegistrationNumber,
+      driverName: entry.driverName,
+      reason: reason.trim(),
+      photo: photoUrl,
+      status: "unavailable",
+      reportedBy,
+      reportedAt: new Date(),
+      resolvedBy: "",
+      resolvedAt: null,
+    });
+
+    await order.save();
+    return successResponse(res, "Vehicle marked as unavailable", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+exports.markVehicleAvailable = async (req, res) => {
+  try {
+    const { id, historyId } = req.params;
+    const { resolveDescription } = req.body;
+
+    if (!resolveDescription?.trim())
+      return errorResponse(res, "Resolution reason is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const history = order.onRoadUnavailableHistory.id(historyId);
+    if (!history) return errorResponse(res, "History not found", null, 404);
+
+    const resolvedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const photoFile = (req.files || []).find(f => f.fieldname === "availablePhoto");
+    const photoUrl = photoFile ? getFileUrl(photoFile) : "";
+
+    history.status = "available";
+    history.resolvedBy = resolvedBy;
+    history.resolvedAt = new Date();
+    history.resolveDescription = resolveDescription.trim();
+    history.resolvePhoto = photoUrl;
+
+    const entry = order.onRoadExecutionArray.find(
+      (e) => e.vehicleRegistrationNumber === history.vehicleRegNo
+    );
+    if (entry) {
+      entry.unavailableStatus = false;
+      entry.unavailableReason = "";
+    }
+
+    await order.save();
+    return successResponse(res, "Vehicle marked as available", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }

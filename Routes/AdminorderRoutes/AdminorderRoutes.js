@@ -79,9 +79,11 @@ router.post(
   ctrl.uploadStageDocument
 );
 
-
+router.patch("/pipeline/:id/onroad-driver/:entryId", protect, ctrl.updateOnRoadDriver);
 router.post("/pipeline/:id/onroad-issue", protect, pipelineUpload, ctrl.addOnRoadIssue);
 router.patch("/pipeline/:id/onroad-issue/:issueId/resolve", protect, pipelineUpload, ctrl.resolveOnRoadIssue);
+router.post("/pipeline/:id/onroad-unavailable", protect, pipelineUpload, ctrl.markVehicleUnavailable);
+router.patch("/pipeline/:id/onroad-unavailable/:historyId/available", protect, pipelineUpload, ctrl.markVehicleAvailable);
 
 router.patch("/pipeline/:id/todo-uploader", protect, ctrl.saveTodoUploadedBy);
 
