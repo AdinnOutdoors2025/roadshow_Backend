@@ -30,6 +30,7 @@ const ContactEnquiryRoutes = require("./Routes/ContactEnquiryRoute/ContactEnquir
 const packageRoutes = require('./Routes/PackageManagementRoutes/packagemanagement');
 const adminOrderRoutes = require("./Routes/AdminorderRoutes/AdminorderRoutes");
 const SalesOrderRoutes = require("./Routes/Salesorderroutes/salesorderRoutes");
+const DriverLocationRoutes = require("./Routes/driverlocationRoutes/driverlocationroutes");
 const locationRoutes = require('./Routes/locationRoutes/locationRoutes');
 const vehicleTypeRoutes = require("./Routes/vehicleTypeRoutes");
 const gstDetailRoutes = require('./Routes/GstDetailRoutes/gstDetailRoutes');
@@ -209,6 +210,7 @@ app.use(ContactEnquiryRoutes);
 app.use('/packages', packageRoutes);
 app.use("/admin", adminOrderRoutes);
 app.use("/sales", SalesOrderRoutes);
+app.use("/api/orders", DriverLocationRoutes);
 app.use('/locations', locationRoutes);
 app.use('/gstdetails', gstDetailRoutes);
 app.use('/promoters', promoterroutes);

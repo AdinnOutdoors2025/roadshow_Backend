@@ -62,9 +62,10 @@ if (STORAGE_TYPE === "space") {
   });
 }
 
+
 const salesUpload = multer({
   storage: salesUploadStorage,
-  limits: { fileSize: 20 * 1024 * 1024 }, 
+  limits: { fileSize: 10 * 1024 * 1024 }, 
   fileFilter: salesFileFilter,
 }).any();
 

@@ -31,6 +31,30 @@ const getFilePath = (file) => {
   return `/uploads/${path.basename(file.path)}`;
 };
 
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;  
+const DOC_MAX_BYTES   = 10 * 1024 * 1024;  
+
+const IMAGE_MIMES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+const DOC_MIMES   = ["application/pdf"];
+
+const validateFile = (file, label) => {
+  if (!file) return null;
+
+  const isImage = IMAGE_MIMES.includes(file.mimetype);
+  const isDoc   = DOC_MIMES.includes(file.mimetype);
+
+  const maxBytes = isImage ? IMAGE_MAX_BYTES : DOC_MAX_BYTES;
+  const maxLabel = isImage ? "5 MB" : "10 MB";
+  const typeLabel = isImage ? "Image" : "PDF document";
+
+  const fileSize = file.size || (file.buffer ? file.buffer.length : 0);
+
+  if (fileSize > maxBytes) {
+    return `${label} ${typeLabel} size exceeds ${maxLabel} limit (uploaded: ${(fileSize / (1024 * 1024)).toFixed(2)} MB)`;
+  }
+  return null;
+};
+
 
 exports.getSalesPipeline = async (req, res) => {
   try {
@@ -110,6 +134,19 @@ exports.updateSalesPipeline = async (req, res) => {
     // const movedBy = order.salesHandlerName || "Admin";
     const movedBy = req.user?.username || order.salesHandlerName || "Admin";
     const uploadedFiles = req.files || [];
+
+     const fileFieldLabels = {
+      analysisDocument: "Need Analysis",
+      proposalDocument: "Proposal",
+      negotiationDocument: "Negotiation",
+      salesPoDocument: "Sales PO",
+      closedLostDocument: "Closed Lost",
+    };
+    for (const file of uploadedFiles) {
+      const label = fileFieldLabels[file.fieldname] || file.fieldname;
+      const err = validateFile(file, label);
+      if (err) return errorResponse(res, err, null, 400);
+    }
 
 
     if (order.salesPipelineStatus === "projectCodeCreation") {
@@ -285,6 +322,20 @@ exports.uploadStageDocument = async (req, res) => {
 
     const uploadedBy = order.salesHandlerName;
     const uploadedFiles = req.files || [];
+
+      // File size validation
+    const stageFileLabels = {
+      enquiryDocument: "Enquiry",
+      analysisDocument: "Need Analysis",
+      proposalDocument: "Proposal",
+      negotiationDocument: "Negotiation",
+      salesPoDocument: "Sales PO",
+    };
+    for (const file of uploadedFiles) {
+      const label = stageFileLabels[file.fieldname] || file.fieldname;
+      const err = validateFile(file, label);
+      if (err) return errorResponse(res, err, null, 400);
+    }
 
 
     if (stage === "enquiry") {

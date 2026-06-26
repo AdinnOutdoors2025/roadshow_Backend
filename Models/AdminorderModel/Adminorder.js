@@ -91,6 +91,19 @@ const projectExecutionDocSchema = new mongoose.Schema(
 );
 
 
+const driverLocationSchema = new mongoose.Schema(
+  {
+    vehicleRegistrationNumber: { type: String, required: true },
+    latitude: { type: Number, required: true },
+    longitude: { type: Number, required: true },
+    address: { type: String, default: "" },
+    updatedBy: { type: String, default: "" },
+    updatedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+
 const todoDocSchema = new mongoose.Schema(
   {
     document: { type: String, default: "" },
@@ -353,7 +366,7 @@ const orderSchema = new mongoose.Schema(
     projectExecutionArray: { type: [projectExecutionDocSchema], default: [] },
     todoArray: { type: [todoDocSchema], default: [] },
 
-
+    driverLocationArray: { type: [driverLocationSchema], default: [] },
 
     onRoadExecutionArray: [
       {

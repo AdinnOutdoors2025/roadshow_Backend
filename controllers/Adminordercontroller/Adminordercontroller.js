@@ -94,6 +94,33 @@ function calcPricingBackend(pkg, v) {
 }
 
 
+
+const IMAGE_MIMES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const DOC_MAX_BYTES = 10 * 1024 * 1024;
+
+const VIDEO_MIMES = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska", "video/webm"];
+const VIDEO_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+
+const validateFile = (file, label) => {
+  if (!file) return null;
+  const isImage = IMAGE_MIMES.includes(file.mimetype);
+  const isVideo = VIDEO_MIMES.includes(file.mimetype);
+  const fileSize = file.size || 0;
+
+  if (isImage && fileSize > IMAGE_MAX_BYTES) {
+    return `Image upload only 5 MB allowed. "${file.originalname}" is ${(fileSize / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  if (isVideo && fileSize > VIDEO_MAX_BYTES) {
+    return `Video upload only 50 MB allowed. "${file.originalname}" is ${(fileSize / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  if (!isImage && !isVideo && fileSize > DOC_MAX_BYTES) {
+    return `PDF document upload only 10 MB allowed. "${file.originalname}" is ${(fileSize / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  return null;
+};
+
+
 const STAGE_ORDER = [
   "todo",
   "projectExecution",
@@ -205,10 +232,25 @@ exports.createAdminOrder = async (req, res) => {
         campaignTypeName = ct.name;
       }
 
+
+
+
       const uploadedFiles = req.files || [];
-      const campaignImages = uploadedFiles
-        .filter((f) => f.fieldname === `campaignImages_${i}`)
-        .map((f) => getFileUrl(f));
+
+
+      const imageFiles = uploadedFiles.filter((f) => f.fieldname === `campaignImages_${i}`);
+      for (const imgFile of imageFiles) {
+        if ((imgFile.size || 0) > IMAGE_MAX_BYTES) {
+          return errorResponse(
+            res,
+            `Vehicle ${i + 1}: Campaign image "${imgFile.originalname}" exceeds 5 MB limit (uploaded: ${((imgFile.size || 0) / (1024 * 1024)).toFixed(2)} MB)`,
+            null,
+            400
+          );
+        }
+      }
+
+      const campaignImages = imageFiles.map((f) => getFileUrl(f));
       const campaignVideos = uploadedFiles
         .filter((f) => f.fieldname === `campaignVideos_${i}`)
         .map((f) => getFileUrl(f));
@@ -366,22 +408,22 @@ exports.getAllOrders = async (req, res) => {
 
     const filter = {};
 
-    // Pipeline Status
+
     if (pipelineStatus && pipelineStatus !== "all") {
       filter.pipelineStatus = pipelineStatus;
     }
 
-    // Order Status
+
     if (orderStatus && orderStatus !== "all") {
       filter.orderStatus = orderStatus;
     }
 
-    // Vehicle Type filter (bookingItems array inside)
+   
     if (vehicleType && vehicleType !== "all") {
       filter["bookingItems.vehicleType"] = vehicleType;
     }
 
-    // Duration overlap filter
+
     if (durationFrom || durationTo) {
       if (durationFrom) {
         filter["bookingItems.toDate"] = {
@@ -396,7 +438,7 @@ exports.getAllOrders = async (req, res) => {
       }
     }
 
-    // Created At filter
+
     if (createdFrom || createdTo) {
       filter.createdAt = {};
       if (createdFrom) {
@@ -407,7 +449,7 @@ exports.getAllOrders = async (req, res) => {
       }
     }
 
-    // Search — orderId, name, phone, city, state
+
     if (search && search.trim().length >= 1) {
       const q = search.trim();
       const orConditions = [
@@ -417,7 +459,7 @@ exports.getAllOrders = async (req, res) => {
         { "bookingItems.city": { $regex: q, $options: "i" } },
         { "bookingItems.state": { $regex: q, $options: "i" } },
       ];
-      // If search is a number, also match grandTotal
+   
       if (!isNaN(Number(q))) {
         orConditions.push({ grandTotal: Number(q) });
         orConditions.push({ grandNegotiationTotal: Number(q) });
@@ -518,7 +560,7 @@ exports.getOrdersByPipeline = async (req, res) => {
       const targetStage = stage === "newOrder" ? "todo" : stage;
       if (grouped[targetStage]) grouped[targetStage].push(o);
       else grouped["todo"].push(o);
-    }); 
+    });
 
     return successResponse(res, "Pipeline orders fetched", {
       grouped,
@@ -558,20 +600,20 @@ exports.updateOrderPipeline = async (req, res) => {
       );
     }
 
-   
-if (oldStage === "projectExecution" && pipelineStatus === "onRoad") {
-  const hasActiveDriver = order.onRoadExecutionArray.some(
-    e => e.onRoadStatus === 1
-  );
-  if (!hasActiveDriver) {
-    return errorResponse(
-      res, 
-      "Please complete at least one vehicle Model details and enable On Road status",
-      null, 
-      400
-    );
-  }
-}
+
+    if (oldStage === "projectExecution" && pipelineStatus === "onRoad") {
+      const hasActiveDriver = order.onRoadExecutionArray.some(
+        e => e.onRoadStatus === 1
+      );
+      if (!hasActiveDriver) {
+        return errorResponse(
+          res,
+          "Please complete at least one vehicle Model details and enable On Road status",
+          null,
+          400
+        );
+      }
+    }
 
     const movedBy = req.user?.username || order.handlerName || "Admin";
 
@@ -590,18 +632,24 @@ if (oldStage === "projectExecution" && pipelineStatus === "onRoad") {
 
     order.pipelineStatus = pipelineStatus;
 
+    
+    // logEntry.handlerName = order.handlerName || "";
+
     const logEntry = {
       fromStage: oldStage,
       toStage: pipelineStatus,
       movedBy,
+      handlerName: order.handlerName || "",
       movedAt: new Date(),
     };
 
-    if (
-      pipelineStatus === "projectExecution"
-    ) {
-      logEntry.handlerName = order.handlerName || "";
-    }
+    // if (
+    //   pipelineStatus === "projectExecution"
+    // ) {
+    //   logEntry.handlerName = order.handlerName || "";
+    // }
+
+
 
     order.pipelineLogs.push(logEntry);
     await order.save();
@@ -634,8 +682,13 @@ exports.uploadStageDocument = async (req, res) => {
         : order.handlerName || req.user?.username || "Admin");
 
     const docFile = (req.files || []).find((f) => f.fieldname === "document");
-    const docUrl = docFile ? getFileUrl(docFile) : "";
 
+    if (docFile) {
+      const err = validateFile(docFile, "Stage document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+
+    const docUrl = docFile ? getFileUrl(docFile) : "";
 
     if (stage === "todo" || order.pipelineStatus === "todo") {
       if (docUrl || notes?.trim()) {
@@ -686,7 +739,7 @@ exports.submitOnRoadDetails = async (req, res) => {
   try {
     const { id } = req.params;
     const { vehicleIndex, driverName, driverPhone,
-            vehicleRegistrationNumber } = req.body;
+      vehicleRegistrationNumber } = req.body;
 
     if (!driverName?.trim())
       return errorResponse(res, "Driver name is required", null, 400);
@@ -703,7 +756,7 @@ exports.submitOnRoadDetails = async (req, res) => {
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
-   
+
     const gatepassFile = (req.files || []).find(f => f.fieldname === "gatepassPhoto");
     const photoUrl = gatepassFile ? getFileUrl(gatepassFile) : "";
 
@@ -732,13 +785,13 @@ exports.submitOnRoadDetails = async (req, res) => {
       changedFields: {},
     });
 
-  
-   
+
+
     const vIdx = Number(vehicleIndex);
     const bookingItem = order.bookingItems[vIdx];
     const requiredQty = bookingItem?.quantity || 1;
 
-   
+
     const savedForThisVehicle = order.onRoadExecutionArray.filter(
       e => e.vehicleIndex === vIdx
     );
@@ -811,7 +864,7 @@ exports.updateOnRoadDriver = async (req, res) => {
 exports.addOnRoadIssue = async (req, res) => {
   try {
     const { id } = req.params;
-   
+
     const { vehicleIndex, issueDescription, vehicleRegistrationNumber } = req.body;
 
     if (!issueDescription?.trim())
@@ -820,7 +873,7 @@ exports.addOnRoadIssue = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-  
+
     let entry;
     if (vehicleRegistrationNumber?.trim()) {
       entry = order.onRoadExecutionArray.find(
@@ -838,6 +891,12 @@ exports.addOnRoadIssue = async (req, res) => {
         : order.handlerName || req.user?.username || "Admin";
 
     const photoFile = (req.files || []).find(f => f.fieldname === "issuePhoto");
+
+    if (photoFile) {
+      const err = validateFile(photoFile, "Issue photo");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+
     const photoUrl = photoFile ? getFileUrl(photoFile) : "";
 
     order.onRoadIssues.push({
@@ -877,13 +936,19 @@ exports.resolveOnRoadIssue = async (req, res) => {
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
-  
+
     const photoFile = (req.files || []).find(f => f.fieldname === "resolvePhoto");
+
+    if (photoFile) {
+      const err = validateFile(photoFile, "Resolve photo");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+
     const photoUrl = photoFile ? getFileUrl(photoFile) : "";
 
     issue.status = "resolved";
     issue.resolveDescription = resolveDescription.trim();
-    issue.resolvePhoto = photoUrl;   
+    issue.resolvePhoto = photoUrl;
     issue.resolvedBy = resolvedBy;
     issue.resolvedAt = new Date();
 
@@ -902,7 +967,7 @@ exports.updateOnRoadStatus = async (req, res) => {
   const order = await Order.findById(id);
   const entry = order.onRoadExecutionArray.id(entryId);
   entry.onRoadStatus = Number(onRoadStatus);
-  
+
   await order.save();
   return successResponse(res, "Status updated", { order });
 };
@@ -943,7 +1008,7 @@ exports.editOnRoadDetails = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-   
+
     const entry = order.onRoadExecutionArray.id(entryId);
     if (!entry) return errorResponse(res, "Entry not found", null, 404);
 
@@ -952,7 +1017,7 @@ exports.editOnRoadDetails = async (req, res) => {
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
-   
+
     const changedFields = {};
     if (driverName?.trim() && driverName.trim() !== entry.driverName)
       changedFields.driverName = { old: entry.driverName, new: driverName.trim() };
@@ -963,14 +1028,14 @@ exports.editOnRoadDetails = async (req, res) => {
     if (vehicleRegistrationNumber?.trim() && vehicleRegistrationNumber.trim() !== entry.vehicleRegistrationNumber)
       changedFields.vehicleRegistrationNumber = { old: entry.vehicleRegistrationNumber, new: vehicleRegistrationNumber.trim() };
 
-    
+
     if (driverName?.trim()) entry.driverName = driverName.trim();
     if (driverPhone?.trim()) entry.driverPhone = driverPhone.trim();
     if (driverAlternatePhone !== undefined) entry.driverAlternatePhone = driverAlternatePhone;
     if (vehicleRegistrationNumber?.trim())
       entry.vehicleRegistrationNumber = vehicleRegistrationNumber.trim().toUpperCase();
 
-    
+
     order.onRoadHistory.push({
       action: "edited",
       driverName: entry.driverName,
@@ -1012,6 +1077,12 @@ exports.markVehicleUnavailable = async (req, res) => {
         : order.handlerName || req.user?.username || "Admin";
 
     const photoFile = (req.files || []).find(f => f.fieldname === "unavailablePhoto");
+
+    if (photoFile) {
+      const err = validateFile(photoFile, "Unavailable photo");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+
     const photoUrl = photoFile ? getFileUrl(photoFile) : "";
 
     entry.unavailableStatus = true;
@@ -1042,9 +1113,6 @@ exports.markVehicleAvailable = async (req, res) => {
     const { id, historyId } = req.params;
     const { resolveDescription } = req.body;
 
-    if (!resolveDescription?.trim())
-      return errorResponse(res, "Resolution reason is required", null, 400);
-
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
@@ -1057,12 +1125,18 @@ exports.markVehicleAvailable = async (req, res) => {
         : order.handlerName || req.user?.username || "Admin";
 
     const photoFile = (req.files || []).find(f => f.fieldname === "availablePhoto");
+
+    if (photoFile) {
+      const err = validateFile(photoFile, "Available photo");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+
     const photoUrl = photoFile ? getFileUrl(photoFile) : "";
 
     history.status = "available";
     history.resolvedBy = resolvedBy;
     history.resolvedAt = new Date();
-    history.resolveDescription = resolveDescription.trim();
+    history.resolveDescription = (resolveDescription || "").trim();
     history.resolvePhoto = photoUrl;
 
     const entry = order.onRoadExecutionArray.find(
