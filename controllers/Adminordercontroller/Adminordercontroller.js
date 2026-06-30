@@ -8,6 +8,7 @@ const Package = require("../../Models/PackageManagementModel/packagemanagement")
 require("dotenv").config();
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const { successResponse, errorResponse } = require("../../Utils/response");
+const { sendFocMail, getActiveAdminEmails, getEmailByUsername } = require('../../Utils/focMailer');
 
 
 
@@ -125,7 +126,6 @@ const STAGE_ORDER = [
   "todo",
   "projectExecution",
   "onRoad",
-  "campaignRunning",
   "vehicleUnavailable",
   "clientClosure",
   "invoiceGeneration",
@@ -483,7 +483,7 @@ exports.getAllOrders = async (req, res) => {
         "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
         "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
         "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray " +
-        "projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory"
+        "projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray"
       );
 
     return successResponse(res, "Orders fetched successfully", {
@@ -545,7 +545,7 @@ exports.getOrdersByPipeline = async (req, res) => {
         "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
         "companyName clientName designation email address gstNumber customerCategory " +
         "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy " +
-        "onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory"
+        "onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray"
       );
 
     const filteredOrders = orders.filter(
@@ -583,6 +583,10 @@ exports.updateOrderPipeline = async (req, res) => {
 
     const order = await Order.findById(orderId);
     if (!order) return errorResponse(res, "Order not found", null, 404);
+
+     if (order.pipelineStatus === "closedLost") {
+      return errorResponse(res, "This order is closed lost and cannot be moved.", null, 400);
+    }
 
     const oldStage = order.pipelineStatus;
     const isStaff = Number(req.user.isAdmin) === 0;
@@ -669,10 +673,7 @@ exports.uploadStageDocument = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-    // const uploadedBy =
-    //   Number(req.user.isAdmin) === 0
-    //     ? req.user.username
-    //     : order.handlerName || req.user?.username || "Admin";
+
 
     const uploadedBy =
       (order.pipelineStatus === "todo" ? order.todoUploadedBy : null) ||
@@ -1149,6 +1150,415 @@ exports.markVehicleAvailable = async (req, res) => {
 
     await order.save();
     return successResponse(res, "Vehicle marked as available", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.submitClientFeedback = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comments, rating, bookingItemId } = req.body; // ADD bookingItemId
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const createdBy = Number(req.user.isAdmin) === 0
+      ? req.user.username
+      : order.handlerName || req.user?.username || "Admin";
+
+    const feedbackEntry = {
+      bookingItemId: bookingItemId || null, // ADD THIS
+      comments: (comments || "").trim(),
+      rating: rating || null,
+      createdBy,
+      createdDate: new Date(),
+    };
+
+    order.clientFeedbackHistory.push(feedbackEntry);
+    await order.save();
+    return successResponse(res, "Feedback submitted successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+
+
+exports.submitCampaignClosure = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type, reason, fromDate, toDate, bookingItemId } = req.body;
+
+    if (!type || !["closed", "foc", "paid"].includes(type))
+      return errorResponse(res, "Invalid closure type", null, 400);
+
+    if (type === "closed" && !reason?.trim())
+      return errorResponse(res, "Reason is required for closure", null, 400);
+
+    if (type === "foc") {
+      if (!reason?.trim())
+        return errorResponse(res, "Reason is required for FOC", null, 400);
+      if (!fromDate)
+        return errorResponse(res, "From date is required", null, 400);
+      if (!toDate)
+        return errorResponse(res, "To date is required", null, 400);
+    }
+
+    if (type === "paid") {
+      if (!fromDate)
+        return errorResponse(res, "From date is required", null, 400);
+      if (!toDate)
+        return errorResponse(res, "To date is required", null, 400);
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const createdBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const docFile = (req.files || []).find((f) => f.fieldname === "document");
+    if (docFile) {
+      const err = validateFile(docFile, "Document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const docUrl = docFile ? getFileUrl(docFile) : "";
+
+    if (type === "foc") {
+      const existing = order.campaignClosureArray.find(
+        (c) =>
+          c.type === "foc" &&
+          c.status === "pending" &&
+          String(c.bookingItemId) === String(bookingItemId || "")
+      );
+
+      // requester's own email straight from JWT — no DB lookup needed
+      const requesterEmail = req.user?.email || "";
+      const adminEmails = await getActiveAdminEmails();
+
+      if (existing) {
+        const changedFields = {};
+        const newReason = reason.trim();
+        const newFromDate = new Date(fromDate);
+        const newToDate = new Date(toDate);
+
+        if (existing.reason !== newReason)
+          changedFields.reason = { old: existing.reason, new: newReason };
+        if (!existing.fromDate || existing.fromDate.getTime() !== newFromDate.getTime())
+          changedFields.fromDate = { old: existing.fromDate, new: newFromDate };
+        if (!existing.toDate || existing.toDate.getTime() !== newToDate.getTime())
+          changedFields.toDate = { old: existing.toDate, new: newToDate };
+        if (docUrl && existing.document !== docUrl)
+          changedFields.document = { old: existing.document, new: docUrl };
+
+        const finalDocPath = docUrl || existing.document;
+
+        await sendFocMail({
+          status: "created",
+          reason: newReason,
+          fromDate: newFromDate,
+          toDate: newToDate,
+          documentPath: finalDocPath,
+          description: `FOC extension request updated by ${createdBy} for order ${order.projectCodeArray[0].projectCode}. Reason: ${newReason}`,
+          toEmail: adminEmails,
+          ccEmail: requesterEmail,
+        });
+
+        existing.reason = newReason;
+        existing.fromDate = newFromDate;
+        existing.toDate = newToDate;
+        if (docUrl) existing.document = docUrl;
+
+        if (Object.keys(changedFields).length > 0) {
+          existing.focHistory.push({
+            action: "updated",
+            changedFields,
+            changedBy: createdBy,
+            changedAt: new Date(),
+          });
+        }
+
+        await order.save();
+        return successResponse(res, "FOC extension updated successfully", { order });
+      }
+
+      const newReason = reason.trim();
+      const newFromDate = new Date(fromDate);
+      const newToDate = new Date(toDate);
+
+      await sendFocMail({
+        status: "created",
+        reason: newReason,
+        fromDate: newFromDate,
+        toDate: newToDate,
+        documentPath: docUrl,
+        description: `New FOC extension request raised by ${createdBy} for order ${order.projectCodeArray[0].projectCode}. Reason: ${newReason}`,
+        toEmail: adminEmails,
+        ccEmail: requesterEmail,
+      });
+
+      const closureEntry = {
+        bookingItemId: bookingItemId || null,
+        type,
+        reason: newReason,
+        document: docUrl,
+        fromDate: newFromDate,
+        toDate: newToDate,
+        createdBy,
+        createdAt: new Date(),
+        status: "pending",
+        focHistory: [
+          { action: "created", changedFields: {}, changedBy: createdBy, changedAt: new Date() },
+        ],
+      };
+
+      order.campaignClosureArray.push(closureEntry);
+      await order.save();
+      return successResponse(res, "FOC extension submitted successfully", { order });
+    }
+
+    const closureEntry = {
+      bookingItemId: bookingItemId || null,
+      type,
+      reason: (reason || "").trim(),
+      document: docUrl,
+      fromDate: fromDate ? new Date(fromDate) : null,
+      toDate: toDate ? new Date(toDate) : null,
+      createdBy,
+      createdAt: new Date(),
+    };
+
+    order.campaignClosureArray.push(closureEntry);
+
+    if (type === "closed") {
+      const oldStage = order.pipelineStatus;
+      order.pipelineStatus = "closedLost";
+      order.pipelineLogs.push({
+        fromStage: oldStage,
+        toStage: "closedLost",
+        movedBy: createdBy,
+        movedAt: new Date(),
+      });
+    }
+
+    await order.save();
+    return successResponse(res, "Campaign closure submitted successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.approveFocEntry = async (req, res) => {
+  try {
+    const { id, closureId } = req.params;
+    const { fromDate, reason, toDate } = req.body;
+
+    if (Number(req.user.isAdmin) !== 1) {
+      return errorResponse(res, "Only super admin can approve FOC extension", null, 403);
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const entry = order.campaignClosureArray.id(closureId);
+    if (!entry) return errorResponse(res, "FOC entry not found", null, 404);
+    if (entry.type !== "foc") return errorResponse(res, "Not a FOC entry", null, 400);
+    if (entry.status === "approved") return errorResponse(res, "Already approved", null, 400);
+
+    const approvedBy = req.user?.username || "Admin";
+    const changedFields = {};
+
+    if (fromDate) {
+      const newFromDate = new Date(fromDate);
+      if (!entry.fromDate || entry.fromDate.getTime() !== newFromDate.getTime()) {
+        changedFields.fromDate = { old: entry.fromDate, new: newFromDate };
+        entry.fromDate = newFromDate;
+      }
+    }
+    if (reason && reason.trim() && reason.trim() !== entry.reason) {
+      changedFields.reason = { old: entry.reason, new: reason.trim() };
+      entry.reason = reason.trim();
+    }
+    if (toDate) {
+      const newToDate = new Date(toDate);
+      if (!entry.toDate || entry.toDate.getTime() !== newToDate.getTime()) {
+        changedFields.toDate = { old: entry.toDate, new: newToDate };
+        entry.toDate = newToDate;
+      }
+    }
+
+    // approver's own email straight from JWT — no DB lookup needed
+    const approverEmail = req.user?.email || "";
+
+    // original requester is a DIFFERENT user, so this still needs a DB lookup
+    const createdByUsername =
+      (entry.focHistory || []).find((h) => h.action === "created")?.changedBy ||
+      entry.createdBy;
+    const creatorEmail = await getEmailByUsername(createdByUsername);
+
+    await sendFocMail({
+      status: "approved",
+      reason: entry.reason,
+      fromDate: entry.fromDate,
+      toDate: entry.toDate,
+      documentPath: entry.document,
+      description: `FOC extension approved by ${approvedBy} for order ${order.projectCodeArray[0].projectCode}. Reason: ${entry.reason}`,
+      toEmail: approverEmail,
+      ccEmail: creatorEmail,
+    });
+
+    entry.status = "approved";
+    entry.approvedBy = approvedBy;
+    entry.approvedAt = new Date();
+
+    entry.focHistory.push({
+      action: "approved",
+      changedFields,
+      changedBy: approvedBy,
+      changedAt: new Date(),
+    });
+
+    await order.save();
+    return successResponse(res, "FOC extension approved successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.updateCampaignClosure = async (req, res) => {
+  try {
+    const { id, closureId } = req.params;
+    const { reason, fromDate, toDate } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const entry = order.campaignClosureArray.id(closureId);
+    if (!entry) return errorResponse(res, "Closure entry not found", null, 404);
+
+    const docFile = (req.files || []).find(f => f.fieldname === "document");
+    if (docFile) {
+      const err = validateFile(docFile, "Document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const docUrl = docFile ? getFileUrl(docFile) : entry.document;
+
+    if (reason?.trim()) entry.reason = reason.trim();
+    if (fromDate) entry.fromDate = new Date(fromDate);
+    if (toDate) entry.toDate = new Date(toDate);
+    if (docUrl) entry.document = docUrl;
+
+    await order.save();
+    return successResponse(res, "Closure updated successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.submitOrderClosedWon = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comments } = req.body;
+
+    if (!comments?.trim())
+      return errorResponse(res, "Comments are required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    if (order.pipelineStatus === "closedLost") {
+      return errorResponse(res, "This order is closed lost and cannot be moved.", null, 400);
+    }
+
+    const uploadedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const docFile = (req.files || []).find((f) => f.fieldname === "document");
+    if (docFile) {
+      const err = validateFile(docFile, "Closed Won document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const docUrl = docFile ? getFileUrl(docFile) : "";
+
+    order.orderClosedWonArray.push({
+      comments: comments.trim(),
+      document: docUrl,
+      uploadedBy,
+      uploadedAt: new Date(),
+    });
+
+    const oldStage = order.pipelineStatus;
+    order.pipelineStatus = "closedWon";
+    order.pipelineLogs.push({
+      fromStage: oldStage,
+      toStage: "closedWon",
+      movedBy: uploadedBy,
+      movedAt: new Date(),
+    });
+
+    await order.save();
+    return successResponse(res, "Order moved to Closed Won successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.submitOrderClosedLost = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason?.trim())
+      return errorResponse(res, "Reason is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    if (order.pipelineStatus === "closedLost") {
+      return errorResponse(res, "This order is already closed lost.", null, 400);
+    }
+
+    const uploadedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const docFile = (req.files || []).find((f) => f.fieldname === "document");
+    if (docFile) {
+      const err = validateFile(docFile, "Closed Lost document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const docUrl = docFile ? getFileUrl(docFile) : "";
+
+    order.orderClosedLostArray.push({
+      reason: reason.trim(),
+      document: docUrl,
+      uploadedBy,
+      uploadedAt: new Date(),
+    });
+
+    const oldStage = order.pipelineStatus;
+    order.pipelineStatus = "closedLost";
+    order.pipelineLogs.push({
+      fromStage: oldStage,
+      toStage: "closedLost",
+      movedBy: uploadedBy,
+      movedAt: new Date(),
+    });
+
+    await order.save();
+    return successResponse(res, "Order moved to Closed Lost successfully", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }

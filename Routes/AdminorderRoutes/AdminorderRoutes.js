@@ -89,8 +89,31 @@ router.patch("/pipeline/:id/todo-uploader", protect, ctrl.saveTodoUploadedBy);
 
 router.post("/pipeline/:id/onroad-details", protect, pipelineUpload, ctrl.submitOnRoadDetails);
 router.patch("/pipeline/:id/onroad-status/:entryId", protect, ctrl.updateOnRoadStatus);
+router.post(
+  "/pipeline/:id/closed-won",
+  protect,
+  pipelineUpload,
+  ctrl.submitOrderClosedWon
+);
+
+router.post(
+  "/pipeline/:id/closed-lost",
+  protect,
+  pipelineUpload,
+  ctrl.submitOrderClosedLost
+);
 
 router.put("/pipeline/:id/onroad-details/:entryId", protect, ctrl.editOnRoadDetails);
+
+router.post("/pipeline/:id/client-feedback", protect, pipelineUpload, ctrl.submitClientFeedback);
+router.post("/pipeline/:id/campaign-closure", protect, pipelineUpload, ctrl.submitCampaignClosure);
+router.patch("/pipeline/:id/campaign-closure/:closureId", protect, pipelineUpload, ctrl.updateCampaignClosure);
+router.patch(
+  "/pipeline/:id/campaign-closure/:closureId/approve",
+  protect,
+  pipelineUpload,
+  ctrl.approveFocEntry
+);
 
 router.get("/orders", protect, ctrl.getAllOrders);  
 router.get("/orders/:orderId", ctrl.getOrderById);

@@ -9,35 +9,51 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN;
 
 const generateToken = (admin) =>
   jwt.sign(
-    { id: admin._id, username: admin.username, role: admin.role , isAdmin: admin.isAdmin },
+    { id: admin._id, username: admin.username, role: admin.role , isAdmin: admin.isAdmin ,email:admin.email },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
   );
 
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 
 const registerAdmin = async (req, res) => {
-  const { username, password } = req.body;
+  const { username, email, password } = req.body;
 
   try {
-    if (!username || !password) {
-      return errorResponse(res, 'All fields are required: username, password', null, 400);
+    if (!username || !email || !password) {
+      return errorResponse(res, 'All fields are required: username, email, password', null, 400);
     }
 
     if (!/^[a-zA-Z0-9]{4,20}$/.test(username)) {
       return errorResponse(res, 'Username must be 4-20 alphanumeric characters', null, 400);
     }
 
+    if (!EMAIL_REGEX.test(email.trim())) {
+      return errorResponse(res, 'Please provide a valid email address', null, 400);
+    }
+
     if (password.length < 6) {
       return errorResponse(res, 'Password must be at least 6 characters', null, 400);
     }
 
-    const existing = await AdminUser.findOne({ username: username.trim() });
+    const existing = await AdminUser.findOne({
+      $or: [
+        { username: username.trim() },
+        { email: email.trim().toLowerCase() },
+      ],
+    });
+
     if (existing) {
-      return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+      if (existing.username === username.trim()) {
+        return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+      }
+      return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
     }
 
     const admin = new AdminUser({
       username: username.trim(),
+      email: email.trim().toLowerCase(),
       password,
       role: 'admin',
     });
@@ -47,11 +63,15 @@ const registerAdmin = async (req, res) => {
 
     return successResponse(res, 'Admin registered successfully', {
       token,
-      user: { id: admin._id, username: admin.username, role: admin.role },
+      user: { id: admin._id, username: admin.username, email: admin.email, role: admin.role },
     }, 201);
 
   } catch (err) {
     if (err.code === 11000) {
+      const field = Object.keys(err.keyPattern || {})[0];
+      if (field === 'email') {
+        return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
+      }
       return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
     }
     console.error('Register error:', err.message);
@@ -105,24 +125,37 @@ const getAdminProfile = (req, res) => {
 };
 
 const createStaffAdmin = async (req, res) => {
-  const { username, password, phone } = req.body;
+  const { username, email, password, phone } = req.body;
 
   try {
-    if (!username || !password)
-      return errorResponse(res, 'Username and password are required', null, 400);
+    if (!username || !email || !password)
+      return errorResponse(res, 'Username, email and password are required', null, 400);
 
     if (!/^[a-zA-Z0-9]{4,20}$/.test(username))
       return errorResponse(res, 'Username must be 4-20 alphanumeric characters', null, 400);
 
+    if (!EMAIL_REGEX.test(email.trim()))
+      return errorResponse(res, 'Please provide a valid email address', null, 400);
+
     if (password.length < 6)
       return errorResponse(res, 'Password must be at least 6 characters', null, 400);
 
-    const existing = await AdminUser.findOne({ username: username.trim() });
-    if (existing)
-      return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+    const existing = await AdminUser.findOne({
+      $or: [
+        { username: username.trim() },
+        { email: email.trim().toLowerCase() },
+      ],
+    });
+
+    if (existing) {
+      if (existing.username === username.trim())
+        return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+      return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
+    }
 
     const staffAdmin = new AdminUser({
       username: username.trim(),
+      email: email.trim().toLowerCase(),
       password,
       phone: phone || '',
       isAdmin: 0,
@@ -136,6 +169,7 @@ const createStaffAdmin = async (req, res) => {
       user: {
         id: staffAdmin._id,
         username: staffAdmin.username,
+        email: staffAdmin.email,
         phone: staffAdmin.phone,
         role: staffAdmin.role,
         isAdmin: staffAdmin.isAdmin,
@@ -144,8 +178,12 @@ const createStaffAdmin = async (req, res) => {
     }, 201);
 
   } catch (err) {
-    if (err.code === 11000)
+    if (err.code === 11000) {
+      const field = Object.keys(err.keyPattern || {})[0];
+      if (field === 'email')
+        return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
       return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+    }
     return errorResponse(res, 'Server error', err.message);
   }
 };
@@ -163,7 +201,7 @@ const getAllStaffAdmins = async (req, res) => {
 // UPDATE
 const updateStaffAdmin = async (req, res) => {
   const { id } = req.params;
-  const { username, phone, status, password } = req.body;
+  const { username, email, phone, status, password } = req.body;
 
   try {
     const staffAdmin = await AdminUser.findOne({ _id: id, role: 'staffAdmin' });
@@ -171,6 +209,13 @@ const updateStaffAdmin = async (req, res) => {
       return errorResponse(res, 'Staff admin not found', null, 404);
 
     if (username) staffAdmin.username = username.trim();
+
+    if (email) {
+      if (!EMAIL_REGEX.test(email.trim()))
+        return errorResponse(res, 'Please provide a valid email address', null, 400);
+      staffAdmin.email = email.trim().toLowerCase();
+    }
+
     if (phone !== undefined) staffAdmin.phone = phone;
     if (status) staffAdmin.status = status;
 
@@ -186,13 +231,18 @@ const updateStaffAdmin = async (req, res) => {
       user: {
         id: staffAdmin._id,
         username: staffAdmin.username,
+        email: staffAdmin.email,
         phone: staffAdmin.phone,
         status: staffAdmin.status,
       },
     });
   } catch (err) {
-    if (err.code === 11000)
+    if (err.code === 11000) {
+      const field = Object.keys(err.keyPattern || {})[0];
+      if (field === 'email')
+        return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
       return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+    }
     return errorResponse(res, 'Server error', err.message);
   }
 };
