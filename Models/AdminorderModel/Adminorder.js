@@ -220,12 +220,24 @@ const clientFeedbackSchema = new mongoose.Schema({
 const focHistoryEntrySchema = new mongoose.Schema(
   {
     action: { type: String, enum: ["created", "updated", "approved"], required: true },
-    changedFields: { type: Object, default: {} }, // { reason: {old, new}, toDate: {old, new}, fromDate: {old, new} }
+    changedFields: { type: Object, default: {} }, 
     changedBy: { type: String, default: "" },
     changedAt: { type: Date, default: Date.now },
   },
   { _id: true }
 );
+
+const focChatMessageSchema = new mongoose.Schema(
+  {
+    senderUsername: { type: String, required: true },
+    senderRole: { type: String, enum: ["staffAdmin", "admin"], required: true },
+    message: { type: String, default: "" },
+    attachment: { type: String, default: "" },
+    sentAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 
 const campaignClosureSchema = new mongoose.Schema({
   bookingItemId: { type: mongoose.Schema.Types.ObjectId, default: null },
@@ -236,13 +248,17 @@ const campaignClosureSchema = new mongoose.Schema({
   toDate: { type: Date, default: null },
   createdBy: { type: String, default: "" },
   createdAt: { type: Date, default: Date.now },
-
-  // ── FOC approval workflow ──────────────────────────────────────
   status: { type: String, enum: ["pending", "approved"], default: "pending" },
   approvedBy: { type: String, default: "" },
   approvedAt: { type: Date, default: null },
   focHistory: { type: [focHistoryEntrySchema], default: [] },
+
+
+  isAdminCreated: { type: Boolean, default: false }, 
+  focChatMessages: { type: [focChatMessageSchema], default: [] },
 }, { _id: true });
+
+
 
 const enquiryDocSchema = new mongoose.Schema(
   {

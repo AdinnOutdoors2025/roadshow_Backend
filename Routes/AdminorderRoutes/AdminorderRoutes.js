@@ -86,6 +86,12 @@ router.post("/pipeline/:id/onroad-unavailable", protect, pipelineUpload, ctrl.ma
 router.patch("/pipeline/:id/onroad-unavailable/:historyId/available", protect, pipelineUpload, ctrl.markVehicleAvailable);
 
 router.patch("/pipeline/:id/todo-uploader", protect, ctrl.saveTodoUploadedBy);
+router.post(
+  "/pipeline/:id/campaign-closure/:closureId/chat",
+  protect,
+  pipelineUpload,
+  ctrl.sendFocChatMessage
+);
 
 router.post("/pipeline/:id/onroad-details", protect, pipelineUpload, ctrl.submitOnRoadDetails);
 router.patch("/pipeline/:id/onroad-status/:entryId", protect, ctrl.updateOnRoadStatus);
@@ -113,6 +119,12 @@ router.patch(
   protect,
   pipelineUpload,
   ctrl.approveFocEntry
+);
+router.post(
+  "/pipeline/:id/foc/create-and-approve",
+  protect,
+  pipelineUpload,
+  ctrl.createAndApproveFocEntry
 );
 
 router.get("/orders", protect, ctrl.getAllOrders);  

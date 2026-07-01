@@ -418,7 +418,7 @@ exports.getAllOrders = async (req, res) => {
       filter.orderStatus = orderStatus;
     }
 
-   
+
     if (vehicleType && vehicleType !== "all") {
       filter["bookingItems.vehicleType"] = vehicleType;
     }
@@ -459,7 +459,7 @@ exports.getAllOrders = async (req, res) => {
         { "bookingItems.city": { $regex: q, $options: "i" } },
         { "bookingItems.state": { $regex: q, $options: "i" } },
       ];
-   
+
       if (!isNaN(Number(q))) {
         orConditions.push({ grandTotal: Number(q) });
         orConditions.push({ grandNegotiationTotal: Number(q) });
@@ -584,7 +584,7 @@ exports.updateOrderPipeline = async (req, res) => {
     const order = await Order.findById(orderId);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-     if (order.pipelineStatus === "closedLost") {
+    if (order.pipelineStatus === "closedLost") {
       return errorResponse(res, "This order is closed lost and cannot be moved.", null, 400);
     }
 
@@ -636,7 +636,7 @@ exports.updateOrderPipeline = async (req, res) => {
 
     order.pipelineStatus = pipelineStatus;
 
-    
+
     // logEntry.handlerName = order.handlerName || "";
 
     const logEntry = {
@@ -1217,10 +1217,15 @@ exports.submitCampaignClosure = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
+    // const createdBy =
+    //   Number(req.user.isAdmin) === 0
+    //     ? req.user.username
+    //     : order.handlerName || req.user?.username || "Admin";
+
     const createdBy =
       Number(req.user.isAdmin) === 0
         ? req.user.username
-        : order.handlerName || req.user?.username || "Admin";
+        : req.user?.username || order.handlerName || "Admin";
 
     const docFile = (req.files || []).find((f) => f.fieldname === "document");
     if (docFile) {
@@ -1237,7 +1242,7 @@ exports.submitCampaignClosure = async (req, res) => {
           String(c.bookingItemId) === String(bookingItemId || "")
       );
 
-      // requester's own email straight from JWT — no DB lookup needed
+     
       const requesterEmail = req.user?.email || "";
       const adminEmails = await getActiveAdminEmails();
 
@@ -1302,6 +1307,8 @@ exports.submitCampaignClosure = async (req, res) => {
         ccEmail: requesterEmail,
       });
 
+     
+
       const closureEntry = {
         bookingItemId: bookingItemId || null,
         type,
@@ -1312,6 +1319,8 @@ exports.submitCampaignClosure = async (req, res) => {
         createdBy,
         createdAt: new Date(),
         status: "pending",
+        isAdminCreated: false,  
+        focChatMessages: [],     
         focHistory: [
           { action: "created", changedFields: {}, changedBy: createdBy, changedAt: new Date() },
         ],
@@ -1426,6 +1435,67 @@ exports.approveFocEntry = async (req, res) => {
 
     await order.save();
     return successResponse(res, "FOC extension approved successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+exports.createAndApproveFocEntry = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason, fromDate, toDate, bookingItemId } = req.body;
+
+    // Only super admin can use this shortcut
+    if (Number(req.user.isAdmin) !== 1) {
+      return errorResponse(res, "Only super admin can create and approve FOC extension", null, 403);
+    }
+
+    if (!reason?.trim())
+      return errorResponse(res, "Reason is required", null, 400);
+    if (!fromDate)
+      return errorResponse(res, "From date is required", null, 400);
+    if (!toDate)
+      return errorResponse(res, "To date is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const docFile = (req.files || []).find((f) => f.fieldname === "document");
+    if (docFile) {
+      const err = validateFile(docFile, "Document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const docUrl = docFile ? getFileUrl(docFile) : "";
+
+    const adminUsername = req.user?.username || "Admin";
+    const now = new Date();
+
+    
+
+    const closureEntry = {
+      bookingItemId: bookingItemId || null,
+      type: "foc",
+      reason: reason.trim(),
+      document: docUrl,
+      fromDate: new Date(fromDate),
+      toDate: new Date(toDate),
+      createdBy: adminUsername,
+      createdAt: now,
+      status: "approved",
+      approvedBy: adminUsername,
+      approvedAt: now,
+      isAdminCreated: true,   
+      focChatMessages: [],    
+      focHistory: [
+        { action: "created", changedFields: {}, changedBy: adminUsername, changedAt: now },
+        { action: "approved", changedFields: {}, changedBy: adminUsername, changedAt: now },
+      ],
+    };
+
+    order.campaignClosureArray.push(closureEntry);
+    await order.save();
+
+    return successResponse(res, "FOC extension created and approved successfully", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
@@ -1559,6 +1629,57 @@ exports.submitOrderClosedLost = async (req, res) => {
 
     await order.save();
     return successResponse(res, "Order moved to Closed Lost successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.sendFocChatMessage = async (req, res) => {
+  try {
+    const { id, closureId } = req.params;
+    const { message } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const entry = order.campaignClosureArray.id(closureId);
+    if (!entry) return errorResponse(res, "FOC entry not found", null, 404);
+    if (entry.type !== "foc") return errorResponse(res, "Not a FOC entry", null, 400);
+
+    // Chat is only open while the FOC is still pending
+    if (entry.status !== "pending") {
+      return errorResponse(res, "This FOC request is already approved — chat is closed", null, 400);
+    }
+
+    // Admin-created (self-approved) entries never have a chat thread
+    if (entry.isAdminCreated) {
+      return errorResponse(res, "This FOC entry was created by admin directly and has no chat", null, 400);
+    }
+
+    if (!message?.trim() && !(req.files || []).length) {
+      return errorResponse(res, "Message or attachment is required", null, 400);
+    }
+
+    const attachmentFile = (req.files || []).find((f) => f.fieldname === "attachment");
+    if (attachmentFile) {
+      const err = validateFile(attachmentFile, "Chat attachment");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const attachmentUrl = attachmentFile ? getFileUrl(attachmentFile) : "";
+
+    const senderRole = Number(req.user.isAdmin) === 1 ? "admin" : "staffAdmin";
+
+    entry.focChatMessages.push({
+      senderUsername: req.user?.username || "Unknown",
+      senderRole,
+      message: (message || "").trim(),
+      attachment: attachmentUrl,
+      sentAt: new Date(),
+    });
+
+    await order.save();
+    return successResponse(res, "Message sent", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
