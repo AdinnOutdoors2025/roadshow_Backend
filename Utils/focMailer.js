@@ -1,6 +1,4 @@
 
-
-
 require("dotenv").config();
 const axios = require("axios");
 const AdminUser = require("../Models/MainLoginSchema");
@@ -65,13 +63,13 @@ async function sendFocMail({ status, reason, fromDate, toDate, documentPath, des
 
   let response;
   try {
-    response = await axios.post(FOC_MAIL_API_URL, payload, {
+    response = await axios.post(process.env.EXTERNAL_API_URL, payload, {
       headers: { "Content-Type": "application/json" },
       timeout: 15000,
     });
   } catch (err) {
     throw new Error(`FOC mail API request failed: ${err?.response?.data?.message || err.message}`);
-  }
+  } 
 
   const data = response.data;
   if (!data || data.status !== "success") {

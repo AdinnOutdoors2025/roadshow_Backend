@@ -134,4 +134,6 @@ router.post("/orders/create", protect, adminOrderUpload, ctrl.createAdminOrder);
 router.get("/campaign-types", ctrl.getCampaignTypes);
 router.post("/campaign-types", ctrl.createCampaignType);
 
+router.get("/vamosys/apikey", ctrl.getVamosysApiKey);
+
 module.exports = router;

@@ -1684,3 +1684,39 @@ exports.sendFocChatMessage = async (req, res) => {
     return errorResponse(res, error.message, null, 500);
   }
 };
+
+exports.getVamosysApiKey = async (req, res) => {
+  try {
+    const userId =  "ADINN12";
+    const validDays = 365;
+    const time = Math.floor(Date.now() / 1000);
+
+    const url = `https://api.vamosys.com/getApiKey?userId=${userId}&validDays=${validDays}&time=${time}`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(response.status).json({
+        success: false,
+        message: "Vamosys API returned an error",
+        error: errText,
+      });
+    }
+
+    const data = await response.json();
+
+    return res.status(200).json({
+      success: true,
+      requestedUrl: url,
+      data,
+    });
+  } catch (error) {
+    console.error("Vamosys API key fetch failed:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch Vamosys API key",
+      error: error.message,
+    });
+  }
+};

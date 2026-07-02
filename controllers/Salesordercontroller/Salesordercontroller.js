@@ -522,7 +522,7 @@ exports.sendProjectMail = async (req, res) => {
       toLocation: item.toLocation || "",
       state: item.state || "",
       city: item.city || "",
-      quantity: item.quantity || 1,
+      vehicleCount: item.quantity || 1,
       rental: item.rentalCost || 0,
       rtoCharges: item.rtoCost || 0,
       extraKm: item.extraKmCost || 0,
