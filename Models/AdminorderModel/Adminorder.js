@@ -327,7 +327,7 @@ const closedLostDocSchema = new mongoose.Schema(
 
 const orderClosedWonSchema = new mongoose.Schema(
   {
-    comments: { type: String, required: true },
+    comments: { type: String, required: false },
     document: { type: String, default: "" },
     uploadedBy: { type: String, default: "" },
     uploadedAt: { type: Date, default: Date.now },
@@ -446,20 +446,22 @@ const orderSchema = new mongoose.Schema(
 
     driverLocationArray: { type: [driverLocationSchema], default: [] },
 
-    onRoadExecutionArray: [
-      {
-        vehicleIndex: { type: Number, required: true },
-        driverName: { type: String, required: true, default: "" },
-        driverPhone: { type: String, required: true, default: "" },
-        vehicleRegistrationNumber: { type: String, required: true, default: "" },
-        gatepassPhoto: { type: String, default: "" },
-        onRoadStatus: { type: Number, enum: [0, 1], default: 0 },
-        uploadedBy: { type: String, default: "" },
-        uploadedAt: { type: Date, default: Date.now },
-        unavailableStatus: { type: Boolean, default: false },
-        unavailableReason: { type: String, default: "" },
-      }
-    ],
+onRoadExecutionArray: [
+  {
+    vehicleIndex: { type: Number, required: true },
+    driverName: { type: String, required: true, default: "" },
+    driverPhone: { type: String, required: true, default: "" },
+    vehicleRegistrationNumber: { type: String, required: true, default: "" },
+    gatepassPhoto: { type: String, default: "" },
+    onRoadStatus: { type: Number, enum: [0, 1], default: 0 },
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+    unavailableStatus: { type: Boolean, default: false },
+    unavailableReason: { type: String, default: "" },
+  }
+],
+
+
     onRoadUnavailableHistory: { type: [onRoadUnavailableHistorySchema], default: [] },
     onRoadHistory: { type: [onRoadHistorySchema], default: [] },
     onRoadIssues: { type: [onRoadIssueSchema], default: [] },

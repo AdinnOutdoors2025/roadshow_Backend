@@ -135,5 +135,6 @@ router.get("/campaign-types", ctrl.getCampaignTypes);
 router.post("/campaign-types", ctrl.createCampaignType);
 
 router.get("/vamosys/apikey", ctrl.getVamosysApiKey);
+router.get("/vamosys/vehicle-locations", ctrl.getVehicleLocationsProxy);
 
 module.exports = router;

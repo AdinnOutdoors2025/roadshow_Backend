@@ -1,6 +1,4 @@
 
-
-
 /* eslint-disable */
 const path = require("path");
 const Order = require("../../Models/AdminorderModel/Adminorder");
@@ -9,7 +7,7 @@ require("dotenv").config();
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const { successResponse, errorResponse } = require("../../Utils/response");
 const { sendFocMail, getActiveAdminEmails, getEmailByUsername } = require('../../Utils/focMailer');
-
+const VehicleMaster = require("../../Models/vehicleDetails");
 
 
 async function generateAdminOrderId() {
@@ -634,6 +632,9 @@ exports.updateOrderPipeline = async (req, res) => {
       }
     }
 
+
+
+
     order.pipelineStatus = pipelineStatus;
 
 
@@ -757,9 +758,10 @@ exports.submitOnRoadDetails = async (req, res) => {
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
-
     const gatepassFile = (req.files || []).find(f => f.fieldname === "gatepassPhoto");
     const photoUrl = gatepassFile ? getFileUrl(gatepassFile) : "";
+
+
 
     const newEntry = {
       vehicleIndex: Number(vehicleIndex),
@@ -769,7 +771,7 @@ exports.submitOnRoadDetails = async (req, res) => {
       gatepassPhoto: photoUrl,
       onRoadStatus: 0,
       uploadedBy,
-      uploadedAt: new Date()
+      uploadedAt: new Date(),
     };
     order.onRoadExecutionArray.push(newEntry);
 
@@ -1242,7 +1244,7 @@ exports.submitCampaignClosure = async (req, res) => {
           String(c.bookingItemId) === String(bookingItemId || "")
       );
 
-     
+
       const requesterEmail = req.user?.email || "";
       const adminEmails = await getActiveAdminEmails();
 
@@ -1307,7 +1309,7 @@ exports.submitCampaignClosure = async (req, res) => {
         ccEmail: requesterEmail,
       });
 
-     
+
 
       const closureEntry = {
         bookingItemId: bookingItemId || null,
@@ -1319,8 +1321,8 @@ exports.submitCampaignClosure = async (req, res) => {
         createdBy,
         createdAt: new Date(),
         status: "pending",
-        isAdminCreated: false,  
-        focChatMessages: [],     
+        isAdminCreated: false,
+        focChatMessages: [],
         focHistory: [
           { action: "created", changedFields: {}, changedBy: createdBy, changedAt: new Date() },
         ],
@@ -1470,7 +1472,7 @@ exports.createAndApproveFocEntry = async (req, res) => {
     const adminUsername = req.user?.username || "Admin";
     const now = new Date();
 
-    
+
 
     const closureEntry = {
       bookingItemId: bookingItemId || null,
@@ -1484,8 +1486,8 @@ exports.createAndApproveFocEntry = async (req, res) => {
       status: "approved",
       approvedBy: adminUsername,
       approvedAt: now,
-      isAdminCreated: true,   
-      focChatMessages: [],    
+      isAdminCreated: true,
+      focChatMessages: [],
       focHistory: [
         { action: "created", changedFields: {}, changedBy: adminUsername, changedAt: now },
         { action: "approved", changedFields: {}, changedBy: adminUsername, changedAt: now },
@@ -1533,15 +1535,13 @@ exports.updateCampaignClosure = async (req, res) => {
 };
 
 
+
 exports.submitOrderClosedWon = async (req, res) => {
   try {
     const { id } = req.params;
     const { comments } = req.body;
 
-    if (!comments?.trim())
-      return errorResponse(res, "Comments are required", null, 400);
-
-    const order = await Order.findById(id);
+    const order = await Order.findById(id);   
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
     if (order.pipelineStatus === "closedLost") {
@@ -1577,12 +1577,28 @@ exports.submitOrderClosedWon = async (req, res) => {
     });
 
     await order.save();
+
+   
+    const regNumbers = (order.onRoadExecutionArray || [])
+      .map((e) => e.vehicleRegistrationNumber)
+      .filter(Boolean);
+
+    for (const regNo of regNumbers) {
+      try {
+        await VehicleMaster.updateOne(
+          { "registrationVehicles.registrationNumber": regNo },
+          { $set: { "registrationVehicles.$.statusAvailability.currentStatus": "Available" } }
+        );
+      } catch (err) {
+        console.error(`Failed to release vehicle ${regNo}:`, err.message);
+      }
+    }
+
     return successResponse(res, "Order moved to Closed Won successfully", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
 };
-
 
 exports.submitOrderClosedLost = async (req, res) => {
   try {
@@ -1647,12 +1663,12 @@ exports.sendFocChatMessage = async (req, res) => {
     if (!entry) return errorResponse(res, "FOC entry not found", null, 404);
     if (entry.type !== "foc") return errorResponse(res, "Not a FOC entry", null, 400);
 
-    // Chat is only open while the FOC is still pending
+   
     if (entry.status !== "pending") {
       return errorResponse(res, "This FOC request is already approved — chat is closed", null, 400);
     }
 
-    // Admin-created (self-approved) entries never have a chat thread
+   
     if (entry.isAdminCreated) {
       return errorResponse(res, "This FOC entry was created by admin directly and has no chat", null, 400);
     }
@@ -1685,31 +1701,38 @@ exports.sendFocChatMessage = async (req, res) => {
   }
 };
 
+
+
+async function fetchVamosysApiKey() {
+  const userId = "ADINN12";
+  const validDays = 365;
+  const time = Math.floor(Date.now() / 1000);
+
+  const url = `https://api.vamosys.com/getApiKey?userId=${userId}&validDays=${validDays}&time=${time}`;
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(errText || "Vamosys API returned an error");
+  }
+
+  const data = await response.json();
+  return data.apiKey || "";
+}
+
 exports.getVamosysApiKey = async (req, res) => {
   try {
-    const userId =  "ADINN12";
+    const userId = "ADINN12";
     const validDays = 365;
     const time = Math.floor(Date.now() / 1000);
-
     const url = `https://api.vamosys.com/getApiKey?userId=${userId}&validDays=${validDays}&time=${time}`;
 
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      const errText = await response.text();
-      return res.status(response.status).json({
-        success: false,
-        message: "Vamosys API returned an error",
-        error: errText,
-      });
-    }
-
-    const data = await response.json();
+    const apiKey = await fetchVamosysApiKey();
 
     return res.status(200).json({
       success: true,
       requestedUrl: url,
-      data,
+      data: { apiKey },
     });
   } catch (error) {
     console.error("Vamosys API key fetch failed:", error.message);
@@ -1718,5 +1741,29 @@ exports.getVamosysApiKey = async (req, res) => {
       message: "Failed to fetch Vamosys API key",
       error: error.message,
     });
+  }
+};
+
+
+
+
+exports.getVehicleLocationsProxy = async (req, res) => {
+  try {
+   
+    const apiKey = await fetchVamosysApiKey();
+
+    const url = `http://api.vamosys.com/apiMobile/getVehicleLocations?apiKey=${apiKey}&userId=ADINN12&groupId=ADINN12`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return errorResponse(res, "Vamosys locations API error: " + errText, null, 502);
+    }
+
+    const data = await response.json();
+    return successResponse(res, "Vehicle locations fetched", { data });
+  } catch (error) {
+    console.error("Vamosys locations proxy error:", error.message);
+    return errorResponse(res, error.message, null, 500);
   }
 };
