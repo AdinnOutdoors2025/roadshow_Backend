@@ -282,7 +282,7 @@ exports.updateSalesPipeline = async (req, res) => {
       order.closedLostArray.push({
         reason: reason.trim(),
         document: getFilePath(lostFile),
-        uploadedBy: order.salesHandlerName,
+        uploadedBy: order.salesHandlerName || req.user.username,
         uploadedAt: new Date(),
       });
     }
@@ -429,7 +429,7 @@ exports.uploadStageDocument = async (req, res) => {
       order.closedWonArray.push({
         salesPoDocument: getFilePath(poFile),
         salesPoNotes: (salesPoNotes || "").trim(),
-        uploadedBy,
+         uploadedBy,
         uploadedAt: new Date(),
       });
     }

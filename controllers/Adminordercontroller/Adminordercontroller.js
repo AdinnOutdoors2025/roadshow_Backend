@@ -1602,6 +1602,7 @@ exports.submitOrderClosedWon = async (req, res) => {
 
 exports.submitOrderClosedLost = async (req, res) => {
   try {
+    
     const { id } = req.params;
     const { reason } = req.body;
 
