@@ -63,7 +63,7 @@ if (STORAGE_TYPE === "space") {
 
 const pipelineUpload = multer({
   storage: pipelineStorage,
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: pipelineFileFilter,
 }).any();
 
@@ -86,11 +86,46 @@ router.post("/pipeline/:id/onroad-unavailable", protect, pipelineUpload, ctrl.ma
 router.patch("/pipeline/:id/onroad-unavailable/:historyId/available", protect, pipelineUpload, ctrl.markVehicleAvailable);
 
 router.patch("/pipeline/:id/todo-uploader", protect, ctrl.saveTodoUploadedBy);
+router.post(
+  "/pipeline/:id/campaign-closure/:closureId/chat",
+  protect,
+  pipelineUpload,
+  ctrl.sendFocChatMessage
+);
 
 router.post("/pipeline/:id/onroad-details", protect, pipelineUpload, ctrl.submitOnRoadDetails);
 router.patch("/pipeline/:id/onroad-status/:entryId", protect, ctrl.updateOnRoadStatus);
+router.post(
+  "/pipeline/:id/closed-won",
+  protect,
+  pipelineUpload,
+  ctrl.submitOrderClosedWon
+);
+
+router.post(
+  "/pipeline/:id/closed-lost",
+  protect,
+  pipelineUpload,
+  ctrl.submitOrderClosedLost
+);
 
 router.put("/pipeline/:id/onroad-details/:entryId", protect, ctrl.editOnRoadDetails);
+
+router.post("/pipeline/:id/client-feedback", protect, pipelineUpload, ctrl.submitClientFeedback);
+router.post("/pipeline/:id/campaign-closure", protect, pipelineUpload, ctrl.submitCampaignClosure);
+router.patch("/pipeline/:id/campaign-closure/:closureId", protect, pipelineUpload, ctrl.updateCampaignClosure);
+router.patch(
+  "/pipeline/:id/campaign-closure/:closureId/approve",
+  protect,
+  pipelineUpload,
+  ctrl.approveFocEntry
+);
+router.post(
+  "/pipeline/:id/foc/create-and-approve",
+  protect,
+  pipelineUpload,
+  ctrl.createAndApproveFocEntry
+);
 
 router.get("/orders", protect, ctrl.getAllOrders);  
 router.get("/orders/:orderId", ctrl.getOrderById);
@@ -98,5 +133,7 @@ router.post("/orders/create", protect, adminOrderUpload, ctrl.createAdminOrder);
 
 router.get("/campaign-types", ctrl.getCampaignTypes);
 router.post("/campaign-types", ctrl.createCampaignType);
+
+router.get("/vamosys/apikey", ctrl.getVamosysApiKey);
 
 module.exports = router;

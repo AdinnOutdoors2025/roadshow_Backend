@@ -91,6 +91,19 @@ const projectExecutionDocSchema = new mongoose.Schema(
 );
 
 
+const driverLocationSchema = new mongoose.Schema(
+  {
+    vehicleRegistrationNumber: { type: String, required: true },
+    latitude: { type: Number, required: true },
+    longitude: { type: Number, required: true },
+    address: { type: String, default: "" },
+    updatedBy: { type: String, default: "" },
+    updatedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+
 const todoDocSchema = new mongoose.Schema(
   {
     document: { type: String, default: "" },
@@ -191,6 +204,62 @@ const onRoadDriverHistorySchema = new mongoose.Schema({
   changedFields: { type: Object, default: {} },
 }, { _id: true });
 
+
+
+
+const clientFeedbackSchema = new mongoose.Schema({
+  bookingItemId: { type: mongoose.Schema.Types.ObjectId, default: null }, // ADD THIS
+  comments: { type: String, default: "" },
+  rating: { type: String, enum: ["Good", "Average", "Poor"], default: null },
+  createdBy: { type: String, default: "" },
+  createdDate: { type: Date, default: Date.now },
+}, { _id: true });
+
+
+
+const focHistoryEntrySchema = new mongoose.Schema(
+  {
+    action: { type: String, enum: ["created", "updated", "approved"], required: true },
+    changedFields: { type: Object, default: {} }, 
+    changedBy: { type: String, default: "" },
+    changedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+const focChatMessageSchema = new mongoose.Schema(
+  {
+    senderUsername: { type: String, required: true },
+    senderRole: { type: String, enum: ["staffAdmin", "admin"], required: true },
+    message: { type: String, default: "" },
+    attachment: { type: String, default: "" },
+    sentAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+
+const campaignClosureSchema = new mongoose.Schema({
+  bookingItemId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  type: { type: String, enum: ["closed", "foc", "paid"], required: true },
+  reason: { type: String, default: "" },
+  document: { type: String, default: "" },
+  fromDate: { type: Date, default: null },
+  toDate: { type: Date, default: null },
+  createdBy: { type: String, default: "" },
+  createdAt: { type: Date, default: Date.now },
+  status: { type: String, enum: ["pending", "approved"], default: "pending" },
+  approvedBy: { type: String, default: "" },
+  approvedAt: { type: Date, default: null },
+  focHistory: { type: [focHistoryEntrySchema], default: [] },
+
+
+  isAdminCreated: { type: Boolean, default: false }, 
+  focChatMessages: { type: [focChatMessageSchema], default: [] },
+}, { _id: true });
+
+
+
 const enquiryDocSchema = new mongoose.Schema(
   {
     document: { type: String, default: "" },
@@ -254,6 +323,28 @@ const closedLostDocSchema = new mongoose.Schema(
   },
   { _id: true }
 );
+
+
+const orderClosedWonSchema = new mongoose.Schema(
+  {
+    comments: { type: String, required: true },
+    document: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+const orderClosedLostSchema = new mongoose.Schema(
+  {
+    reason: { type: String, required: true },
+    document: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 
 const salesPipelineLogSchema = new mongoose.Schema(
   {
@@ -353,7 +444,7 @@ const orderSchema = new mongoose.Schema(
     projectExecutionArray: { type: [projectExecutionDocSchema], default: [] },
     todoArray: { type: [todoDocSchema], default: [] },
 
-
+    driverLocationArray: { type: [driverLocationSchema], default: [] },
 
     onRoadExecutionArray: [
       {
@@ -373,6 +464,8 @@ const orderSchema = new mongoose.Schema(
     onRoadHistory: { type: [onRoadHistorySchema], default: [] },
     onRoadIssues: { type: [onRoadIssueSchema], default: [] },
     onRoadDriverHistory: { type: [onRoadDriverHistorySchema], default: [] },
+    clientFeedbackHistory: { type: [clientFeedbackSchema], default: [] },
+    campaignClosureArray: { type: [campaignClosureSchema], default: [] },
 
     // ── Project Code ──────────────────────────────────────────────
 
@@ -380,6 +473,8 @@ const orderSchema = new mongoose.Schema(
     projectCodeArray: { type: [projectCodeSchema], default: [] },
     projectMailLogs: { type: [projectMailLogSchema], default: [] },
 
+    orderClosedWonArray: { type: [orderClosedWonSchema], default: [] },
+    orderClosedLostArray: { type: [orderClosedLostSchema], default: [] },
     // ── Sales Pipeline (unchanged) ────────────────────────────────
     salesPipelineStatus: {
       type: String,

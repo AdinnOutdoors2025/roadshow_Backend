@@ -8,6 +8,7 @@ const Package = require("../../Models/PackageManagementModel/packagemanagement")
 require("dotenv").config();
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const { successResponse, errorResponse } = require("../../Utils/response");
+const { sendFocMail, getActiveAdminEmails, getEmailByUsername } = require('../../Utils/focMailer');
 
 
 
@@ -94,11 +95,37 @@ function calcPricingBackend(pkg, v) {
 }
 
 
+
+const IMAGE_MIMES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const DOC_MAX_BYTES = 10 * 1024 * 1024;
+
+const VIDEO_MIMES = ["video/mp4", "video/quicktime", "video/x-msvideo", "video/x-matroska", "video/webm"];
+const VIDEO_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+
+const validateFile = (file, label) => {
+  if (!file) return null;
+  const isImage = IMAGE_MIMES.includes(file.mimetype);
+  const isVideo = VIDEO_MIMES.includes(file.mimetype);
+  const fileSize = file.size || 0;
+
+  if (isImage && fileSize > IMAGE_MAX_BYTES) {
+    return `Image upload only 5 MB allowed. "${file.originalname}" is ${(fileSize / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  if (isVideo && fileSize > VIDEO_MAX_BYTES) {
+    return `Video upload only 50 MB allowed. "${file.originalname}" is ${(fileSize / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  if (!isImage && !isVideo && fileSize > DOC_MAX_BYTES) {
+    return `PDF document upload only 10 MB allowed. "${file.originalname}" is ${(fileSize / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  return null;
+};
+
+
 const STAGE_ORDER = [
   "todo",
   "projectExecution",
   "onRoad",
-  "campaignRunning",
   "vehicleUnavailable",
   "clientClosure",
   "invoiceGeneration",
@@ -205,10 +232,25 @@ exports.createAdminOrder = async (req, res) => {
         campaignTypeName = ct.name;
       }
 
+
+
+
       const uploadedFiles = req.files || [];
-      const campaignImages = uploadedFiles
-        .filter((f) => f.fieldname === `campaignImages_${i}`)
-        .map((f) => getFileUrl(f));
+
+
+      const imageFiles = uploadedFiles.filter((f) => f.fieldname === `campaignImages_${i}`);
+      for (const imgFile of imageFiles) {
+        if ((imgFile.size || 0) > IMAGE_MAX_BYTES) {
+          return errorResponse(
+            res,
+            `Vehicle ${i + 1}: Campaign image "${imgFile.originalname}" exceeds 5 MB limit (uploaded: ${((imgFile.size || 0) / (1024 * 1024)).toFixed(2)} MB)`,
+            null,
+            400
+          );
+        }
+      }
+
+      const campaignImages = imageFiles.map((f) => getFileUrl(f));
       const campaignVideos = uploadedFiles
         .filter((f) => f.fieldname === `campaignVideos_${i}`)
         .map((f) => getFileUrl(f));
@@ -366,22 +408,22 @@ exports.getAllOrders = async (req, res) => {
 
     const filter = {};
 
-    // Pipeline Status
+
     if (pipelineStatus && pipelineStatus !== "all") {
       filter.pipelineStatus = pipelineStatus;
     }
 
-    // Order Status
+
     if (orderStatus && orderStatus !== "all") {
       filter.orderStatus = orderStatus;
     }
 
-    // Vehicle Type filter (bookingItems array inside)
+
     if (vehicleType && vehicleType !== "all") {
       filter["bookingItems.vehicleType"] = vehicleType;
     }
 
-    // Duration overlap filter
+
     if (durationFrom || durationTo) {
       if (durationFrom) {
         filter["bookingItems.toDate"] = {
@@ -396,7 +438,7 @@ exports.getAllOrders = async (req, res) => {
       }
     }
 
-    // Created At filter
+
     if (createdFrom || createdTo) {
       filter.createdAt = {};
       if (createdFrom) {
@@ -407,7 +449,7 @@ exports.getAllOrders = async (req, res) => {
       }
     }
 
-    // Search — orderId, name, phone, city, state
+
     if (search && search.trim().length >= 1) {
       const q = search.trim();
       const orConditions = [
@@ -417,7 +459,7 @@ exports.getAllOrders = async (req, res) => {
         { "bookingItems.city": { $regex: q, $options: "i" } },
         { "bookingItems.state": { $regex: q, $options: "i" } },
       ];
-      // If search is a number, also match grandTotal
+
       if (!isNaN(Number(q))) {
         orConditions.push({ grandTotal: Number(q) });
         orConditions.push({ grandNegotiationTotal: Number(q) });
@@ -441,7 +483,7 @@ exports.getAllOrders = async (req, res) => {
         "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
         "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
         "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray " +
-        "projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory"
+        "projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray"
       );
 
     return successResponse(res, "Orders fetched successfully", {
@@ -503,7 +545,7 @@ exports.getOrdersByPipeline = async (req, res) => {
         "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
         "companyName clientName designation email address gstNumber customerCategory " +
         "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy " +
-        "onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory"
+        "onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray"
       );
 
     const filteredOrders = orders.filter(
@@ -518,7 +560,7 @@ exports.getOrdersByPipeline = async (req, res) => {
       const targetStage = stage === "newOrder" ? "todo" : stage;
       if (grouped[targetStage]) grouped[targetStage].push(o);
       else grouped["todo"].push(o);
-    }); 
+    });
 
     return successResponse(res, "Pipeline orders fetched", {
       grouped,
@@ -542,6 +584,10 @@ exports.updateOrderPipeline = async (req, res) => {
     const order = await Order.findById(orderId);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
+    if (order.pipelineStatus === "closedLost") {
+      return errorResponse(res, "This order is closed lost and cannot be moved.", null, 400);
+    }
+
     const oldStage = order.pipelineStatus;
     const isStaff = Number(req.user.isAdmin) === 0;
 
@@ -558,20 +604,20 @@ exports.updateOrderPipeline = async (req, res) => {
       );
     }
 
-   
-if (oldStage === "projectExecution" && pipelineStatus === "onRoad") {
-  const hasActiveDriver = order.onRoadExecutionArray.some(
-    e => e.onRoadStatus === 1
-  );
-  if (!hasActiveDriver) {
-    return errorResponse(
-      res, 
-      "Please complete at least one vehicle Model details and enable On Road status",
-      null, 
-      400
-    );
-  }
-}
+
+    if (oldStage === "projectExecution" && pipelineStatus === "onRoad") {
+      const hasActiveDriver = order.onRoadExecutionArray.some(
+        e => e.onRoadStatus === 1
+      );
+      if (!hasActiveDriver) {
+        return errorResponse(
+          res,
+          "Please complete at least one vehicle Model details and enable On Road status",
+          null,
+          400
+        );
+      }
+    }
 
     const movedBy = req.user?.username || order.handlerName || "Admin";
 
@@ -590,18 +636,24 @@ if (oldStage === "projectExecution" && pipelineStatus === "onRoad") {
 
     order.pipelineStatus = pipelineStatus;
 
+
+    // logEntry.handlerName = order.handlerName || "";
+
     const logEntry = {
       fromStage: oldStage,
       toStage: pipelineStatus,
       movedBy,
+      handlerName: order.handlerName || "",
       movedAt: new Date(),
     };
 
-    if (
-      pipelineStatus === "projectExecution"
-    ) {
-      logEntry.handlerName = order.handlerName || "";
-    }
+    // if (
+    //   pipelineStatus === "projectExecution"
+    // ) {
+    //   logEntry.handlerName = order.handlerName || "";
+    // }
+
+
 
     order.pipelineLogs.push(logEntry);
     await order.save();
@@ -621,10 +673,7 @@ exports.uploadStageDocument = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-    // const uploadedBy =
-    //   Number(req.user.isAdmin) === 0
-    //     ? req.user.username
-    //     : order.handlerName || req.user?.username || "Admin";
+
 
     const uploadedBy =
       (order.pipelineStatus === "todo" ? order.todoUploadedBy : null) ||
@@ -634,8 +683,13 @@ exports.uploadStageDocument = async (req, res) => {
         : order.handlerName || req.user?.username || "Admin");
 
     const docFile = (req.files || []).find((f) => f.fieldname === "document");
-    const docUrl = docFile ? getFileUrl(docFile) : "";
 
+    if (docFile) {
+      const err = validateFile(docFile, "Stage document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+
+    const docUrl = docFile ? getFileUrl(docFile) : "";
 
     if (stage === "todo" || order.pipelineStatus === "todo") {
       if (docUrl || notes?.trim()) {
@@ -686,7 +740,7 @@ exports.submitOnRoadDetails = async (req, res) => {
   try {
     const { id } = req.params;
     const { vehicleIndex, driverName, driverPhone,
-            vehicleRegistrationNumber } = req.body;
+      vehicleRegistrationNumber } = req.body;
 
     if (!driverName?.trim())
       return errorResponse(res, "Driver name is required", null, 400);
@@ -703,7 +757,7 @@ exports.submitOnRoadDetails = async (req, res) => {
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
-   
+
     const gatepassFile = (req.files || []).find(f => f.fieldname === "gatepassPhoto");
     const photoUrl = gatepassFile ? getFileUrl(gatepassFile) : "";
 
@@ -732,13 +786,13 @@ exports.submitOnRoadDetails = async (req, res) => {
       changedFields: {},
     });
 
-  
-   
+
+
     const vIdx = Number(vehicleIndex);
     const bookingItem = order.bookingItems[vIdx];
     const requiredQty = bookingItem?.quantity || 1;
 
-   
+
     const savedForThisVehicle = order.onRoadExecutionArray.filter(
       e => e.vehicleIndex === vIdx
     );
@@ -811,7 +865,7 @@ exports.updateOnRoadDriver = async (req, res) => {
 exports.addOnRoadIssue = async (req, res) => {
   try {
     const { id } = req.params;
-   
+
     const { vehicleIndex, issueDescription, vehicleRegistrationNumber } = req.body;
 
     if (!issueDescription?.trim())
@@ -820,7 +874,7 @@ exports.addOnRoadIssue = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-  
+
     let entry;
     if (vehicleRegistrationNumber?.trim()) {
       entry = order.onRoadExecutionArray.find(
@@ -838,6 +892,12 @@ exports.addOnRoadIssue = async (req, res) => {
         : order.handlerName || req.user?.username || "Admin";
 
     const photoFile = (req.files || []).find(f => f.fieldname === "issuePhoto");
+
+    if (photoFile) {
+      const err = validateFile(photoFile, "Issue photo");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+
     const photoUrl = photoFile ? getFileUrl(photoFile) : "";
 
     order.onRoadIssues.push({
@@ -877,13 +937,19 @@ exports.resolveOnRoadIssue = async (req, res) => {
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
-  
+
     const photoFile = (req.files || []).find(f => f.fieldname === "resolvePhoto");
+
+    if (photoFile) {
+      const err = validateFile(photoFile, "Resolve photo");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+
     const photoUrl = photoFile ? getFileUrl(photoFile) : "";
 
     issue.status = "resolved";
     issue.resolveDescription = resolveDescription.trim();
-    issue.resolvePhoto = photoUrl;   
+    issue.resolvePhoto = photoUrl;
     issue.resolvedBy = resolvedBy;
     issue.resolvedAt = new Date();
 
@@ -902,7 +968,7 @@ exports.updateOnRoadStatus = async (req, res) => {
   const order = await Order.findById(id);
   const entry = order.onRoadExecutionArray.id(entryId);
   entry.onRoadStatus = Number(onRoadStatus);
-  
+
   await order.save();
   return successResponse(res, "Status updated", { order });
 };
@@ -943,7 +1009,7 @@ exports.editOnRoadDetails = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-   
+
     const entry = order.onRoadExecutionArray.id(entryId);
     if (!entry) return errorResponse(res, "Entry not found", null, 404);
 
@@ -952,7 +1018,7 @@ exports.editOnRoadDetails = async (req, res) => {
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
-   
+
     const changedFields = {};
     if (driverName?.trim() && driverName.trim() !== entry.driverName)
       changedFields.driverName = { old: entry.driverName, new: driverName.trim() };
@@ -963,14 +1029,14 @@ exports.editOnRoadDetails = async (req, res) => {
     if (vehicleRegistrationNumber?.trim() && vehicleRegistrationNumber.trim() !== entry.vehicleRegistrationNumber)
       changedFields.vehicleRegistrationNumber = { old: entry.vehicleRegistrationNumber, new: vehicleRegistrationNumber.trim() };
 
-    
+
     if (driverName?.trim()) entry.driverName = driverName.trim();
     if (driverPhone?.trim()) entry.driverPhone = driverPhone.trim();
     if (driverAlternatePhone !== undefined) entry.driverAlternatePhone = driverAlternatePhone;
     if (vehicleRegistrationNumber?.trim())
       entry.vehicleRegistrationNumber = vehicleRegistrationNumber.trim().toUpperCase();
 
-    
+
     order.onRoadHistory.push({
       action: "edited",
       driverName: entry.driverName,
@@ -1012,6 +1078,12 @@ exports.markVehicleUnavailable = async (req, res) => {
         : order.handlerName || req.user?.username || "Admin";
 
     const photoFile = (req.files || []).find(f => f.fieldname === "unavailablePhoto");
+
+    if (photoFile) {
+      const err = validateFile(photoFile, "Unavailable photo");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+
     const photoUrl = photoFile ? getFileUrl(photoFile) : "";
 
     entry.unavailableStatus = true;
@@ -1042,9 +1114,6 @@ exports.markVehicleAvailable = async (req, res) => {
     const { id, historyId } = req.params;
     const { resolveDescription } = req.body;
 
-    if (!resolveDescription?.trim())
-      return errorResponse(res, "Resolution reason is required", null, 400);
-
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
@@ -1057,12 +1126,18 @@ exports.markVehicleAvailable = async (req, res) => {
         : order.handlerName || req.user?.username || "Admin";
 
     const photoFile = (req.files || []).find(f => f.fieldname === "availablePhoto");
+
+    if (photoFile) {
+      const err = validateFile(photoFile, "Available photo");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+
     const photoUrl = photoFile ? getFileUrl(photoFile) : "";
 
     history.status = "available";
     history.resolvedBy = resolvedBy;
     history.resolvedAt = new Date();
-    history.resolveDescription = resolveDescription.trim();
+    history.resolveDescription = (resolveDescription || "").trim();
     history.resolvePhoto = photoUrl;
 
     const entry = order.onRoadExecutionArray.find(
@@ -1077,5 +1152,571 @@ exports.markVehicleAvailable = async (req, res) => {
     return successResponse(res, "Vehicle marked as available", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.submitClientFeedback = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comments, rating, bookingItemId } = req.body; // ADD bookingItemId
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const createdBy = Number(req.user.isAdmin) === 0
+      ? req.user.username
+      : order.handlerName || req.user?.username || "Admin";
+
+    const feedbackEntry = {
+      bookingItemId: bookingItemId || null, // ADD THIS
+      comments: (comments || "").trim(),
+      rating: rating || null,
+      createdBy,
+      createdDate: new Date(),
+    };
+
+    order.clientFeedbackHistory.push(feedbackEntry);
+    await order.save();
+    return successResponse(res, "Feedback submitted successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+
+
+exports.submitCampaignClosure = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type, reason, fromDate, toDate, bookingItemId } = req.body;
+
+    if (!type || !["closed", "foc", "paid"].includes(type))
+      return errorResponse(res, "Invalid closure type", null, 400);
+
+    if (type === "closed" && !reason?.trim())
+      return errorResponse(res, "Reason is required for closure", null, 400);
+
+    if (type === "foc") {
+      if (!reason?.trim())
+        return errorResponse(res, "Reason is required for FOC", null, 400);
+      if (!fromDate)
+        return errorResponse(res, "From date is required", null, 400);
+      if (!toDate)
+        return errorResponse(res, "To date is required", null, 400);
+    }
+
+    if (type === "paid") {
+      if (!fromDate)
+        return errorResponse(res, "From date is required", null, 400);
+      if (!toDate)
+        return errorResponse(res, "To date is required", null, 400);
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    // const createdBy =
+    //   Number(req.user.isAdmin) === 0
+    //     ? req.user.username
+    //     : order.handlerName || req.user?.username || "Admin";
+
+    const createdBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : req.user?.username || order.handlerName || "Admin";
+
+    const docFile = (req.files || []).find((f) => f.fieldname === "document");
+    if (docFile) {
+      const err = validateFile(docFile, "Document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const docUrl = docFile ? getFileUrl(docFile) : "";
+
+    if (type === "foc") {
+      const existing = order.campaignClosureArray.find(
+        (c) =>
+          c.type === "foc" &&
+          c.status === "pending" &&
+          String(c.bookingItemId) === String(bookingItemId || "")
+      );
+
+     
+      const requesterEmail = req.user?.email || "";
+      const adminEmails = await getActiveAdminEmails();
+
+      if (existing) {
+        const changedFields = {};
+        const newReason = reason.trim();
+        const newFromDate = new Date(fromDate);
+        const newToDate = new Date(toDate);
+
+        if (existing.reason !== newReason)
+          changedFields.reason = { old: existing.reason, new: newReason };
+        if (!existing.fromDate || existing.fromDate.getTime() !== newFromDate.getTime())
+          changedFields.fromDate = { old: existing.fromDate, new: newFromDate };
+        if (!existing.toDate || existing.toDate.getTime() !== newToDate.getTime())
+          changedFields.toDate = { old: existing.toDate, new: newToDate };
+        if (docUrl && existing.document !== docUrl)
+          changedFields.document = { old: existing.document, new: docUrl };
+
+        const finalDocPath = docUrl || existing.document;
+
+        await sendFocMail({
+          status: "created",
+          reason: newReason,
+          fromDate: newFromDate,
+          toDate: newToDate,
+          documentPath: finalDocPath,
+          description: `FOC extension request updated by ${createdBy} for order ${order.projectCodeArray[0].projectCode}. Reason: ${newReason}`,
+          toEmail: adminEmails,
+          ccEmail: requesterEmail,
+        });
+
+        existing.reason = newReason;
+        existing.fromDate = newFromDate;
+        existing.toDate = newToDate;
+        if (docUrl) existing.document = docUrl;
+
+        if (Object.keys(changedFields).length > 0) {
+          existing.focHistory.push({
+            action: "updated",
+            changedFields,
+            changedBy: createdBy,
+            changedAt: new Date(),
+          });
+        }
+
+        await order.save();
+        return successResponse(res, "FOC extension updated successfully", { order });
+      }
+
+      const newReason = reason.trim();
+      const newFromDate = new Date(fromDate);
+      const newToDate = new Date(toDate);
+
+      await sendFocMail({
+        status: "created",
+        reason: newReason,
+        fromDate: newFromDate,
+        toDate: newToDate,
+        documentPath: docUrl,
+        description: `New FOC extension request raised by ${createdBy} for order ${order.projectCodeArray[0].projectCode}. Reason: ${newReason}`,
+        toEmail: adminEmails,
+        ccEmail: requesterEmail,
+      });
+
+     
+
+      const closureEntry = {
+        bookingItemId: bookingItemId || null,
+        type,
+        reason: newReason,
+        document: docUrl,
+        fromDate: newFromDate,
+        toDate: newToDate,
+        createdBy,
+        createdAt: new Date(),
+        status: "pending",
+        isAdminCreated: false,  
+        focChatMessages: [],     
+        focHistory: [
+          { action: "created", changedFields: {}, changedBy: createdBy, changedAt: new Date() },
+        ],
+      };
+
+      order.campaignClosureArray.push(closureEntry);
+      await order.save();
+      return successResponse(res, "FOC extension submitted successfully", { order });
+    }
+
+    const closureEntry = {
+      bookingItemId: bookingItemId || null,
+      type,
+      reason: (reason || "").trim(),
+      document: docUrl,
+      fromDate: fromDate ? new Date(fromDate) : null,
+      toDate: toDate ? new Date(toDate) : null,
+      createdBy,
+      createdAt: new Date(),
+    };
+
+    order.campaignClosureArray.push(closureEntry);
+
+    if (type === "closed") {
+      const oldStage = order.pipelineStatus;
+      order.pipelineStatus = "closedLost";
+      order.pipelineLogs.push({
+        fromStage: oldStage,
+        toStage: "closedLost",
+        movedBy: createdBy,
+        movedAt: new Date(),
+      });
+    }
+
+    await order.save();
+    return successResponse(res, "Campaign closure submitted successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.approveFocEntry = async (req, res) => {
+  try {
+    const { id, closureId } = req.params;
+    const { fromDate, reason, toDate } = req.body;
+
+    if (Number(req.user.isAdmin) !== 1) {
+      return errorResponse(res, "Only super admin can approve FOC extension", null, 403);
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const entry = order.campaignClosureArray.id(closureId);
+    if (!entry) return errorResponse(res, "FOC entry not found", null, 404);
+    if (entry.type !== "foc") return errorResponse(res, "Not a FOC entry", null, 400);
+    if (entry.status === "approved") return errorResponse(res, "Already approved", null, 400);
+
+    const approvedBy = req.user?.username || "Admin";
+    const changedFields = {};
+
+    if (fromDate) {
+      const newFromDate = new Date(fromDate);
+      if (!entry.fromDate || entry.fromDate.getTime() !== newFromDate.getTime()) {
+        changedFields.fromDate = { old: entry.fromDate, new: newFromDate };
+        entry.fromDate = newFromDate;
+      }
+    }
+    if (reason && reason.trim() && reason.trim() !== entry.reason) {
+      changedFields.reason = { old: entry.reason, new: reason.trim() };
+      entry.reason = reason.trim();
+    }
+    if (toDate) {
+      const newToDate = new Date(toDate);
+      if (!entry.toDate || entry.toDate.getTime() !== newToDate.getTime()) {
+        changedFields.toDate = { old: entry.toDate, new: newToDate };
+        entry.toDate = newToDate;
+      }
+    }
+
+    // approver's own email straight from JWT — no DB lookup needed
+    const approverEmail = req.user?.email || "";
+
+    // original requester is a DIFFERENT user, so this still needs a DB lookup
+    const createdByUsername =
+      (entry.focHistory || []).find((h) => h.action === "created")?.changedBy ||
+      entry.createdBy;
+    const creatorEmail = await getEmailByUsername(createdByUsername);
+
+    await sendFocMail({
+      status: "approved",
+      reason: entry.reason,
+      fromDate: entry.fromDate,
+      toDate: entry.toDate,
+      documentPath: entry.document,
+      description: `FOC extension approved by ${approvedBy} for order ${order.projectCodeArray[0].projectCode}. Reason: ${entry.reason}`,
+      toEmail: approverEmail,
+      ccEmail: creatorEmail,
+    });
+
+    entry.status = "approved";
+    entry.approvedBy = approvedBy;
+    entry.approvedAt = new Date();
+
+    entry.focHistory.push({
+      action: "approved",
+      changedFields,
+      changedBy: approvedBy,
+      changedAt: new Date(),
+    });
+
+    await order.save();
+    return successResponse(res, "FOC extension approved successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+exports.createAndApproveFocEntry = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason, fromDate, toDate, bookingItemId } = req.body;
+
+    // Only super admin can use this shortcut
+    if (Number(req.user.isAdmin) !== 1) {
+      return errorResponse(res, "Only super admin can create and approve FOC extension", null, 403);
+    }
+
+    if (!reason?.trim())
+      return errorResponse(res, "Reason is required", null, 400);
+    if (!fromDate)
+      return errorResponse(res, "From date is required", null, 400);
+    if (!toDate)
+      return errorResponse(res, "To date is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const docFile = (req.files || []).find((f) => f.fieldname === "document");
+    if (docFile) {
+      const err = validateFile(docFile, "Document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const docUrl = docFile ? getFileUrl(docFile) : "";
+
+    const adminUsername = req.user?.username || "Admin";
+    const now = new Date();
+
+    
+
+    const closureEntry = {
+      bookingItemId: bookingItemId || null,
+      type: "foc",
+      reason: reason.trim(),
+      document: docUrl,
+      fromDate: new Date(fromDate),
+      toDate: new Date(toDate),
+      createdBy: adminUsername,
+      createdAt: now,
+      status: "approved",
+      approvedBy: adminUsername,
+      approvedAt: now,
+      isAdminCreated: true,   
+      focChatMessages: [],    
+      focHistory: [
+        { action: "created", changedFields: {}, changedBy: adminUsername, changedAt: now },
+        { action: "approved", changedFields: {}, changedBy: adminUsername, changedAt: now },
+      ],
+    };
+
+    order.campaignClosureArray.push(closureEntry);
+    await order.save();
+
+    return successResponse(res, "FOC extension created and approved successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.updateCampaignClosure = async (req, res) => {
+  try {
+    const { id, closureId } = req.params;
+    const { reason, fromDate, toDate } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const entry = order.campaignClosureArray.id(closureId);
+    if (!entry) return errorResponse(res, "Closure entry not found", null, 404);
+
+    const docFile = (req.files || []).find(f => f.fieldname === "document");
+    if (docFile) {
+      const err = validateFile(docFile, "Document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const docUrl = docFile ? getFileUrl(docFile) : entry.document;
+
+    if (reason?.trim()) entry.reason = reason.trim();
+    if (fromDate) entry.fromDate = new Date(fromDate);
+    if (toDate) entry.toDate = new Date(toDate);
+    if (docUrl) entry.document = docUrl;
+
+    await order.save();
+    return successResponse(res, "Closure updated successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.submitOrderClosedWon = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comments } = req.body;
+
+    if (!comments?.trim())
+      return errorResponse(res, "Comments are required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    if (order.pipelineStatus === "closedLost") {
+      return errorResponse(res, "This order is closed lost and cannot be moved.", null, 400);
+    }
+
+    const uploadedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const docFile = (req.files || []).find((f) => f.fieldname === "document");
+    if (docFile) {
+      const err = validateFile(docFile, "Closed Won document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const docUrl = docFile ? getFileUrl(docFile) : "";
+
+    order.orderClosedWonArray.push({
+      comments: comments.trim(),
+      document: docUrl,
+      uploadedBy,
+      uploadedAt: new Date(),
+    });
+
+    const oldStage = order.pipelineStatus;
+    order.pipelineStatus = "closedWon";
+    order.pipelineLogs.push({
+      fromStage: oldStage,
+      toStage: "closedWon",
+      movedBy: uploadedBy,
+      movedAt: new Date(),
+    });
+
+    await order.save();
+    return successResponse(res, "Order moved to Closed Won successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.submitOrderClosedLost = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason?.trim())
+      return errorResponse(res, "Reason is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    if (order.pipelineStatus === "closedLost") {
+      return errorResponse(res, "This order is already closed lost.", null, 400);
+    }
+
+    const uploadedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const docFile = (req.files || []).find((f) => f.fieldname === "document");
+    if (docFile) {
+      const err = validateFile(docFile, "Closed Lost document");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const docUrl = docFile ? getFileUrl(docFile) : "";
+
+    order.orderClosedLostArray.push({
+      reason: reason.trim(),
+      document: docUrl,
+      uploadedBy,
+      uploadedAt: new Date(),
+    });
+
+    const oldStage = order.pipelineStatus;
+    order.pipelineStatus = "closedLost";
+    order.pipelineLogs.push({
+      fromStage: oldStage,
+      toStage: "closedLost",
+      movedBy: uploadedBy,
+      movedAt: new Date(),
+    });
+
+    await order.save();
+    return successResponse(res, "Order moved to Closed Lost successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.sendFocChatMessage = async (req, res) => {
+  try {
+    const { id, closureId } = req.params;
+    const { message } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const entry = order.campaignClosureArray.id(closureId);
+    if (!entry) return errorResponse(res, "FOC entry not found", null, 404);
+    if (entry.type !== "foc") return errorResponse(res, "Not a FOC entry", null, 400);
+
+    // Chat is only open while the FOC is still pending
+    if (entry.status !== "pending") {
+      return errorResponse(res, "This FOC request is already approved — chat is closed", null, 400);
+    }
+
+    // Admin-created (self-approved) entries never have a chat thread
+    if (entry.isAdminCreated) {
+      return errorResponse(res, "This FOC entry was created by admin directly and has no chat", null, 400);
+    }
+
+    if (!message?.trim() && !(req.files || []).length) {
+      return errorResponse(res, "Message or attachment is required", null, 400);
+    }
+
+    const attachmentFile = (req.files || []).find((f) => f.fieldname === "attachment");
+    if (attachmentFile) {
+      const err = validateFile(attachmentFile, "Chat attachment");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const attachmentUrl = attachmentFile ? getFileUrl(attachmentFile) : "";
+
+    const senderRole = Number(req.user.isAdmin) === 1 ? "admin" : "staffAdmin";
+
+    entry.focChatMessages.push({
+      senderUsername: req.user?.username || "Unknown",
+      senderRole,
+      message: (message || "").trim(),
+      attachment: attachmentUrl,
+      sentAt: new Date(),
+    });
+
+    await order.save();
+    return successResponse(res, "Message sent", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+exports.getVamosysApiKey = async (req, res) => {
+  try {
+    const userId =  "ADINN12";
+    const validDays = 365;
+    const time = Math.floor(Date.now() / 1000);
+
+    const url = `https://api.vamosys.com/getApiKey?userId=${userId}&validDays=${validDays}&time=${time}`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(response.status).json({
+        success: false,
+        message: "Vamosys API returned an error",
+        error: errText,
+      });
+    }
+
+    const data = await response.json();
+
+    return res.status(200).json({
+      success: true,
+      requestedUrl: url,
+      data,
+    });
+  } catch (error) {
+    console.error("Vamosys API key fetch failed:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch Vamosys API key",
+      error: error.message,
+    });
   }
 };
