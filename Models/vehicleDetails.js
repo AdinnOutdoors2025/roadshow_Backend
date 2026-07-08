@@ -68,6 +68,8 @@ const registrationVehicleSchema = new mongoose.Schema(
       },
       availableFrom: { type: Date, default: null },
       remarks: { type: String, default: "" },
+      fromDate: { type: Date, default: null },
+      toDate: { type: Date, default: null },
     },
 
     // Maintenance Details
@@ -152,45 +154,45 @@ const vehicleSchema = new mongoose.Schema(
     // },
 
     techSpecs: {
-  screenType: { type: String, default: "LED Only" },
-  numberOfScreens: { type: String, default: "" },
- 
-  // Left/Right Screen Size (ft) — used when numberOfScreens === "3"
-  leftRightScreenWidth: { type: String, default: "" },
-  leftRightScreenHeight: { type: String, default: "" },
- 
-  // Back Screen Size (ft) — used when numberOfScreens === "1" or "3"
-  backScreenWidth: { type: String, default: "" },
-  backScreenHeight: { type: String, default: "" },
- 
-  // Left/Right Resolution (px) — used when numberOfScreens === "3"
-  leftRightResolutionWidth: { type: String, default: "" },
-  leftRightResolutionHeight: { type: String, default: "" },
- 
-  // Back Resolution (px) — used when numberOfScreens === "1" or "3"
-  backResolutionWidth: { type: String, default: "" },
-  backResolutionHeight: { type: String, default: "" },
- 
-  // ── NEW FIELDS: Separate Left screen — used when numberOfScreens === "2"
-  leftScreenWidth: { type: String, default: "" },
-  leftScreenHeight: { type: String, default: "" },
-  leftResolutionWidth: { type: String, default: "" },
-  leftResolutionHeight: { type: String, default: "" },
- 
-  // ── NEW FIELDS: Separate Right screen — used when numberOfScreens === "2"
-  rightScreenWidth: { type: String, default: "" },
-  rightScreenHeight: { type: String, default: "" },
-  rightResolutionWidth: { type: String, default: "" },
-  rightResolutionHeight: { type: String, default: "" },
- 
-  audioOutput: { type: String, default: "" },
-  brightness: { type: String, default: "" },
-  displayVersion: { type: String, default: "" },
-  generatorCapacity: { type: String, default: "" },
-  additionalFeatures: { type: String, default: "" },
- 
-  // soundQuality: { type: String, default: "" },  // REMOVED — deprecated 22/05/2026
-},
+      screenType: { type: String, default: "LED Only" },
+      numberOfScreens: { type: String, default: "" },
+
+      // Left/Right Screen Size (ft) — used when numberOfScreens === "3"
+      leftRightScreenWidth: { type: String, default: "" },
+      leftRightScreenHeight: { type: String, default: "" },
+
+      // Back Screen Size (ft) — used when numberOfScreens === "1" or "3"
+      backScreenWidth: { type: String, default: "" },
+      backScreenHeight: { type: String, default: "" },
+
+      // Left/Right Resolution (px) — used when numberOfScreens === "3"
+      leftRightResolutionWidth: { type: String, default: "" },
+      leftRightResolutionHeight: { type: String, default: "" },
+
+      // Back Resolution (px) — used when numberOfScreens === "1" or "3"
+      backResolutionWidth: { type: String, default: "" },
+      backResolutionHeight: { type: String, default: "" },
+
+      // ── NEW FIELDS: Separate Left screen — used when numberOfScreens === "2"
+      leftScreenWidth: { type: String, default: "" },
+      leftScreenHeight: { type: String, default: "" },
+      leftResolutionWidth: { type: String, default: "" },
+      leftResolutionHeight: { type: String, default: "" },
+
+      // ── NEW FIELDS: Separate Right screen — used when numberOfScreens === "2"
+      rightScreenWidth: { type: String, default: "" },
+      rightScreenHeight: { type: String, default: "" },
+      rightResolutionWidth: { type: String, default: "" },
+      rightResolutionHeight: { type: String, default: "" },
+
+      audioOutput: { type: String, default: "" },
+      brightness: { type: String, default: "" },
+      displayVersion: { type: String, default: "" },
+      generatorCapacity: { type: String, default: "" },
+      additionalFeatures: { type: String, default: "" },
+
+      // soundQuality: { type: String, default: "" },  // REMOVED — deprecated 22/05/2026
+    },
 
     // // Pricing (Shared)
     // pricing: {

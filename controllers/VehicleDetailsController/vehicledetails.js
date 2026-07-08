@@ -543,7 +543,7 @@
 // const updateRegistrationVehicle = async (req, res) => {
 //   try {
 //     const { id, registrationNumber } = req.params;
-    
+
 //     // Support both spaced and unspaced input
 //     const cleanReg = cleanRegistrationNumber(registrationNumber);       // "TN58BK7674"
 //     const formattedReg = formatRegistrationNumber(cleanReg);            // "TN 58 BK 7674"
@@ -1095,6 +1095,7 @@
 
 // controllers/VehicleDetailsController/vehicledetails.js
 const Vehicle = require("../../Models/vehicleDetails");
+const { checkVehicleAvailability } = require("../../Utils/vehicleAvailability");
 const mongoose = require("mongoose");
 const path = require("path");
 const fs = require("fs");
@@ -1247,31 +1248,31 @@ const createVehicle = async (req, res) => {
 
 
     const updatedTechSpecs = techSpecs || {
-  screenType: "LED Only",
-  numberOfScreens: "",
-  leftRightScreenWidth: "",
-  leftRightScreenHeight: "",
-  backScreenWidth: "",
-  backScreenHeight: "",
-  leftRightResolutionWidth: "",
-  leftRightResolutionHeight: "",
-  backResolutionWidth: "",
-  backResolutionHeight: "",
-  leftScreenWidth: "",        // NEW
-  leftScreenHeight: "",       // NEW
-  leftResolutionWidth: "",    // NEW
-  leftResolutionHeight: "",   // NEW
-  rightScreenWidth: "",       // NEW
-  rightScreenHeight: "",      // NEW
-  rightResolutionWidth: "",   // NEW
-  rightResolutionHeight: "",  // NEW
-  audioOutput: "",
-  brightness: "",
-  displayVersion: "",
-  generatorCapacity: "",
-  additionalFeatures: "",
-  // soundQuality: "",  // REMOVED
-};
+      screenType: "LED Only",
+      numberOfScreens: "",
+      leftRightScreenWidth: "",
+      leftRightScreenHeight: "",
+      backScreenWidth: "",
+      backScreenHeight: "",
+      leftRightResolutionWidth: "",
+      leftRightResolutionHeight: "",
+      backResolutionWidth: "",
+      backResolutionHeight: "",
+      leftScreenWidth: "",        // NEW
+      leftScreenHeight: "",       // NEW
+      leftResolutionWidth: "",    // NEW
+      leftResolutionHeight: "",   // NEW
+      rightScreenWidth: "",       // NEW
+      rightScreenHeight: "",      // NEW
+      rightResolutionWidth: "",   // NEW
+      rightResolutionHeight: "",  // NEW
+      audioOutput: "",
+      brightness: "",
+      displayVersion: "",
+      generatorCapacity: "",
+      additionalFeatures: "",
+      // soundQuality: "",  // REMOVED
+    };
 
 
     let existingGroup = await Vehicle.findOne({ "basicInfo.vehicleType": basicInfo.vehicleType });
@@ -1362,12 +1363,12 @@ const updateVehicleStep = async (req, res) => {
     // const { step, stepData, completed } = req.body;
     const { id } = req.params;
 
-    
-let parsedBody = req.body;
-if (req.body && req.body.data) {
-  try { parsedBody = JSON.parse(req.body.data); } catch(e) { parsedBody = req.body; }
-}
-const { step, stepData, completed } = parsedBody;
+
+    let parsedBody = req.body;
+    if (req.body && req.body.data) {
+      try { parsedBody = JSON.parse(req.body.data); } catch (e) { parsedBody = req.body; }
+    }
+    const { step, stepData, completed } = parsedBody;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, message: "Invalid ID" });
@@ -1418,16 +1419,16 @@ const { step, stepData, completed } = parsedBody;
 
 
     if (req.files) {
-  const mediaFields = [
-    "frontViewImage", "leftSideImage", "rightSideImage",
-    "rearViewImage", "interiorImage", "demoVideo",
-  ];
-  mediaFields.forEach((field) => {
-    if (req.files[field] && req.files[field][0]) {
-      setPayload[`mediaFiles.${field}`] = getFileUrl(req.files[field][0]);
+      const mediaFields = [
+        "frontViewImage", "leftSideImage", "rightSideImage",
+        "rearViewImage", "interiorImage", "demoVideo",
+      ];
+      mediaFields.forEach((field) => {
+        if (req.files[field] && req.files[field][0]) {
+          setPayload[`mediaFiles.${field}`] = getFileUrl(req.files[field][0]);
+        }
+      });
     }
-  });
-}
 
 
     // Use findOneAndUpdate — avoids VersionError entirely
@@ -1629,6 +1630,14 @@ const updateVehicle = async (req, res) => {
             currentStatus === "Unavailable"
               ? regVehicle.statusAvailability?.remarks || regVehicle.remarks || ""
               : "",
+          fromDate:
+            currentStatus === "Booked"
+              ? regVehicle.statusAvailability?.fromDate || regVehicle.fromDate || null
+              : null,
+          toDate:
+            currentStatus === "Booked"
+              ? regVehicle.statusAvailability?.toDate || regVehicle.toDate || null
+              : null,
         };
 
         const maintenance = {
@@ -1683,33 +1692,33 @@ const updateVehicle = async (req, res) => {
 
 
     if (updateData.techSpecs) {
-  updateData.techSpecs = {
-    screenType: updateData.techSpecs.screenType || "LED Only",
-    numberOfScreens: updateData.techSpecs.numberOfScreens || "",
-    leftRightScreenWidth: updateData.techSpecs.leftRightScreenWidth || "",
-    leftRightScreenHeight: updateData.techSpecs.leftRightScreenHeight || "",
-    backScreenWidth: updateData.techSpecs.backScreenWidth || "",
-    backScreenHeight: updateData.techSpecs.backScreenHeight || "",
-    leftRightResolutionWidth: updateData.techSpecs.leftRightResolutionWidth || "",
-    leftRightResolutionHeight: updateData.techSpecs.leftRightResolutionHeight || "",
-    backResolutionWidth: updateData.techSpecs.backResolutionWidth || "",
-    backResolutionHeight: updateData.techSpecs.backResolutionHeight || "",
-    leftScreenWidth: updateData.techSpecs.leftScreenWidth || "",        // NEW
-    leftScreenHeight: updateData.techSpecs.leftScreenHeight || "",      // NEW
-    leftResolutionWidth: updateData.techSpecs.leftResolutionWidth || "", // NEW
-    leftResolutionHeight: updateData.techSpecs.leftResolutionHeight || "", // NEW
-    rightScreenWidth: updateData.techSpecs.rightScreenWidth || "",      // NEW
-    rightScreenHeight: updateData.techSpecs.rightScreenHeight || "",    // NEW
-    rightResolutionWidth: updateData.techSpecs.rightResolutionWidth || "", // NEW
-    rightResolutionHeight: updateData.techSpecs.rightResolutionHeight || "", // NEW
-    audioOutput: updateData.techSpecs.audioOutput || "",
-    brightness: updateData.techSpecs.brightness || "",
-    displayVersion: updateData.techSpecs.displayVersion || "",
-    generatorCapacity: updateData.techSpecs.generatorCapacity || "",
-    additionalFeatures: updateData.techSpecs.additionalFeatures || "",
-    // soundQuality: updateData.techSpecs.soundQuality || "",  // REMOVED
-  };
-}
+      updateData.techSpecs = {
+        screenType: updateData.techSpecs.screenType || "LED Only",
+        numberOfScreens: updateData.techSpecs.numberOfScreens || "",
+        leftRightScreenWidth: updateData.techSpecs.leftRightScreenWidth || "",
+        leftRightScreenHeight: updateData.techSpecs.leftRightScreenHeight || "",
+        backScreenWidth: updateData.techSpecs.backScreenWidth || "",
+        backScreenHeight: updateData.techSpecs.backScreenHeight || "",
+        leftRightResolutionWidth: updateData.techSpecs.leftRightResolutionWidth || "",
+        leftRightResolutionHeight: updateData.techSpecs.leftRightResolutionHeight || "",
+        backResolutionWidth: updateData.techSpecs.backResolutionWidth || "",
+        backResolutionHeight: updateData.techSpecs.backResolutionHeight || "",
+        leftScreenWidth: updateData.techSpecs.leftScreenWidth || "",        // NEW
+        leftScreenHeight: updateData.techSpecs.leftScreenHeight || "",      // NEW
+        leftResolutionWidth: updateData.techSpecs.leftResolutionWidth || "", // NEW
+        leftResolutionHeight: updateData.techSpecs.leftResolutionHeight || "", // NEW
+        rightScreenWidth: updateData.techSpecs.rightScreenWidth || "",      // NEW
+        rightScreenHeight: updateData.techSpecs.rightScreenHeight || "",    // NEW
+        rightResolutionWidth: updateData.techSpecs.rightResolutionWidth || "", // NEW
+        rightResolutionHeight: updateData.techSpecs.rightResolutionHeight || "", // NEW
+        audioOutput: updateData.techSpecs.audioOutput || "",
+        brightness: updateData.techSpecs.brightness || "",
+        displayVersion: updateData.techSpecs.displayVersion || "",
+        generatorCapacity: updateData.techSpecs.generatorCapacity || "",
+        additionalFeatures: updateData.techSpecs.additionalFeatures || "",
+        // soundQuality: updateData.techSpecs.soundQuality || "",  // REMOVED
+      };
+    }
 
 
     // Process media files if any
@@ -1804,7 +1813,7 @@ const updateVehicle = async (req, res) => {
 const updateRegistrationVehicle = async (req, res) => {
   try {
     const { id, registrationNumber } = req.params;
-    
+
     // Support both spaced and unspaced input
     const cleanReg = cleanRegistrationNumber(registrationNumber);       // "TN58BK7674"
     const formattedReg = formatRegistrationNumber(cleanReg);            // "TN 58 BK 7674"
@@ -1850,40 +1859,56 @@ const updateRegistrationVehicle = async (req, res) => {
       "Damaged": 5,
     };
 
-  //   if (updateData.currentStatus) {
-  //     // vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus = updateData.currentStatus;
-  //    vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus = updateData.currentStatus;
-  // vehicle.registrationVehicles[regIndex].statusAvailability.statusPriority =
-  //   STATUS_PRIORITY[updateData.currentStatus] ?? 0;
-  //     if (updateData.currentStatus === "Unavailable") {
-  //       vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = updateData.availableFrom || null;
-  //       vehicle.registrationVehicles[regIndex].statusAvailability.remarks = updateData.remarks || "";
-  //     } else {
-  //       vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = null;
-  //       vehicle.registrationVehicles[regIndex].statusAvailability.remarks = "";
-  //     }
-  //   }
+    //   if (updateData.currentStatus) {
+    //     // vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus = updateData.currentStatus;
+    //    vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus = updateData.currentStatus;
+    // vehicle.registrationVehicles[regIndex].statusAvailability.statusPriority =
+    //   STATUS_PRIORITY[updateData.currentStatus] ?? 0;
+    //     if (updateData.currentStatus === "Unavailable") {
+    //       vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = updateData.availableFrom || null;
+    //       vehicle.registrationVehicles[regIndex].statusAvailability.remarks = updateData.remarks || "";
+    //     } else {
+    //       vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = null;
+    //       vehicle.registrationVehicles[regIndex].statusAvailability.remarks = "";
+    //     }
+    //   }
 
 
-  // AFTER — save remarks for ALL statuses, only clear availableFrom when not Unavailable
-if (updateData.currentStatus) {
-  vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus = updateData.currentStatus;
-  vehicle.registrationVehicles[regIndex].statusAvailability.statusPriority =
-    STATUS_PRIORITY[updateData.currentStatus] ?? 0;
+    // AFTER — save remarks for ALL statuses, only clear availableFrom when not Unavailable
+    if (updateData.currentStatus) {
+      vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus = updateData.currentStatus;
+      vehicle.registrationVehicles[regIndex].statusAvailability.statusPriority =
+        STATUS_PRIORITY[updateData.currentStatus] ?? 0;
 
-  // Save remarks for any status (Damaged, Maintenance, Booked, etc.)
-  if (updateData.remarks !== undefined) {
-    vehicle.registrationVehicles[regIndex].statusAvailability.remarks = updateData.remarks || "";
-  }
+      // Save remarks for any status (Damaged, Maintenance, Booked, etc.)
+      if (updateData.remarks !== undefined) {
+        vehicle.registrationVehicles[regIndex].statusAvailability.remarks = updateData.remarks || "";
+      }
 
-  // availableFrom only relevant for Unavailable
-  if (updateData.currentStatus === "Unavailable") {
-    vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = updateData.availableFrom || null;
-  } else {
-    vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = null;
-    // Do NOT clear remarks here — already set above
-  }
-}
+      // availableFrom only relevant for Unavailable
+      if (updateData.currentStatus === "Unavailable") {
+        vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = updateData.availableFrom || null;
+      } else {
+        vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = null;
+        // Do NOT clear remarks here — already set above
+      }
+
+      if (updateData.currentStatus === "Booked") {
+        vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = updateData.fromDate || null;
+        vehicle.registrationVehicles[regIndex].statusAvailability.toDate = updateData.toDate || null;
+      } else {
+        vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = null;
+        vehicle.registrationVehicles[regIndex].statusAvailability.toDate = null;
+      }
+    }
+
+
+    if (updateData.currentStatus === undefined) {
+      if (updateData.fromDate !== undefined)
+        vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = updateData.fromDate || null;
+      if (updateData.toDate !== undefined)
+        vehicle.registrationVehicles[regIndex].statusAvailability.toDate = updateData.toDate || null;
+    }
 
     if (updateData.lastServiceDate !== undefined)
       vehicle.registrationVehicles[regIndex].maintenance.lastServiceDate = updateData.lastServiceDate || null;
@@ -2480,6 +2505,154 @@ const saveLocations = async (req, res) => {
 };
 
 
+
+const checkAvailability = async (req, res) => {
+  try {
+    const { vehicleType, quantity, fromDate, toDate } = req.body;
+    
+
+    if (!vehicleType || !quantity || !fromDate || !toDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: vehicleType, quantity, fromDate, toDate are required"
+      });
+    }
+
+  
+    const result = await checkVehicleAvailability({ 
+      vehicleType, 
+      quantity, 
+      fromDate, 
+      toDate 
+    });
+
+    res.status(200).json({
+      success: true,
+      message: result.available ? "Vehicles available" : "Not enough vehicles available",
+      data: result
+    });
+  } catch (error) {
+    console.error("Check Availability Error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Error checking availability"
+    });
+  }
+};
+
+
+
+const updateRegistrationVehicleByRegNo = async (req, res) => {
+  try {
+    const { registrationNumber } = req.params;
+
+    const cleanReg = cleanRegistrationNumber(registrationNumber);
+    const formattedReg = formatRegistrationNumber(cleanReg);
+
+  
+    const vehicle = await Vehicle.findOne({
+      "registrationVehicles.registrationNumber": { $in: [cleanReg, formattedReg] },
+    });
+
+    if (!vehicle) {
+      return res.status(404).json({ success: false, message: "Registration vehicle not found" });
+    }
+
+    const regIndex = vehicle.registrationVehicles.findIndex(
+      (rv) => rv.registrationNumber === formattedReg || rv.registrationNumber === cleanReg
+    );
+
+    if (regIndex === -1) {
+      return res.status(404).json({ success: false, message: "Registration vehicle not found" });
+    }
+
+    const updateData = req.body;
+
+    if (updateData.city) vehicle.registrationVehicles[regIndex].city = updateData.city;
+    if (updateData.modelConfig) vehicle.registrationVehicles[regIndex].modelConfig = updateData.modelConfig;
+    if (updateData.permitType) vehicle.registrationVehicles[regIndex].permitType = updateData.permitType;
+    if (updateData.ownershipType) vehicle.registrationVehicles[regIndex].ownershipType = updateData.ownershipType;
+    if (updateData.fuelType) vehicle.registrationVehicles[regIndex].fuelType = updateData.fuelType;
+    if (updateData.manufacturingYear) vehicle.registrationVehicles[regIndex].manufacturingYear = updateData.manufacturingYear;
+    if (updateData.gpsEnabled !== undefined) vehicle.registrationVehicles[regIndex].gpsEnabled = updateData.gpsEnabled;
+    if (updateData.activeStatus !== undefined) vehicle.registrationVehicles[regIndex].activeStatus = updateData.activeStatus;
+
+    const STATUS_PRIORITY = {
+      "Waiting for Status": 0,
+      "Available": 1,
+      "Unavailable": 2,
+      "Booked": 3,
+      "Maintenance": 4,
+      "Damaged": 5,
+    };
+
+    if (updateData.currentStatus) {
+      vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus = updateData.currentStatus;
+      vehicle.registrationVehicles[regIndex].statusAvailability.statusPriority =
+        STATUS_PRIORITY[updateData.currentStatus] ?? 0;
+
+      if (updateData.remarks !== undefined) {
+        vehicle.registrationVehicles[regIndex].statusAvailability.remarks = updateData.remarks || "";
+      }
+
+      if (updateData.currentStatus === "Unavailable") {
+        vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = updateData.availableFrom || null;
+      } else {
+        vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = null;
+      }
+
+      if (updateData.currentStatus === "Booked") {
+        vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = updateData.fromDate || null;
+        vehicle.registrationVehicles[regIndex].statusAvailability.toDate = updateData.toDate || null;
+      } else {
+        vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = null;
+        vehicle.registrationVehicles[regIndex].statusAvailability.toDate = null;
+      }
+    }
+
+    if (updateData.currentStatus === undefined) {
+      if (updateData.fromDate !== undefined)
+        vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = updateData.fromDate || null;
+      if (updateData.toDate !== undefined)
+        vehicle.registrationVehicles[regIndex].statusAvailability.toDate = updateData.toDate || null;
+    }
+
+    if (updateData.lastServiceDate !== undefined)
+      vehicle.registrationVehicles[regIndex].maintenance.lastServiceDate = updateData.lastServiceDate || null;
+    if (updateData.insuranceExpiryDate !== undefined)
+      vehicle.registrationVehicles[regIndex].maintenance.insuranceExpiryDate = updateData.insuranceExpiryDate || null;
+    if (updateData.pollutionExpiryDate !== undefined)
+      vehicle.registrationVehicles[regIndex].maintenance.pollutionExpiryDate = updateData.pollutionExpiryDate || null;
+
+    if (updateData.driverName !== undefined)
+      vehicle.registrationVehicles[regIndex].driverDetails.driverName = updateData.driverName || "";
+    if (updateData.driverPhone !== undefined)
+      vehicle.registrationVehicles[regIndex].driverDetails.driverPhone = updateData.driverPhone || "";
+    if (updateData.backupDriver !== undefined)
+      vehicle.registrationVehicles[regIndex].driverDetails.backupDriver = updateData.backupDriver || "";
+    if (updateData.backupDriverPhone !== undefined)
+      vehicle.registrationVehicles[regIndex].driverDetails.backupDriverPhone = updateData.backupDriverPhone || "";
+    if (updateData.driverCharges !== undefined)
+      vehicle.registrationVehicles[regIndex].driverDetails.driverCharges = updateData.driverCharges || 0;
+
+    await vehicle.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Registration vehicle updated successfully",
+      data: vehicle,
+    });
+  } catch (error) {
+    console.error("Update Registration Vehicle By RegNo Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error Updating Registration Vehicle",
+      error: error.message,
+    });
+  }
+};
+
+
 module.exports = {
   createVehicle,
   getNewVehicles,
@@ -2496,4 +2669,6 @@ module.exports = {
   getVehiclesByType,
   getVehicleGroupByType,
   updateVehicleStep,
+  checkAvailability,
+  updateRegistrationVehicleByRegNo
 };
