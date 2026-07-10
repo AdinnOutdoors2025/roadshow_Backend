@@ -24,7 +24,9 @@ import {
 } from "../../Utils/shortUrl.js";
 
 import { sendOtpSms } from "../../Utils/smsServices.js";
-
+//EMAIL ADDED 
+import axios from "axios";
+//EMAIL ADDED 
 const ROADSHOW_APPROVAL_PASSWORD =
   process.env.ROADSHOW_QUOTATION_APPROVAL_PASSWORD || "Adinn@#123";
 
@@ -62,6 +64,397 @@ const sanitizeWaitingApprovalQuotationForResponse = (quotation) => {
   return data;
 };
 
+//EMAIL ADDED 
+// const ROADSHOW_RATECARD_MAIL_API_URL =
+//   process.env.ROADSHOW_RATECARD_MAIL_API_URL ||
+//   "https://adinndigital.com/api/roadshow_rateCard/index_roadshowQuotationApproval.php";
+
+// const ROADSHOW_APPROVAL_MAIL_TO =
+//   process.env.ROADSHOW_APPROVAL_MAIL_TO || "reactdeveloper@adinn.co.in";
+
+// const ROADSHOW_APPROVAL_MAIL_CC =
+//   process.env.ROADSHOW_APPROVAL_MAIL_CC || "smm@adinn.co.in";
+
+// const normalizeEmailCsv = (value = "") =>
+//   String(value || "")
+//     .split(",")
+//     .map((email) => email.trim())
+//     .filter(Boolean);
+
+// const buildFrontendQuotationUrl = (quotationNumber = "") => {
+//   const frontendBaseUrl = process.env.FRONTEND_BASE_URL || "";
+
+//   if (!frontendBaseUrl || !quotationNumber) return "";
+
+//   return `${frontendBaseUrl.replace(
+//     /\/$/,
+//     "",
+//   )}/roadshow-quotations?qn=${encodeURIComponent(quotationNumber)}`;
+// };
+
+// const sendRoadshowQuotationApprovalMail = async ({
+//   quotation,
+//   pdfUrl = "",
+//   pdfShortUrl = "",
+// }) => {
+//   if (!quotation) return null;
+
+//   const quotationObject =
+//     typeof quotation.toObject === "function"
+//       ? quotation.toObject()
+//       : quotation;
+
+//   const rawPayload = quotationObject.rawPayload || {};
+
+//   const sourcePayload =
+//     rawPayload && Object.keys(rawPayload).length > 0
+//       ? rawPayload
+//       : quotationObject;
+
+//   const quotationNumber =
+//     quotationObject.quotationNumber ||
+//     sourcePayload.quotationNumber ||
+//     sourcePayload?.quotation?.displayedProposalNumber ||
+//     "";
+
+//   const quotationUrl = buildFrontendQuotationUrl(quotationNumber);
+
+//   const finalPdfUrl =
+//     pdfUrl ||
+//     quotationObject?.pdf?.publicUrl ||
+//     sourcePayload?.pdf?.publicUrl ||
+//     "";
+
+//   const mailData = {
+//     ...sourcePayload,
+
+//     quotationId: String(quotationObject._id || sourcePayload.quotationId || ""),
+//     quotationNumber,
+//     status: quotationObject.status || sourcePayload.status || "waiting_for_approval",
+
+//     quotation: sourcePayload.quotation || quotationObject.quotation || {},
+//     clientDetails: sourcePayload.clientDetails || quotationObject.clientDetails || {},
+//     preparedByDetails:
+//       sourcePayload.preparedByDetails || quotationObject.preparedByDetails || {},
+//     campaign: sourcePayload.campaign || quotationObject.campaign || {},
+//     vehicle: sourcePayload.vehicle || quotationObject.vehicle || {},
+//     pricing: sourcePayload.pricing || quotationObject.pricing || {},
+//     addOns: sourcePayload.addOns || quotationObject.addOns || {},
+//     approval: sourcePayload.approval || quotationObject.approval || {},
+
+//     urls: {
+//       approvalUrl: quotationUrl,
+//       quotationUrl,
+//       pdfUrl: finalPdfUrl,
+//       pdfShortUrl: "",
+//       downloadUrl: finalPdfUrl,
+//     },
+//   };
+
+//   console.log("Roadshow approval mail API URL:", ROADSHOW_RATECARD_MAIL_API_URL);
+//   console.log("Roadshow approval mail TO:", ROADSHOW_APPROVAL_MAIL_TO);
+//   console.log("Roadshow approval mail CC:", ROADSHOW_APPROVAL_MAIL_CC);
+
+//   console.log("Roadshow mail clientDetails:", mailData.clientDetails);
+//   console.log("Roadshow mail campaign:", mailData.campaign);
+//   console.log("Roadshow mail vehicle:", {
+//     name: mailData?.vehicle?.selectedVehicleSnapshot?.name,
+//     category: mailData?.vehicle?.selectedCategory,
+//   });
+//   console.log("Roadshow mail pricing:", {
+//     vehicleRate: mailData?.pricing?.pricingDetails?.vehicleRate,
+//     vehicleDiscountAmount: mailData?.pricing?.pricingDetails?.vehicleDiscountAmount,
+//     vehicleFinalRate: mailData?.pricing?.pricingDetails?.vehicleFinalRate,
+//     brandingCostDiscount:
+//       mailData?.pricing?.pricingDetails?.brandingCostDiscount,
+//     rtoPermissionDiscount:
+//       mailData?.pricing?.pricingDetails?.rtoPermissionDiscount,
+//     totalDiscountAmount: mailData?.pricing?.totalDiscountAmount,
+//     grandTotal: mailData?.pricing?.grandTotal,
+//   });
+
+// const mailPayload = {
+//   mailtype: "roadshow_quotationApproval",
+//   testOnly: true,
+//   to: normalizeEmailCsv(ROADSHOW_APPROVAL_MAIL_TO),
+//   cc: normalizeEmailCsv(ROADSHOW_APPROVAL_MAIL_CC),
+//   data: mailData,
+// };
+
+//   const response = await axios.post(
+//     ROADSHOW_RATECARD_MAIL_API_URL,
+//     mailPayload,
+//     {
+//       headers: {
+//         "Content-Type": "application/json",
+//       },
+//       timeout: 20000,
+//     },
+//   );
+
+//   return response.data;
+// };
+
+const ROADSHOW_RATECARD_MAIL_API_URL =
+  process.env.ROADSHOW_RATECARD_MAIL_API_URL ||
+  "https://adinndigital.com/api/roadshow_rateCard/index_roadshowQuotationApproval.php";
+
+const ROADSHOW_APPROVAL_MAIL_TO =
+  process.env.ROADSHOW_APPROVAL_MAIL_TO || "reactdeveloper@adinn.co.in";
+
+const ROADSHOW_APPROVAL_MAIL_CC =
+  process.env.ROADSHOW_APPROVAL_MAIL_CC || "smm@adinn.co.in";
+
+const ROADSHOW_APPROVAL_MAIL_TEST_ONLY =
+  String(process.env.ROADSHOW_APPROVAL_MAIL_TEST_ONLY || "false").toLowerCase() ===
+  "true";
+
+const normalizeEmailCsv = (value = "") =>
+  String(value || "")
+    .split(",")
+    .map((email) => email.trim())
+    .filter(Boolean);
+
+const FRONTEND_BASE_URL =
+  process.env.FRONTEND_BASE_URL ||
+  "http://localhost:3000";
+
+const buildFrontendQuotationUrl = (quotationNumber = "") => {
+  const baseUrl = String(FRONTEND_BASE_URL || "").trim();
+  const qn = String(quotationNumber || "").trim();
+
+  if (!baseUrl || !qn) return "";
+
+  return `${baseUrl.replace(/\/+$/, "")}/roadshow-quotations?qn=${encodeURIComponent(
+    qn,
+  )}`;
+};
+const toNumber = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
+const getPlainQuotation = (quotation) => {
+  if (!quotation) return {};
+  return typeof quotation.toObject === "function"
+    ? quotation.toObject()
+    : quotation;
+};
+
+const buildApprovalMailData = ({ quotation, pdfUrl = "", pdfShortUrl = "" }) => {
+  const quotationObject = getPlainQuotation(quotation);
+
+  const rawPayload =
+    quotationObject.rawPayload && Object.keys(quotationObject.rawPayload).length > 0
+      ? quotationObject.rawPayload
+      : quotationObject;
+
+  const quotationNumber =
+    quotationObject.quotationNumber ||
+    rawPayload.quotationNumber ||
+    rawPayload?.quotation?.displayedProposalNumber ||
+    "";
+
+  const quotationUrl = buildFrontendQuotationUrl(quotationNumber);
+
+  const clientDetails =
+    rawPayload.clientDetails || quotationObject.clientDetails || {};
+
+  const preparedByDetails =
+    rawPayload.preparedByDetails || quotationObject.preparedByDetails || {};
+
+  const campaign = rawPayload.campaign || quotationObject.campaign || {};
+  const vehicle = rawPayload.vehicle || quotationObject.vehicle || {};
+  const pricing = rawPayload.pricing || quotationObject.pricing || {};
+  const pricingDetails = pricing.pricingDetails || {};
+
+  const selectedVehicleSnapshot =
+    vehicle.selectedVehicleSnapshot ||
+    vehicle.selectedVehicleVariantSnapshot ||
+    {};
+
+  const vehicleName =
+    selectedVehicleSnapshot.name ||
+    vehicle.name ||
+    campaign.selectedVehicleName ||
+    "";
+
+  const variantLabel =
+    campaign.selectedVehicleVariantLabel ||
+    vehicle.variantLabel ||
+    selectedVehicleSnapshot.variantLabel ||
+    "";
+
+  const finalPdfUrl =
+    pdfShortUrl ||
+    pdfUrl ||
+    quotationObject?.pdf?.publicUrl ||
+    quotationObject?.pdf?.cdnUrl ||
+    "";
+
+  return {
+    quotationId: String(quotationObject._id || rawPayload.quotationId || ""),
+    quotationNumber,
+    status: "waiting_for_approval",
+
+    clientDetails: {
+      companyName: clientDetails.companyName || "",
+      clientName: clientDetails.clientName || "",
+      contactNumber: clientDetails.contactNumber || "",
+      email: clientDetails.email || "",
+      campaignName:
+        clientDetails.campaignName || campaign.campaignName || "",
+      campaignLocation:
+        clientDetails.campaignLocation || campaign.campaignLocation || "",
+    },
+
+    preparedByDetails: {
+      staffName:
+        preparedByDetails.staffName ||
+        preparedByDetails?.staff?.name ||
+        "",
+      staffPhone:
+        preparedByDetails.staffPhone ||
+        preparedByDetails?.staff?.phoneNumber ||
+        "",
+      email: preparedByDetails.email || "",
+    },
+
+    campaign: {
+      selectedCategory: campaign.selectedCategory || vehicle.selectedCategory || "",
+      selectedVehicleVariantLabel: variantLabel,
+      regionLabel: campaign.regionLabel || "",
+      quantity: campaign.quantity || "",
+      days: campaign.days || "",
+      kmLimit: campaign.kmLimit || campaign.selectedVehicleVariantKmPerDay || "",
+      rtoBillingMonths: campaign.rtoBillingMonths || "",
+    },
+
+    vehicle: {
+      // Keep both shapes so PHP can read either old or new format.
+      name: vehicleName,
+      category: campaign.selectedCategory || vehicle.selectedCategory || "",
+      variantLabel,
+      selectedVehicleSnapshot: {
+        name: vehicleName,
+      },
+    },
+
+    pricing: {
+      pricingDetails: {
+        vehicleRate: toNumber(pricingDetails.vehicleRate),
+        vehicleFinalRate: toNumber(pricingDetails.vehicleFinalRate),
+        vehicleDiscountAmount: toNumber(pricingDetails.vehicleDiscountAmount),
+
+        brandingCost: toNumber(pricingDetails.brandingCost),
+        brandingCostDiscount: toNumber(pricingDetails.brandingCostDiscount),
+
+        rtoPermission: toNumber(pricingDetails.rtoPermission),
+        rtoPermissionDiscount: toNumber(pricingDetails.rtoPermissionDiscount),
+      },
+
+      actualSubtotal: toNumber(pricing.actualSubtotal),
+      totalDiscountAmount: toNumber(pricing.totalDiscountAmount),
+      subtotal: toNumber(pricing.subtotal),
+      gstPercent: toNumber(pricing.gstPercent, 18),
+      gstAmount: toNumber(pricing.gstAmount),
+      grandTotal: toNumber(pricing.grandTotal),
+      advanceAmount: toNumber(pricing.advanceAmount),
+
+      quoteLineItems: Array.isArray(pricing.quoteLineItems)
+        ? pricing.quoteLineItems.slice(0, 20).map((item, index) => ({
+          serialNumber: item.serialNumber || index + 1,
+          label: item.label || "",
+          description: item.description || "",
+          rateLabel: item.rateLabel || "",
+          periodLabel: item.periodLabel || "",
+          quantityLabel: item.quantityLabel || "",
+          formulaLabel: item.formulaLabel || "",
+          amount: toNumber(item.amount),
+        }))
+        : [],
+    },
+
+    urls: {
+      approvalUrl: quotationUrl,
+      quotationUrl,
+      // pdfUrl: finalPdfUrl,
+      // downloadUrl: finalPdfUrl,
+       pdfUrl: "",
+  downloadUrl: "",
+    },
+  };
+};
+
+const sendRoadshowQuotationApprovalMail = async ({
+  quotation,
+  pdfUrl = "",
+  pdfShortUrl = "",
+}) => {
+  if (!quotation) return null;
+
+  const mailData = buildApprovalMailData({
+    quotation,
+    pdfUrl,
+    pdfShortUrl,
+  });
+
+  if (!mailData.quotationNumber) {
+    throw new Error("Quotation number is missing for approval mail.");
+  }
+
+  if (!mailData.clientDetails.companyName) {
+    throw new Error("Client company name is missing for approval mail.");
+  }
+
+  const mailPayload = {
+    mailtype: "roadshow_quotationApproval",
+    testOnly: ROADSHOW_APPROVAL_MAIL_TEST_ONLY,
+    to: normalizeEmailCsv(ROADSHOW_APPROVAL_MAIL_TO),
+    cc: normalizeEmailCsv(ROADSHOW_APPROVAL_MAIL_CC),
+    data: mailData,
+  };
+console.log(
+  "Roadshow approval mail payload:",
+  JSON.stringify(mailPayload, null, 2),
+);
+  const response = await axios.post(
+    ROADSHOW_RATECARD_MAIL_API_URL,
+    mailPayload,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+      },
+      timeout: 30000,
+      validateStatus: () => true,
+    },
+  );
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(
+      response.data?.message ||
+      response.data?.error ||
+      `Approval mail API failed with HTTP ${response.status}`,
+    );
+  }
+
+  if (response.data?.status !== "success") {
+    throw new Error(
+      response.data?.message ||
+      response.data?.error ||
+      "Approval mail API returned non-success response",
+    );
+  }
+
+  return response.data;
+  console.log("Approval mail raw response:", response.status, JSON.stringify(response.data));
+};
+
+
+//EMAIL ADDED 
 export const getNextRoadshowQuotationNumber = async (req, res) => {
   try {
     const nextQuotation =
@@ -106,8 +499,8 @@ export const createRoadshowQuotation = async (req, res) => {
 
     const requestedQuotationNumber = normalizeRoadshowQuotationNumber(
       payload?.quotationNumber ||
-        payload?.quotation?.displayedProposalNumber ||
-        "",
+      payload?.quotation?.displayedProposalNumber ||
+      "",
     );
 
     if (!requestedQuotationNumber) {
@@ -218,46 +611,51 @@ export const createRoadshowQuotation = async (req, res) => {
       },
     });
 
-    let quotationShortUrl = "";
-    let quotationLongUrl = "";
-    let shortUrlError = "";
+    // let quotationShortUrl = "";
+    // let quotationLongUrl = "";
+    // let shortUrlError = "";
 
-    try {
-      const shortUrlResult = await createRoadshowQuotationShortUrl({
-        quotationNumber: quotation.quotationNumber,
-        quotationId: quotation._id,
-      });
+    // try {
+    //   const shortUrlResult = await createRoadshowQuotationShortUrl({
+    //     quotationNumber: quotation.quotationNumber,
+    //     quotationId: quotation._id,
+    //   });
 
-      quotationShortUrl = shortUrlResult.shortUrl;
-      quotationLongUrl = shortUrlResult.longUrl;
+    //   quotationShortUrl = shortUrlResult.shortUrl;
+    //   quotationLongUrl = shortUrlResult.longUrl;
 
-      if (quotationShortUrl) {
-        quotation.shortUrl = {
-          provider: shortUrlResult.provider || "is.gd",
-          shortUrl: quotationShortUrl,
-          longUrl: quotationLongUrl,
-          code: shortUrlResult.code || "",
-          createdAt: new Date(),
-        };
+    //   if (quotationShortUrl) {
+    //     quotation.shortUrl = {
+    //       provider: shortUrlResult.provider || "is.gd",
+    //       shortUrl: quotationShortUrl,
+    //       longUrl: quotationLongUrl,
+    //       code: shortUrlResult.code || "",
+    //       createdAt: new Date(),
+    //     };
 
-        await quotation.save();
+    //     await quotation.save();
 
-        const smsResult = await sendOtpSms({
-          mobileNumber: process.env.ADMIN_PHONE_NUMBER,
-          quotationNumber: quotation.quotationNumber,
-          shortUrl: quotationShortUrl,
-        });
+    //     const smsResult = await sendOtpSms({
+    //       mobileNumber: process.env.ADMIN_PHONE_NUMBER,
+    //       quotationNumber: quotation.quotationNumber,
+    //       shortUrl: quotationShortUrl,
+    //     });
 
-        smsResponse = smsResult.response || null;
-      }
-    } catch (urlError) {
-      shortUrlError =
-        urlError instanceof Error
-          ? urlError.message
-          : "Unable to create short URL";
+    //     smsResponse = smsResult.response || null;
+    //   }
+    // } catch (urlError) {
+    //   shortUrlError =
+    //     urlError instanceof Error
+    //       ? urlError.message
+    //       : "Unable to create short URL";
 
-      console.error("Roadshow short URL error:", urlError);
-    }
+    //   console.error("Roadshow short URL error:", urlError);
+    // }
+
+    const quotationShortUrl = "";
+    const quotationLongUrl = buildFrontendQuotationUrl(quotation.quotationNumber);
+    const shortUrlError = "Short URL disabled";
+    smsResponse = null;
 
     return res.status(201).json({
       success: true,
@@ -352,30 +750,35 @@ export const uploadRoadshowQuotationPdf = async (req, res) => {
 
     const publicUrl = getPublicPdfUrl(spaceKey);
 
-    let pdfShortUrl = "";
-    let pdfShortUrlError = "";
-    let pdfShortUrlData = undefined;
+    // let pdfShortUrl = "";
+    // let pdfShortUrlError = "";
+    // let pdfShortUrlData = undefined;
 
-    try {
-      const pdfShortUrlResult = await shortenAnyUrl(publicUrl);
+    // try {
+    //   const pdfShortUrlResult = await shortenAnyUrl(publicUrl);
 
-      pdfShortUrl = pdfShortUrlResult.shortUrl;
+    //   pdfShortUrl = pdfShortUrlResult.shortUrl;
 
-      pdfShortUrlData = {
-        provider: pdfShortUrlResult.provider || "is.gd",
-        shortUrl: pdfShortUrlResult.shortUrl,
-        longUrl: pdfShortUrlResult.longUrl,
-        code: pdfShortUrlResult.code || "",
-        createdAt: new Date(),
-      };
-    } catch (urlError) {
-      pdfShortUrlError =
-        urlError instanceof Error
-          ? urlError.message
-          : "Unable to create PDF short URL";
+    //   pdfShortUrlData = {
+    //     provider: pdfShortUrlResult.provider || "is.gd",
+    //     shortUrl: pdfShortUrlResult.shortUrl,
+    //     longUrl: pdfShortUrlResult.longUrl,
+    //     code: pdfShortUrlResult.code || "",
+    //     createdAt: new Date(),
+    //   };
+    // } catch (urlError) {
+    //   pdfShortUrlError =
+    //     urlError instanceof Error
+    //       ? urlError.message
+    //       : "Unable to create PDF short URL";
 
-      console.error("PDF short URL error:", urlError);
-    }
+    //   console.error("PDF short URL error:", urlError);
+    // }
+
+
+    const pdfShortUrl = "";
+    const pdfShortUrlError = "Short URL disabled";
+    const pdfShortUrlData = undefined;
 
     if (
       !["waiting_for_approval", "approved"].includes(
@@ -407,28 +810,103 @@ export const uploadRoadshowQuotationPdf = async (req, res) => {
       lastPdfUploadIp: req.ip,
       lastPdfUploadUserAgent: req.get("user-agent") || "",
     };
+    //EMAIL ADDED 
 
-    await quotation.save();
+    // await quotation.save();
 
-    return res.json({
-      success: true,
-      message: "Quotation PDF uploaded publicly successfully",
-      data: {
-        quotationId: quotation._id,
-        quotationNumber: quotation.quotationNumber,
-        fileName: finalFileName,
-        bucket: DO_SPACES_BUCKET,
-        spaceKey,
+    // return res.json({
+    //   success: true,
+    //   message: "Quotation PDF uploaded publicly successfully",
+    //   data: {
+    //     quotationId: quotation._id,
+    //     quotationNumber: quotation.quotationNumber,
+    //     fileName: finalFileName,
+    //     bucket: DO_SPACES_BUCKET,
+    //     spaceKey,
 
-        publicUrl,
-        cdnUrl: publicUrl,
+    //     publicUrl,
+    //     cdnUrl: publicUrl,
 
-        pdfShortUrl,
-        pdfLongUrl: publicUrl,
-        downloadUrl: pdfShortUrl || publicUrl,
-        pdfShortUrlError,
-      },
+    //     pdfShortUrl,
+    //     pdfLongUrl: publicUrl,
+    //     downloadUrl: pdfShortUrl || publicUrl,
+    //     pdfShortUrlError,
+    //   },
+    // });
+
+   await quotation.save();
+
+let approvalMailStatus = null;
+let approvalMailError = "";
+
+if (
+  String(quotation.status || "") === "waiting_for_approval" &&
+  quotation.approval?.required
+) {
+  try {
+    approvalMailStatus = await sendRoadshowQuotationApprovalMail({
+      quotation,
+      pdfUrl: publicUrl,
+      pdfShortUrl,
     });
+  } catch (mailError) {
+    approvalMailError =
+      mailError?.response?.data?.message ||
+      mailError?.response?.data?.error ||
+      mailError?.message ||
+      "Unable to send approval mail";
+
+    console.error("Roadshow approval mail error:", approvalMailError);
+  }
+}
+
+return res.json({
+  success: true,
+  message: "Quotation PDF uploaded publicly successfully",
+  data: {
+    quotationId: quotation._id,
+    quotationNumber: quotation.quotationNumber,
+    fileName: finalFileName,
+    bucket: DO_SPACES_BUCKET,
+    spaceKey,
+
+    publicUrl,
+    cdnUrl: publicUrl,
+
+    pdfShortUrl,
+    pdfLongUrl: publicUrl,
+    downloadUrl: pdfShortUrl || publicUrl,
+    pdfShortUrlError,
+
+    approvalMailStatus,
+    approvalMailError,
+  },
+});
+
+    // return res.json({
+    //   success: true,
+    //   message: "Quotation PDF uploaded publicly successfully",
+    //   data: {
+    //     quotationId: quotation._id,
+    //     quotationNumber: quotation.quotationNumber,
+    //     fileName: finalFileName,
+    //     bucket: DO_SPACES_BUCKET,
+    //     spaceKey,
+
+    //     publicUrl,
+    //     cdnUrl: publicUrl,
+
+    //     pdfShortUrl,
+    //     pdfLongUrl: publicUrl,
+    //     downloadUrl: pdfShortUrl || publicUrl,
+    //     pdfShortUrlError,
+
+    //     approvalMailStatus,
+    //     approvalMailError,
+    //   },
+    // });
+
+    //EMAIL ADDED 
   } catch (error) {
     console.error("Upload roadshow quotation PDF error:", error);
 
@@ -574,38 +1052,43 @@ export const approveRoadshowQuotation = async (req, res) => {
       });
     }
 
-    let quotationShortUrl = quotation.shortUrl?.shortUrl || "";
-    let quotationLongUrl = quotation.shortUrl?.longUrl || "";
-    let quotationUrlError = "";
+    // let quotationShortUrl = quotation.shortUrl?.shortUrl || "";
+    // let quotationLongUrl = quotation.shortUrl?.longUrl || "";
+    // let quotationUrlError = "";
 
-    if (!quotationShortUrl) {
-      try {
-        const shortUrlResult = await createRoadshowQuotationShortUrl({
-          quotationNumber: quotation.quotationNumber,
-          quotationId: quotation._id,
-        });
+    // if (!quotationShortUrl) {
+    //   try {
+    //     const shortUrlResult = await createRoadshowQuotationShortUrl({
+    //       quotationNumber: quotation.quotationNumber,
+    //       quotationId: quotation._id,
+    //     });
 
-        quotationShortUrl = shortUrlResult.shortUrl || "";
-        quotationLongUrl = shortUrlResult.longUrl || "";
+    //     quotationShortUrl = shortUrlResult.shortUrl || "";
+    //     quotationLongUrl = shortUrlResult.longUrl || "";
 
-        if (quotationShortUrl) {
-          quotation.shortUrl = {
-            provider: shortUrlResult.provider || "is.gd",
-            shortUrl: quotationShortUrl,
-            longUrl: quotationLongUrl,
-            code: shortUrlResult.code || "",
-            createdAt: new Date(),
-          };
-        }
-      } catch (urlError) {
-        quotationUrlError =
-          urlError instanceof Error
-            ? urlError.message
-            : "Unable to create quotation URL";
+    //     if (quotationShortUrl) {
+    //       quotation.shortUrl = {
+    //         provider: shortUrlResult.provider || "is.gd",
+    //         shortUrl: quotationShortUrl,
+    //         longUrl: quotationLongUrl,
+    //         code: shortUrlResult.code || "",
+    //         createdAt: new Date(),
+    //       };
+    //     }
+    //   } catch (urlError) {
+    //     quotationUrlError =
+    //       urlError instanceof Error
+    //         ? urlError.message
+    //         : "Unable to create quotation URL";
 
-        console.error("Approve quotation URL error:", urlError);
-      }
-    }
+    //     console.error("Approve quotation URL error:", urlError);
+    //   }
+    // }
+
+
+    const quotationShortUrl = "";
+    const quotationLongUrl = buildFrontendQuotationUrl(quotation.quotationNumber);
+    const quotationUrlError = "Short URL disabled";
 
     const pdfLongUrl = quotation.pdf?.publicUrl || "";
     let pdfShortUrl = quotation.pdf?.shortUrl?.shortUrl || "";
@@ -652,11 +1135,11 @@ export const approveRoadshowQuotation = async (req, res) => {
 
     await quotation.save();
     ////////////////send sms///////////////
-    const smsResult = await sendOtpSms({
-      mobileNumber: process.env.ADMIN_PHONE_NUMBER,
-      quotationNumber: quotation.quotationNumber,
-      shortUrl: quotationShortUrl,
-    });
+    // const smsResult = await sendOtpSms({
+    //   mobileNumber: process.env.ADMIN_PHONE_NUMBER,
+    //   quotationNumber: quotation.quotationNumber,
+    //   shortUrl: quotationShortUrl,
+    // });
     ////////////////send sms///////////////
 
     return res.json({
@@ -668,15 +1151,26 @@ export const approveRoadshowQuotation = async (req, res) => {
         status: quotation.status,
         approval: quotation.approval,
 
-        quotationUrl: quotationShortUrl || quotationLongUrl,
-        shortUrl: quotationShortUrl,
+        // quotationUrl: quotationShortUrl || quotationLongUrl,
+        // shortUrl: quotationShortUrl,
+        // longUrl: quotationLongUrl,
+        // quotationUrlError,
+
+        // pdfUrl: pdfShortUrl || pdfLongUrl,
+        // pdfShortUrl,
+        // pdfLongUrl,
+        // downloadUrl: pdfShortUrl || pdfLongUrl,
+        // pdfShortUrlError,
+
+        quotationUrl: quotationLongUrl,
+        shortUrl: "",
         longUrl: quotationLongUrl,
         quotationUrlError,
 
-        pdfUrl: pdfShortUrl || pdfLongUrl,
-        pdfShortUrl,
+        pdfUrl: pdfLongUrl,
+        pdfShortUrl: "",
         pdfLongUrl,
-        downloadUrl: pdfShortUrl || pdfLongUrl,
+        downloadUrl: pdfLongUrl,
         pdfShortUrlError,
       },
     });

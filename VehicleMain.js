@@ -124,6 +124,7 @@ const allowedOrigins = [
   "https://frontend-roadshow.vercel.app",
   "https://frontend-roadshow-97ae.vercel.app",
   "https://frontend-roadshow-*-your-username.vercel.app",
+  "https://ratecard-with-quotation-roadshow-ne.vercel.app"
 ];
 
 app.use(
