@@ -8,6 +8,7 @@ const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const { successResponse, errorResponse } = require("../../Utils/response");
 const { sendFocMail, getActiveAdminEmails, getEmailByUsername } = require('../../Utils/focMailer');
 const VehicleMaster = require("../../Models/vehicleDetails");
+const { checkVehicleAvailability } = require("../../Utils/vehicleAvailability");
 
 
 async function generateAdminOrderId() {
@@ -126,8 +127,6 @@ const STAGE_ORDER = [
   "onRoad",
   "vehicleUnavailable",
   "clientClosure",
-  "invoiceGeneration",
-  "paymentStage2",
   "closedWon",
   "closedLost",
 ];
@@ -475,14 +474,15 @@ exports.getAllOrders = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum)
-      .select(
-        "orderId name phone address email customerType " +
-        "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
-        "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
-        "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
-        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray " +
-        "projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray"
-      );
+     .select(
+  "orderId name phone address email customerType " +
+  "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
+  "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
+  "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
+  "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray " +
+  "projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray " +
+  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray" 
+);
 
     return successResponse(res, "Orders fetched successfully", {
       total,
@@ -537,14 +537,15 @@ exports.getOrdersByPipeline = async (req, res) => {
   try {
     const orders = await Order.find()
       .sort({ createdAt: -1 })
-      .select(
-        "orderId name phone customerType pipelineStatus orderStatus " +
-        "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
-        "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
-        "companyName clientName designation email address gstNumber customerCategory " +
-        "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy " +
-        "onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray"
-      );
+     .select(
+  "orderId name phone customerType pipelineStatus orderStatus " +
+  "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
+  "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
+  "companyName clientName designation email address gstNumber customerCategory " +
+  "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy " +
+  "onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray " +
+  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray"   
+);
 
     const filteredOrders = orders.filter(
       (o) => o.projectCodeArray && o.projectCodeArray.length === 1
@@ -728,6 +729,22 @@ exports.uploadStageDocument = async (req, res) => {
       }
     }
 
+    if (stage === "clientClosure" || order.pipelineStatus === "clientClosure") {
+  if (docUrl || notes?.trim()) {
+    order.clientClosureCommentsArray.push({ document: docUrl, notes: (notes||"").trim(), uploadedBy, uploadedAt: new Date() });
+  }
+}
+if (stage === "closedWon" || order.pipelineStatus === "closedWon") {
+  if (docUrl || notes?.trim()) {
+    order.closedWonCommentsArray.push({ document: docUrl, notes: (notes||"").trim(), uploadedBy, uploadedAt: new Date() });
+  }
+}
+if (stage === "closedLost" || order.pipelineStatus === "closedLost") {
+  if (docUrl || notes?.trim()) {
+    order.closedLostCommentsArray.push({ document: docUrl, notes: (notes||"").trim(), uploadedBy, uploadedAt: new Date() });
+  }
+}
+
     await order.save();
     return successResponse(res, "Document uploaded successfully", { order });
   } catch (error) {
@@ -775,9 +792,12 @@ exports.submitOnRoadDetails = async (req, res) => {
     };
     order.onRoadExecutionArray.push(newEntry);
 
-    // History push
+  
+    const savedSubEntry = order.onRoadExecutionArray[order.onRoadExecutionArray.length - 1];
+
     order.onRoadDriverHistory.push({
       vehicleIndex: Number(vehicleIndex),
+      entryId: savedSubEntry._id,        // ← NEW
       action: "created",
       driverName: driverName.trim(),
       driverPhone: driverPhone.trim(),
@@ -816,6 +836,117 @@ exports.submitOnRoadDetails = async (req, res) => {
   }
 };
 
+
+// exports.submitOnRoadDetails = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { vehicleIndex, driverName, driverPhone,
+//       vehicleRegistrationNumber } = req.body;
+
+//     if (!driverName?.trim())
+//       return errorResponse(res, "Driver name is required", null, 400);
+//     if (!driverPhone?.trim())
+//       return errorResponse(res, "Driver phone is required", null, 400);
+//     if (!vehicleRegistrationNumber?.trim())
+//       return errorResponse(res, "Vehicle registration number is required", null, 400);
+
+//     const order = await Order.findById(id);
+//     if (!order) return errorResponse(res, "Order not found", null, 404);
+
+//     const vIdx = Number(vehicleIndex);
+//     const bookingItem = order.bookingItems[vIdx];
+//     if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
+
+//     const requiredQty = bookingItem.quantity || 1;
+
+//     // ── Availability re-check before saving driver ──────────────────
+//     const savedForThisVehicle = order.onRoadExecutionArray.filter(
+//       (e) => e.vehicleIndex === vIdx
+//     );
+
+//     // Only enforce the check while we still need more drivers/vehicles
+//     // for this booking item (avoids blocking edits after quota already met)
+//     if (savedForThisVehicle.length < requiredQty) {
+//       try {
+//         const availability = await checkVehicleAvailability({
+//           vehicleType: bookingItem.vehicleType,
+//           quantity: requiredQty,
+//           fromDate: bookingItem.fromDate,
+//           toDate: bookingItem.toDate,
+//         });
+
+//         if (!availability.available) {
+//           return errorResponse(
+//             res,
+//             `You are required ${availability.requiredQuantity} vehicle(s) but only ${availability.availableCount} available`,
+//             null,
+//             400
+//           );
+//         }
+//       } catch (availErr) {
+//         return errorResponse(res, availErr.message || "Vehicle availability check failed", null, 400);
+//       }
+//     }
+//     // ──────────────────────────────────────────────────────────────
+
+//     const uploadedBy =
+//       Number(req.user.isAdmin) === 0
+//         ? req.user.username
+//         : order.handlerName || req.user?.username || "Admin";
+
+//     const gatepassFile = (req.files || []).find(f => f.fieldname === "gatepassPhoto");
+//     const photoUrl = gatepassFile ? getFileUrl(gatepassFile) : "";
+
+//     const newEntry = {
+//       vehicleIndex: vIdx,
+//       driverName: driverName.trim(),
+//       driverPhone: driverPhone.trim(),
+//       vehicleRegistrationNumber: vehicleRegistrationNumber.trim().toUpperCase(),
+//       gatepassPhoto: photoUrl,
+//       onRoadStatus: 0,
+//       uploadedBy,
+//       uploadedAt: new Date(),
+//     };
+//     order.onRoadExecutionArray.push(newEntry);
+
+//     const savedSubEntry = order.onRoadExecutionArray[order.onRoadExecutionArray.length - 1];
+
+//     order.onRoadDriverHistory.push({
+//       vehicleIndex: vIdx,
+//       entryId: savedSubEntry._id,
+//       action: "created",
+//       driverName: driverName.trim(),
+//       driverPhone: driverPhone.trim(),
+//       vehicleRegistrationNumber: vehicleRegistrationNumber.trim().toUpperCase(),
+//       gatepassPhoto: photoUrl,
+//       changedBy: uploadedBy,
+//       changedAt: new Date(),
+//       changedFields: {},
+//     });
+
+//     // Recompute after push (fresh count including the new entry)
+//     const savedForThisVehicleAfter = order.onRoadExecutionArray.filter(
+//       (e) => e.vehicleIndex === vIdx
+//     );
+
+//     if (savedForThisVehicleAfter.length >= requiredQty) {
+//       order.onRoadExecutionArray.forEach((e) => {
+//         if (e.vehicleIndex === vIdx) {
+//           e.onRoadStatus = 1;
+//         }
+//       });
+//     }
+
+//     await order.save();
+//     return successResponse(res, "Driver details saved", { order });
+
+//   } catch (error) {
+//     return errorResponse(res, error.message, null, 500);
+//   }
+// };
+
+
+
 exports.updateOnRoadDriver = async (req, res) => {
   try {
     const { id, entryId } = req.params;
@@ -847,6 +978,7 @@ exports.updateOnRoadDriver = async (req, res) => {
 
     order.onRoadDriverHistory.push({
       vehicleIndex: entry.vehicleIndex,
+       entryId: entry._id, 
       action: "updated",
       driverName: entry.driverName,
       driverPhone: entry.driverPhone,
@@ -1541,7 +1673,7 @@ exports.submitOrderClosedWon = async (req, res) => {
     const { id } = req.params;
     const { comments } = req.body;
 
-    const order = await Order.findById(id);   
+    const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
     if (order.pipelineStatus === "closedLost") {
@@ -1578,7 +1710,7 @@ exports.submitOrderClosedWon = async (req, res) => {
 
     await order.save();
 
-   
+
     const regNumbers = (order.onRoadExecutionArray || [])
       .map((e) => e.vehicleRegistrationNumber)
       .filter(Boolean);
@@ -1600,9 +1732,10 @@ exports.submitOrderClosedWon = async (req, res) => {
   }
 };
 
+
 exports.submitOrderClosedLost = async (req, res) => {
   try {
-    
+
     const { id } = req.params;
     const { reason } = req.body;
 
@@ -1635,6 +1768,8 @@ exports.submitOrderClosedLost = async (req, res) => {
       uploadedAt: new Date(),
     });
 
+    // ── CHANGE STARTS HERE ──────────────────────────────────────
+    const RELEASE_VEHICLE_FROM_STAGES = ["projectExecution", "onRoad", "clientClosure"];
     const oldStage = order.pipelineStatus;
     order.pipelineStatus = "closedLost";
     order.pipelineLogs.push({
@@ -1645,6 +1780,25 @@ exports.submitOrderClosedLost = async (req, res) => {
     });
 
     await order.save();
+
+    if (RELEASE_VEHICLE_FROM_STAGES.includes(oldStage)) {
+      const regNumbers = (order.onRoadExecutionArray || [])
+        .map((e) => e.vehicleRegistrationNumber)
+        .filter(Boolean);
+
+      for (const regNo of regNumbers) {
+        try {
+          await VehicleMaster.updateOne(
+            { "registrationVehicles.registrationNumber": regNo },
+            { $set: { "registrationVehicles.$.statusAvailability.currentStatus": "Available" } }
+          );
+        } catch (err) {
+          console.error(`Failed to release vehicle ${regNo}:`, err.message);
+        }
+      }
+    }
+   
+
     return successResponse(res, "Order moved to Closed Lost successfully", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
@@ -1664,12 +1818,12 @@ exports.sendFocChatMessage = async (req, res) => {
     if (!entry) return errorResponse(res, "FOC entry not found", null, 404);
     if (entry.type !== "foc") return errorResponse(res, "Not a FOC entry", null, 400);
 
-   
+
     if (entry.status !== "pending") {
       return errorResponse(res, "This FOC request is already approved — chat is closed", null, 400);
     }
 
-   
+
     if (entry.isAdminCreated) {
       return errorResponse(res, "This FOC entry was created by admin directly and has no chat", null, 400);
     }
@@ -1750,7 +1904,7 @@ exports.getVamosysApiKey = async (req, res) => {
 
 exports.getVehicleLocationsProxy = async (req, res) => {
   try {
-   
+
     const apiKey = await fetchVamosysApiKey();
 
     const url = `http://api.vamosys.com/apiMobile/getVehicleLocations?apiKey=${apiKey}&userId=ADINN12&groupId=ADINN12`;
@@ -1765,6 +1919,405 @@ exports.getVehicleLocationsProxy = async (req, res) => {
     return successResponse(res, "Vehicle locations fetched", { data });
   } catch (error) {
     console.error("Vamosys locations proxy error:", error.message);
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+// exports.addExtraKmDetails = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { vehicleIndex, entryId, extraKm, extraHours, fromDate, toDate } = req.body;
+
+//     const vIdx = Number(vehicleIndex);
+//     const km = Number(extraKm) || 0;
+//     const hrs = Number(extraHours) || 0;
+
+//     if (km <= 0 && hrs <= 0)
+//       return errorResponse(res, "Enter extra KM or extra hours", null, 400);
+
+//     if (!fromDate) return errorResponse(res, "From date is required", null, 400);
+//     if (!toDate) return errorResponse(res, "To date is required", null, 400);
+
+//     const newFrom = new Date(fromDate);
+//     const newTo = new Date(toDate);
+
+//     if (isNaN(newFrom.getTime()) || isNaN(newTo.getTime()))
+//       return errorResponse(res, "Invalid date format", null, 400);
+
+//     if (newFrom > newTo)
+//       return errorResponse(res, "From date must be before or equal to To date", null, 400);
+
+//     const order = await Order.findById(id);
+//     if (!order) return errorResponse(res, "Order not found", null, 404);
+
+//     const bookingItem = order.bookingItems[vIdx];
+//     if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
+
+//     const campaignFrom = new Date(bookingItem.fromDate);
+//     const campaignTo = new Date(bookingItem.toDate);
+
+//     if (newFrom < campaignFrom || newTo > campaignTo) {
+//       return errorResponse(
+//         res,
+//         `Dates must be within campaign range (${campaignFrom.toLocaleDateString("en-IN")} - ${campaignTo.toLocaleDateString("en-IN")})`,
+//         null,
+//         400
+//       );
+//     }
+
+//     let driverEntry = null;
+//     if (entryId) {
+//       driverEntry = order.onRoadExecutionArray.id(entryId);
+//       if (!driverEntry) return errorResponse(res, "Driver entry not found", null, 404);
+//     }
+
+//     if (!bookingItem.packageId)
+//       return errorResponse(res, "Package not linked to this vehicle", null, 400);
+
+//     const pkg = await Package.findById(bookingItem.packageId);
+//     if (!pkg) return errorResponse(res, "Package not found", null, 404);
+
+//     const perKmChargeRate = pkg.perKmCharge || 0;
+//     const additionalHourChargeRate = pkg.additionalHourCharges || 0;
+
+//     const extraKmCost = km * perKmChargeRate;
+//     const extraHourCost = hrs * additionalHourChargeRate;
+//     const totalCost = extraKmCost + extraHourCost;
+
+//     const addedBy =
+//       Number(req.user.isAdmin) === 0
+//         ? req.user.username
+//         : order.handlerName || req.user?.username || "Admin";
+
+//     order.extraKmDetailsArray.push({
+//       vehicleIndex: vIdx,
+//       entryId: driverEntry ? driverEntry._id : null,
+//       driverName: driverEntry?.driverName || "",
+//       driverPhone: driverEntry?.driverPhone || "",
+//       vehicleRegistrationNumber: driverEntry?.vehicleRegistrationNumber || "",
+//       extraKm: km,
+//       extraHours: hrs,
+//       fromDate: newFrom,
+//       toDate: newTo,
+//       perKmChargeRate,
+//       additionalHourChargeRate,
+//       extraKmCost,
+//       extraHourCost,
+//       totalCost,
+//       addedBy,
+//       addedAt: new Date(),
+//     });
+
+//     await order.save();
+//     return successResponse(res, "Extra KM details added successfully", { order }, 201);
+//   } catch (error) {
+//     return errorResponse(res, error.message, null, 500);
+//   }
+// };
+
+
+// exports.addExtraKmDetails = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { vehicleIndex, entryId, extraKm, extraHours, fromDate, toDate } = req.body;
+
+//     const vIdx = Number(vehicleIndex);
+//     const km = Number(extraKm) || 0;
+//     const hrs = Number(extraHours) || 0;
+
+//     if (km <= 0 && hrs <= 0)
+//       return errorResponse(res, "Enter extra KM or extra hours", null, 400);
+
+//     if (!fromDate) return errorResponse(res, "From date is required", null, 400);
+//     if (!toDate) return errorResponse(res, "To date is required", null, 400);
+
+//     const newFrom = new Date(fromDate);
+//     const newTo = new Date(toDate);
+
+//     if (isNaN(newFrom.getTime()) || isNaN(newTo.getTime()))
+//       return errorResponse(res, "Invalid date format", null, 400);
+
+//     if (newFrom > newTo)
+//       return errorResponse(res, "From date must be before or equal to To date", null, 400);
+
+//     const order = await Order.findById(id);
+//     if (!order) return errorResponse(res, "Order not found", null, 404);
+
+//     const bookingItem = order.bookingItems[vIdx];
+//     if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
+
+//     const campaignFrom = new Date(bookingItem.fromDate);
+//     const campaignTo = new Date(bookingItem.toDate);
+
+//     if (newFrom < campaignFrom || newTo > campaignTo) {
+//       return errorResponse(
+//         res,
+//         `Dates must be within campaign range (${campaignFrom.toLocaleDateString("en-IN")} - ${campaignTo.toLocaleDateString("en-IN")})`,
+//         null,
+//         400
+//       );
+//     }
+
+//     let driverEntry = null;
+//     if (entryId) {
+//       driverEntry = order.onRoadExecutionArray.id(entryId);
+//       if (!driverEntry) return errorResponse(res, "Driver entry not found", null, 404);
+//     }
+
+//     if (!bookingItem.packageId)
+//       return errorResponse(res, "Package not linked to this vehicle", null, 400);
+
+//     const pkg = await Package.findById(bookingItem.packageId);
+//     if (!pkg) return errorResponse(res, "Package not found", null, 404);
+
+//     const perKmChargeRate = pkg.perKmCharge || 0;
+//     const additionalHourChargeRate = pkg.additionalHourCharges || 0;
+
+//     const extraKmCost = km * perKmChargeRate;
+//     const extraHourCost = hrs * additionalHourChargeRate;
+//     const totalCost = extraKmCost + extraHourCost;
+
+//     const addedBy =
+//       Number(req.user.isAdmin) === 0
+//         ? req.user.username
+//         : order.handlerName || req.user?.username || "Admin";
+
+//     const extraKmPayload = {
+//       vehicleIndex: vIdx,
+//       entryId: driverEntry ? driverEntry._id : null,
+//       driverName: driverEntry?.driverName || "",
+//       driverPhone: driverEntry?.driverPhone || "",
+//       vehicleRegistrationNumber: driverEntry?.vehicleRegistrationNumber || "",
+//       extraKm: km,
+//       extraHours: hrs,
+//       fromDate: newFrom,
+//       toDate: newTo,
+//       perKmChargeRate,
+//       additionalHourChargeRate,
+//       extraKmCost,
+//       extraHourCost,
+//       totalCost,
+//       addedBy,
+//       addedAt: new Date(),
+//     };
+
+//     // History array - ella time-um oru puthu entry push pannum
+//     order.extraKmDetailsArray.push(extraKmPayload);
+
+//     // Current array - entryId per oru object mattum
+//     // First time -> push, already irundha -> update
+//     if (driverEntry) {
+//       const existingCurrent = order.onRoadExtraKm.find(
+//         (e) => String(e.entryId) === String(driverEntry._id)
+//       );
+
+//       if (existingCurrent) {
+//         existingCurrent.extraKm = km;
+//         existingCurrent.extraHours = hrs;
+//         existingCurrent.fromDate = newFrom;
+//         existingCurrent.toDate = newTo;
+//         existingCurrent.perKmChargeRate = perKmChargeRate;
+//         existingCurrent.additionalHourChargeRate = additionalHourChargeRate;
+//         existingCurrent.extraKmCost = extraKmCost;
+//         existingCurrent.extraHourCost = extraHourCost;
+//         existingCurrent.totalCost = totalCost;
+//         existingCurrent.addedBy = addedBy;
+//         existingCurrent.addedAt = new Date();
+//       } else {
+//         order.onRoadExtraKm.push(extraKmPayload);
+//       }
+//     }
+
+//     await order.save();
+//     return successResponse(res, "Extra KM details added successfully", { order }, 201);
+//   } catch (error) {
+//     return errorResponse(res, error.message, null, 500);
+//   }
+// };
+
+
+
+exports.addExtraKmDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vehicleIndex, entryId, extraKm, extraHours, fromDate, toDate, extraKmId } = req.body;
+
+    const vIdx = Number(vehicleIndex);
+    const km = Number(extraKm) || 0;
+    const hrs = Number(extraHours) || 0;
+
+   
+    if (km <= 0 && hrs <= 0) {
+      return errorResponse(res, "Enter extra KM or extra hours", null, 400);
+    }
+
+    if (!fromDate) {
+      return errorResponse(res, "From date is required", null, 400);
+    }
+
+    if (!toDate) {
+      return errorResponse(res, "To date is required", null, 400);
+    }
+
+    const newFrom = new Date(fromDate);
+    const newTo = new Date(toDate);
+
+    if (isNaN(newFrom.getTime()) || isNaN(newTo.getTime())) {
+      return errorResponse(res, "Invalid date format", null, 400);
+    }
+
+    if (newFrom > newTo) {
+      return errorResponse(res, "From date must be before or equal to To date", null, 400);
+    }
+
+  
+    const order = await Order.findById(id);
+    if (!order) {
+      return errorResponse(res, "Order not found", null, 404);
+    }
+
+    
+    const bookingItem = order.bookingItems[vIdx];
+    if (!bookingItem) {
+      return errorResponse(res, "Vehicle not found in this order", null, 404);
+    }
+
+  
+    const campaignFrom = new Date(bookingItem.fromDate);
+    const campaignTo = new Date(bookingItem.toDate);
+
+    if (newFrom < campaignFrom || newTo > campaignTo) {
+      return errorResponse(
+        res,
+        `Dates must be within campaign range (${campaignFrom.toLocaleDateString("en-IN")} - ${campaignTo.toLocaleDateString("en-IN")})`,
+        null,
+        400
+      );
+    }
+
+ 
+    let driverEntry = null;
+    if (entryId) {
+      driverEntry = order.onRoadExecutionArray.id(entryId);
+      if (!driverEntry) {
+        return errorResponse(res, "Driver entry not found", null, 404);
+      }
+    }
+
+    if (!bookingItem.packageId) {
+      return errorResponse(res, "Package not linked to this vehicle", null, 400);
+    }
+
+    const pkg = await Package.findById(bookingItem.packageId);
+    if (!pkg) {
+      return errorResponse(res, "Package not found", null, 404);
+    }
+
+    const perKmChargeRate = pkg.perKmCharge || 0;
+    const additionalHourChargeRate = pkg.additionalHourCharges || 0;
+
+    const extraKmCost = km * perKmChargeRate;
+    const extraHourCost = hrs * additionalHourChargeRate;
+    const totalCost = extraKmCost + extraHourCost;
+
+    const addedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+   
+    const extraKmPayload = {
+      vehicleIndex: vIdx,
+      entryId: driverEntry ? driverEntry._id : null,
+      driverName: driverEntry?.driverName || "",
+      driverPhone: driverEntry?.driverPhone || "",
+      vehicleRegistrationNumber: driverEntry?.vehicleRegistrationNumber || "",
+      extraKm: km,
+      extraHours: hrs,
+      fromDate: newFrom,
+      toDate: newTo,
+      perKmChargeRate,
+      additionalHourChargeRate,
+      extraKmCost,
+      extraHourCost,
+      totalCost,
+      addedBy,
+      addedAt: new Date(),
+    };
+
+    
+    order.extraKmDetailsArray.push(extraKmPayload);
+
+ 
+    if (driverEntry && entryId) {
+     
+      if (extraKmId) {
+      
+        const existingEntry = order.onRoadExtraKm.id(extraKmId);
+        
+        if (existingEntry) {
+    
+          existingEntry.extraKm = km;
+          existingEntry.extraHours = hrs;
+          existingEntry.fromDate = newFrom;
+          existingEntry.toDate = newTo;
+          existingEntry.perKmChargeRate = perKmChargeRate;
+          existingEntry.additionalHourChargeRate = additionalHourChargeRate;
+          existingEntry.extraKmCost = extraKmCost;
+          existingEntry.extraHourCost = extraHourCost;
+          existingEntry.totalCost = totalCost;
+          existingEntry.addedBy = addedBy;
+          existingEntry.addedAt = new Date();
+          existingEntry.driverName = driverEntry?.driverName || "";
+          existingEntry.driverPhone = driverEntry?.driverPhone || "";
+          existingEntry.vehicleRegistrationNumber = driverEntry?.vehicleRegistrationNumber || "";
+        } else {
+          
+          order.onRoadExtraKm.push(extraKmPayload);
+        }
+      } else {
+        
+        const driverEntries = order.onRoadExtraKm.filter(
+          (e) => e.entryId && e.entryId.toString() === driverEntry._id.toString()
+        );
+        
+        if (driverEntries.length > 0) {
+        
+          const latestEntry = driverEntries[driverEntries.length - 1];
+          
+          
+          latestEntry.extraKm = km;
+          latestEntry.extraHours = hrs;
+          latestEntry.fromDate = newFrom;
+          latestEntry.toDate = newTo;
+          latestEntry.perKmChargeRate = perKmChargeRate;
+          latestEntry.additionalHourChargeRate = additionalHourChargeRate;
+          latestEntry.extraKmCost = extraKmCost;
+          latestEntry.extraHourCost = extraHourCost;
+          latestEntry.totalCost = totalCost;
+          latestEntry.addedBy = addedBy;
+          latestEntry.addedAt = new Date();
+          latestEntry.driverName = driverEntry?.driverName || "";
+          latestEntry.driverPhone = driverEntry?.driverPhone || "";
+          latestEntry.vehicleRegistrationNumber = driverEntry?.vehicleRegistrationNumber || "";
+        } else {
+          
+          order.onRoadExtraKm.push(extraKmPayload);
+        }
+      }
+    } else {
+      
+      order.onRoadExtraKm.push(extraKmPayload);
+    }
+
+    
+    await order.save();
+
+    return successResponse(res, "Extra KM details added successfully", { order }, 201);
+
+  } catch (error) {
+    console.error("Error in addExtraKmDetails:", error);
     return errorResponse(res, error.message, null, 500);
   }
 };

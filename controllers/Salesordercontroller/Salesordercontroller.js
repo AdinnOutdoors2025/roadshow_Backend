@@ -31,17 +31,17 @@ const getFilePath = (file) => {
   return `/uploads/${path.basename(file.path)}`;
 };
 
-const IMAGE_MAX_BYTES = 5 * 1024 * 1024;  
-const DOC_MAX_BYTES   = 10 * 1024 * 1024;  
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const DOC_MAX_BYTES = 10 * 1024 * 1024;
 
 const IMAGE_MIMES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
-const DOC_MIMES   = ["application/pdf"];
+const DOC_MIMES = ["application/pdf"];
 
 const validateFile = (file, label) => {
   if (!file) return null;
 
   const isImage = IMAGE_MIMES.includes(file.mimetype);
-  const isDoc   = DOC_MIMES.includes(file.mimetype);
+  const isDoc = DOC_MIMES.includes(file.mimetype);
 
   const maxBytes = isImage ? IMAGE_MAX_BYTES : DOC_MAX_BYTES;
   const maxLabel = isImage ? "5 MB" : "10 MB";
@@ -135,7 +135,7 @@ exports.updateSalesPipeline = async (req, res) => {
     const movedBy = req.user?.username || order.salesHandlerName || "Admin";
     const uploadedFiles = req.files || [];
 
-     const fileFieldLabels = {
+    const fileFieldLabels = {
       analysisDocument: "Need Analysis",
       proposalDocument: "Proposal",
       negotiationDocument: "Negotiation",
@@ -323,13 +323,16 @@ exports.uploadStageDocument = async (req, res) => {
     const uploadedBy = order.salesHandlerName;
     const uploadedFiles = req.files || [];
 
-      // File size validation
+ 
     const stageFileLabels = {
       enquiryDocument: "Enquiry",
       analysisDocument: "Need Analysis",
       proposalDocument: "Proposal",
       negotiationDocument: "Negotiation",
       salesPoDocument: "Sales PO",
+      poCommentDocument: "PO Comment",
+      projectCodeCommentDocument: "Project Code Comment",
+      closedLostCommentDocument: "Closed Lost Comment",
     };
     for (const file of uploadedFiles) {
       const label = stageFileLabels[file.fieldname] || file.fieldname;
@@ -376,6 +379,7 @@ exports.uploadStageDocument = async (req, res) => {
       });
     }
 
+
     if (stage === "proposalPriceQuote") {
       const proposalFile = uploadedFiles.find(
         (f) => f.fieldname === "proposalDocument"
@@ -421,18 +425,66 @@ exports.uploadStageDocument = async (req, res) => {
       );
     }
 
-    if (stage === "closedWon") {
-      const poFile = uploadedFiles.find(
-        (f) => f.fieldname === "salesPoDocument"
+if (stage === "closedWon") {
+
+
+  const poCommentFile = uploadedFiles.find(f => f.fieldname === "poCommentDocument");
+  const poCommentNotes = req.body.poCommentNotes || "";
+  if (poCommentFile || poCommentNotes) {
+    order.poCommentsArray.push({
+      document: getFilePath(poCommentFile),
+      notes: poCommentNotes.trim(),
+      uploadedBy,
+      uploadedAt: new Date(),
+    });
+  }
+}
+
+
+    if (stage === "projectCodeCreation") {
+      const pcFile = uploadedFiles.find(
+        (f) => f.fieldname === "projectCodeCommentDocument"
       );
-      if (!poFile) return errorResponse(res, "PO document required", null, 400);
-      order.closedWonArray.push({
-        salesPoDocument: getFilePath(poFile),
-        salesPoNotes: (salesPoNotes || "").trim(),
-         uploadedBy,
+      const pcNotes = req.body.projectCodeCommentNotes || "";
+      if (!getFilePath(pcFile) && !pcNotes)
+        return errorResponse(res, "Provide document or notes", null, 400);
+      order.projectCodeCommentsArray.push({
+        document: getFilePath(pcFile),
+        notes: pcNotes.trim(),
+        uploadedBy,
         uploadedAt: new Date(),
       });
     }
+
+   if (stage === "closedLost") {
+  const clFile = uploadedFiles.find(f => f.fieldname === "closedLostCommentDocument");
+  const clNotes = req.body.closedLostCommentNotes || "";
+  if (clFile || clNotes) {
+    order.closedLostCommentsArray.push({
+      document: getFilePath(clFile),
+      notes: clNotes.trim(),
+      uploadedBy: order.salesHandlerName || req.user.username,
+      uploadedAt: new Date(),
+    });
+  }
+}
+
+    // if (stage === "closedWon") {
+    //   const poFile = uploadedFiles.find(
+    //     (f) => f.fieldname === "salesPoDocument"
+    //   );
+    //   if (!poFile) return errorResponse(res, "PO document required", null, 400);
+    //   order.closedWonArray.push({
+    //     salesPoDocument: getFilePath(poFile),
+    //     salesPoNotes: (salesPoNotes || "").trim(),
+    //     uploadedBy,
+    //     uploadedAt: new Date(),
+    //     reason: reason.trim(),
+    //     document: getFilePath(lostFile),
+    //     uploadedBy: order.salesHandlerName || req.user.username,
+    //     uploadedAt: new Date(),
+    //   });
+    // }
 
     await order.save();
     return successResponse(res, "Document uploaded successfully", { order });

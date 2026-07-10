@@ -18,12 +18,22 @@ const gstVerifyDetailSchema = new mongoose.Schema(
       ref: "GstDetail",
       required: true,
     },
+
     gst_number: { type: String, required: true },
     business_name: { type: String, default: "" },
     verifiedAt: { type: Date, default: Date.now },
   },
   { _id: false }
 );
+
+const clientClosureCommentSchema = new mongoose.Schema(
+  {
+    document: { type: String, default: "" }, notes: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" }, uploadedAt: { type: Date, default: Date.now }
+  },
+  { _id: true }
+);
+
 
 const bookingItemSchema = new mongoose.Schema({
   packageId: { type: mongoose.Schema.Types.ObjectId, ref: "Package" },
@@ -80,6 +90,46 @@ const bookingItemSchema = new mongoose.Schema({
 });
 
 
+const extraKmHistorySchema = new mongoose.Schema({
+  vehicleIndex: { type: Number, required: true },
+  entryId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  driverName: { type: String, default: "" },
+  driverPhone: { type: String, default: "" },
+  vehicleRegistrationNumber: { type: String, default: "" },
+  extraKm: { type: Number, default: 0 },
+  extraHours: { type: Number, default: 0 },
+  fromDate: { type: Date, required: true },
+  toDate: { type: Date, required: true },
+  perKmChargeRate: { type: Number, default: 0 },
+  additionalHourChargeRate: { type: Number, default: 0 },
+  extraKmCost: { type: Number, default: 0 },
+  extraHourCost: { type: Number, default: 0 },
+  totalCost: { type: Number, default: 0 },
+  addedBy: { type: String, default: "" },
+  addedAt: { type: Date, default: Date.now },
+}, { _id: true });
+
+
+const onRoadExtraKmSchema = new mongoose.Schema({
+  vehicleIndex: { type: Number, required: true },
+  entryId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  driverName: { type: String, default: "" },
+  driverPhone: { type: String, default: "" },
+  vehicleRegistrationNumber: { type: String, default: "" },
+  extraKm: { type: Number, default: 0 },
+  extraHours: { type: Number, default: 0 },
+  fromDate: { type: Date, required: true },
+  toDate: { type: Date, required: true },
+  perKmChargeRate: { type: Number, default: 0 },
+  additionalHourChargeRate: { type: Number, default: 0 },
+  extraKmCost: { type: Number, default: 0 },
+  extraHourCost: { type: Number, default: 0 },
+  totalCost: { type: Number, default: 0 },
+  addedBy: { type: String, default: "" },
+  addedAt: { type: Date, default: Date.now },
+}, { _id: true });
+
+
 const projectExecutionDocSchema = new mongoose.Schema(
   {
     document: { type: String, default: "" },
@@ -90,6 +140,36 @@ const projectExecutionDocSchema = new mongoose.Schema(
   { _id: true }
 );
 
+
+const poCommentSchema = new mongoose.Schema(
+  {
+    document: { type: String, default: "" },
+    notes: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+const projectCodeCommentSchema = new mongoose.Schema(
+  {
+    document: { type: String, default: "" },
+    notes: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+const closedLostCommentSchema = new mongoose.Schema(
+  {
+    document: { type: String, default: "" },
+    notes: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
 
 const driverLocationSchema = new mongoose.Schema(
   {
@@ -192,8 +272,23 @@ const projectMailLogSchema = new mongoose.Schema(
   { _id: true }
 );
 
+// const onRoadDriverHistorySchema = new mongoose.Schema({
+//   vehicleIndex: { type: Number, required: true },
+//   action: { type: String, enum: ["created", "updated"], default: "created" },
+//   driverName: { type: String, default: "" },
+//   driverPhone: { type: String, default: "" },
+//   vehicleRegistrationNumber: { type: String, default: "" },
+//   gatepassPhoto: { type: String, default: "" },
+//   changedBy: { type: String, default: "" },
+//   changedAt: { type: Date, default: Date.now },
+//   changedFields: { type: Object, default: {} },
+// }, { _id: true });
+
+
+
 const onRoadDriverHistorySchema = new mongoose.Schema({
   vehicleIndex: { type: Number, required: true },
+  entryId: { type: mongoose.Schema.Types.ObjectId, default: null },   // ← NEW
   action: { type: String, enum: ["created", "updated"], default: "created" },
   driverName: { type: String, default: "" },
   driverPhone: { type: String, default: "" },
@@ -203,8 +298,6 @@ const onRoadDriverHistorySchema = new mongoose.Schema({
   changedAt: { type: Date, default: Date.now },
   changedFields: { type: Object, default: {} },
 }, { _id: true });
-
-
 
 
 const clientFeedbackSchema = new mongoose.Schema({
@@ -220,7 +313,7 @@ const clientFeedbackSchema = new mongoose.Schema({
 const focHistoryEntrySchema = new mongoose.Schema(
   {
     action: { type: String, enum: ["created", "updated", "approved"], required: true },
-    changedFields: { type: Object, default: {} }, 
+    changedFields: { type: Object, default: {} },
     changedBy: { type: String, default: "" },
     changedAt: { type: Date, default: Date.now },
   },
@@ -254,7 +347,7 @@ const campaignClosureSchema = new mongoose.Schema({
   focHistory: { type: [focHistoryEntrySchema], default: [] },
 
 
-  isAdminCreated: { type: Boolean, default: false }, 
+  isAdminCreated: { type: Boolean, default: false },
   focChatMessages: { type: [focChatMessageSchema], default: [] },
 }, { _id: true });
 
@@ -446,35 +539,41 @@ const orderSchema = new mongoose.Schema(
 
     driverLocationArray: { type: [driverLocationSchema], default: [] },
 
-onRoadExecutionArray: [
-  {
-    vehicleIndex: { type: Number, required: true },
-    driverName: { type: String, required: true, default: "" },
-    driverPhone: { type: String, required: true, default: "" },
-    vehicleRegistrationNumber: { type: String, required: true, default: "" },
-    gatepassPhoto: { type: String, default: "" },
-    onRoadStatus: { type: Number, enum: [0, 1], default: 0 },
-    uploadedBy: { type: String, default: "" },
-    uploadedAt: { type: Date, default: Date.now },
-    unavailableStatus: { type: Boolean, default: false },
-    unavailableReason: { type: String, default: "" },
-  }
-],
+    onRoadExecutionArray: [
+      {
+        vehicleIndex: { type: Number, required: true },
+        driverName: { type: String, required: true, default: "" },
+        driverPhone: { type: String, required: true, default: "" },
+        vehicleRegistrationNumber: { type: String, required: true, default: "" },
+        gatepassPhoto: { type: String, default: "" },
+        onRoadStatus: { type: Number, enum: [0, 1], default: 0 },
+        uploadedBy: { type: String, default: "" },
+        uploadedAt: { type: Date, default: Date.now },
+        unavailableStatus: { type: Boolean, default: false },
+        unavailableReason: { type: String, default: "" },
+      }
+    ],
 
 
     onRoadUnavailableHistory: { type: [onRoadUnavailableHistorySchema], default: [] },
     onRoadHistory: { type: [onRoadHistorySchema], default: [] },
     onRoadIssues: { type: [onRoadIssueSchema], default: [] },
     onRoadDriverHistory: { type: [onRoadDriverHistorySchema], default: [] },
+    extraKmDetailsArray: { type: [extraKmHistorySchema], default: [] },
+    onRoadExtraKm: { type: [onRoadExtraKmSchema], default: [] },
     clientFeedbackHistory: { type: [clientFeedbackSchema], default: [] },
     campaignClosureArray: { type: [campaignClosureSchema], default: [] },
 
     // ── Project Code ──────────────────────────────────────────────
-
+    clientClosureCommentsArray: { type: [clientClosureCommentSchema], default: [] },
+    closedWonCommentsArray: { type: [clientClosureCommentSchema], default: [] },
+    closedLostCommentsArray: { type: [clientClosureCommentSchema], default: [] },
     onRoadCommentsArray: { type: [onRoadCommentSchema], default: [] },
     projectCodeArray: { type: [projectCodeSchema], default: [] },
     projectMailLogs: { type: [projectMailLogSchema], default: [] },
-
+    poCommentsArray: { type: [poCommentSchema], default: [] },
+    projectCodeCommentsArray: { type: [projectCodeCommentSchema], default: [] },
+    closedLostCommentsArray: { type: [closedLostCommentSchema], default: [] },
     orderClosedWonArray: { type: [orderClosedWonSchema], default: [] },
     orderClosedLostArray: { type: [orderClosedLostSchema], default: [] },
     // ── Sales Pipeline (unchanged) ────────────────────────────────

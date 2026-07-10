@@ -139,6 +139,8 @@ router.post(
   ctrl.createAndApproveFocEntry
 );
 
+router.post("/pipeline/:id/extra-km", protect, ctrl.addExtraKmDetails);
+
 router.get("/orders", protect, ctrl.getAllOrders);  
 router.get("/orders/:orderId", ctrl.getOrderById);
 router.post("/orders/create", protect, adminOrderUpload, ctrl.createAdminOrder);
