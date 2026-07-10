@@ -1,77 +1,3 @@
-
-
-// const multer = require("multer");
-// const multerS3 = require("multer-s3");
-// const path = require("path");
-// const fs = require("fs");
-// const spacesClient = require("../config/spaces"); 
-
-// const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
-// const BUCKET_NAME = process.env.DO_SPACES_BUCKET || "adinn-space";
-
-// let adminStorage;
-
-// if (STORAGE_TYPE === "space") {
- 
-//   adminStorage = multerS3({
-//     s3: spacesClient,
-//     bucket: BUCKET_NAME,
-//     acl: "public-read",
-//     metadata: (req, file, cb) => {
-//       cb(null, { fieldname: file.fieldname });
-//     },
-//     key: (req, file, cb) => {
-//       const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-//       const ext = path.extname(file.originalname);
-//       const name = path.basename(file.originalname, ext).replace(/\s+/g, "-");
-     
-//       const filename = `${file.fieldname}-${uniqueSuffix}-${name}${ext}`;
-//       cb(null, `admin-orders/${filename}`);
-//     },
-//   });
-// } else {
- 
-//   adminStorage = multer.diskStorage({
-//     destination: (req, file, cb) => {
-//       const uploadPath = path.join(__dirname, "../public/uploads");
-//       if (!fs.existsSync(uploadPath)) {
-//         fs.mkdirSync(uploadPath, { recursive: true });
-//       }
-//       cb(null, uploadPath);
-//     },
-//     filename: (req, file, cb) => {
-//       const ext = path.extname(file.originalname);
-//       const name = path.basename(file.originalname, ext).replace(/\s+/g, "-");
-//       cb(null, `${Date.now()}-${name}${ext}`);
-//     },
-//   });
-// }
-
-// const IMAGE_MAX_BYTES = 5 * 1024 * 1024;   // 5 MB
-// const VIDEO_MAX_BYTES = 50 * 1024 * 1024;  // 50 MB
-
-// const adminOrderUpload = multer({
-//   storage: adminStorage,
-//   limits: { fileSize: 50 * 1024 * 1024 }, // Hard cap (videos need 50 MB)
-//   fileFilter: (req, file, cb) => {
-//     const allowedImages = /jpeg|jpg|png|gif|webp/;
-//     const allowedVideos = /mp4|mov|avi|mkv|webm/;
-//     const ext = path.extname(file.originalname).toLowerCase().slice(1);
-//     const isImage = allowedImages.test(ext);
-//     const isVideo = allowedVideos.test(ext);
-
-//     if (!isImage && !isVideo) {
-//       return cb(new Error(`File type .${ext} not allowed`));
-//     }
-
- 
-//     cb(null, true);
-//   },
-// }).any();
-// module.exports = { adminOrderUpload };
-
-
-
 const multer = require("multer");
 const multerS3 = require("multer-s3");
 const path = require("path");
@@ -80,6 +6,19 @@ const spacesClient = require("../config/spaces");
 
 const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
 const BUCKET_NAME = process.env.DO_SPACES_BUCKET || "adinn-space";
+
+
+const sanitizeFilename = (originalname) => {
+  const ext = path.extname(originalname);
+  const base = path.basename(originalname, ext);
+  const safeBase = base
+    .replace(/[#%?&+=\s]+/g, "-")     
+    .replace(/[^a-zA-Z0-9.\-_]/g, "") 
+    .replace(/-+/g, "-")              
+    .replace(/^-+|-+$/g, "")          
+    .slice(0, 100);                   
+  return `${safeBase || "file"}${ext}`;
+};
 
 let adminStorage;
 
@@ -95,7 +34,7 @@ if (STORAGE_TYPE === "space") {
     key: (req, file, cb) => {
       const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
       const ext = path.extname(file.originalname);
-      const name = path.basename(file.originalname, ext).replace(/\s+/g, "-");
+      const name = path.basename(sanitizeFilename(file.originalname), ext);
       const filename = `${file.fieldname}-${uniqueSuffix}-${name}${ext}`;
       cb(null, `admin-orders/${filename}`);
     },
@@ -110,14 +49,13 @@ if (STORAGE_TYPE === "space") {
       cb(null, uploadPath);
     },
     filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname);
-      const name = path.basename(file.originalname, ext).replace(/\s+/g, "-");
-      cb(null, `${Date.now()}-${name}${ext}`);
+      const safeName = sanitizeFilename(file.originalname);
+      cb(null, `${Date.now()}-${safeName}`);
     },
   });
 }
 
-/* ---------------------------- FILE TYPE CHECK ---------------------------- */
+
 const isImageFile = (filename) => {
   const ext = path.extname(filename).toLowerCase().slice(1);
   return /jpeg|jpg|png|gif|webp/.test(ext);

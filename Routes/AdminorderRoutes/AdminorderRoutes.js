@@ -1,5 +1,3 @@
-
-
 const path = require("path");
 const fs = require("fs");
 const express = require("express");
@@ -14,6 +12,19 @@ const spacesClient = require("../../config/spaces");
 
 const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
 const BUCKET_NAME = process.env.DO_SPACES_BUCKET || "adinn-space";
+
+
+const sanitizeFilename = (originalname) => {
+  const ext = path.extname(originalname);
+  const base = path.basename(originalname, ext);
+  const safeBase = base
+    .replace(/[#%?&+=\s]+/g, "-")     
+    .replace(/[^a-zA-Z0-9.\-_]/g, "") 
+    .replace(/-+/g, "-")              
+    .replace(/^-+|-+$/g, "")          
+    .slice(0, 100);                  
+  return `${safeBase || "file"}${ext}`;
+};
 
 
 const pipelineFileFilter = (req, file, cb) => {
@@ -56,7 +67,8 @@ if (STORAGE_TYPE === "space") {
       cb(null, uploadPath);
     },
     filename: (req, file, cb) => {
-      cb(null, `admin-${Date.now()}-${file.originalname}`);
+      const safeName = sanitizeFilename(file.originalname);
+      cb(null, `admin-${Date.now()}-${safeName}`);
     },
   });
 }
@@ -127,6 +139,8 @@ router.post(
   ctrl.createAndApproveFocEntry
 );
 
+router.post("/pipeline/:id/extra-km", protect, ctrl.addExtraKmDetails);
+
 router.get("/orders", protect, ctrl.getAllOrders);  
 router.get("/orders/:orderId", ctrl.getOrderById);
 router.post("/orders/create", protect, adminOrderUpload, ctrl.createAdminOrder);
@@ -135,5 +149,6 @@ router.get("/campaign-types", ctrl.getCampaignTypes);
 router.post("/campaign-types", ctrl.createCampaignType);
 
 router.get("/vamosys/apikey", ctrl.getVamosysApiKey);
+router.get("/vamosys/vehicle-locations", ctrl.getVehicleLocationsProxy);
 
 module.exports = router;
