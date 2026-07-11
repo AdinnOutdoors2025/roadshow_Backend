@@ -38,6 +38,8 @@ const promoterroutes = require('./Routes/Promoterroutes/Promoterroutes');
 const Driverdetailsroutes = require('./Routes/DriverdetailsRoutes/Driverdetailsroute');
 const RoadshowQuotationRoutes  = require('./Routes/roadshowQuotation/roadshowQuotationRoute')
 const shortUrlRoutes = require("./routes/shortUrl.routes.js");
+// CLIENT AUTHENTICATION 
+const clientAuthRoutes = require("./Routes/ClientAuthRoutes/ClientAuthRoutes.js");
 //Image upload requirements
 const multer = require("multer");
 const path = require("path");
@@ -219,7 +221,8 @@ app.use('/promoters', promoterroutes);
 app.use('/drivers', Driverdetailsroutes);
 app.use("/api/roadshow-quotations", RoadshowQuotationRoutes);
 app.use("/", shortUrlRoutes);
-
+// CLIENT AUTHENTICATION 
+app.use( "/api/client-auth", clientAuthRoutes );
 // VEHICLE DETAILS STORED WITH CRUD OPERATIONS
 //IMAGE UPLOAD CLOUDINARY CORRECTED CODE
 const { CloudinaryStorage } = require("multer-storage-cloudinary");

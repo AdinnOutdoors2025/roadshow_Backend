@@ -73,11 +73,23 @@ const verifyAdminExists = async (req, res, next) => {
 
 const isAdmin    = authorizeRoles('admin');
 
+//CLIENT AUTHENTICATION
+const authorizeUserType = (...types) => (req, res, next) => {
+  if (!req.user || !types.includes(req.user.userType)) {
+    return res.status(403).json({
+      success: false,
+      message: "Not allowed. This route is restricted to specific user types.",
+    });
+  }
+  next();
+};
+
 
 module.exports = {
     protect,         
     authorizeRoles,     
     isAdmin,               
     verifyAdminExists,  
-    
+//CLIENT AUTHENTICATION
+    authorizeUserType
 };
