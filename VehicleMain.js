@@ -38,6 +38,7 @@ const promoterroutes = require('./Routes/Promoterroutes/Promoterroutes');
 const Driverdetailsroutes = require('./Routes/DriverdetailsRoutes/Driverdetailsroute');
 const RoadshowQuotationRoutes  = require('./Routes/roadshowQuotation/roadshowQuotationRoute')
 const clientRequestRoutes = require('./Routes/ClientRequestRoutes/ClientRequestRoutes');
+const shortUrlRoutes = require("./routes/shortUrl.routes.js");
 //Image upload requirements
 const multer = require("multer");
 const path = require("path");
@@ -124,6 +125,7 @@ const allowedOrigins = [
   "https://frontend-roadshow.vercel.app",
   "https://frontend-roadshow-97ae.vercel.app",
   "https://frontend-roadshow-*-your-username.vercel.app",
+  "https://ratecard-with-quotation-roadshow-ne.vercel.app"
 ];
 
 app.use(
@@ -218,6 +220,7 @@ app.use('/promoters', promoterroutes);
 app.use('/drivers', Driverdetailsroutes);
 app.use("/api/roadshow-quotations", RoadshowQuotationRoutes);
 app.use('/client-requests', clientRequestRoutes);
+app.use("/", shortUrlRoutes);
 
 // VEHICLE DETAILS STORED WITH CRUD OPERATIONS
 //IMAGE UPLOAD CLOUDINARY CORRECTED CODE
