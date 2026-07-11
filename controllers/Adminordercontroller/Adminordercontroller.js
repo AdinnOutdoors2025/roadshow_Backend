@@ -39,8 +39,12 @@ function calcPricingBackend(pkg, v) {
 
   const rentalCost = pkg.perDayRentalCost * totalDays * quantity;
   const driverCost = pkg.driverCharges * totalDays * quantity;
+   const promoterChargePerDay = parseFloat(process.env.DEFAULT_PROMOTER_CHARGE || "1000");
+
+  //  promoter charges default data 
   const promoterCost = needPromoter
-    ? (pkg.promoterChargePerDay || 0) * totalDays * promoterQuantity
+    // ? (pkg.promoterChargePerDay || 0) * totalDays * promoterQuantity
+       ? (promoterChargePerDay || 0) * totalDays * promoterQuantity
     : 0;
   const rtoCost = pkg.rtoCharges * quantity;
   const extraKmCost = extraKm > 0 ? (pkg.perKmCharge || 0) * extraKm : 0;
@@ -73,7 +77,8 @@ function calcPricingBackend(pkg, v) {
     totalDays,
     perDayRentalCost: pkg.perDayRentalCost,
     driverCharges: pkg.driverCharges,
-    promoterChargePerDay: needPromoter ? pkg.promoterChargePerDay : 0,
+    // promoterChargePerDay: needPromoter ? pkg.promoterChargePerDay : 0,
+     promoterChargePerDay: needPromoter ? promoterChargePerDay : 0,
     rtoCharges: pkg.rtoCharges,
     additionalHourCharges: pkg.additionalHourCharges,
     dailyKmLimit: pkg.dailyKmLimit,
@@ -1922,219 +1927,6 @@ exports.getVehicleLocationsProxy = async (req, res) => {
     return errorResponse(res, error.message, null, 500);
   }
 };
-
-
-// exports.addExtraKmDetails = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const { vehicleIndex, entryId, extraKm, extraHours, fromDate, toDate } = req.body;
-
-//     const vIdx = Number(vehicleIndex);
-//     const km = Number(extraKm) || 0;
-//     const hrs = Number(extraHours) || 0;
-
-//     if (km <= 0 && hrs <= 0)
-//       return errorResponse(res, "Enter extra KM or extra hours", null, 400);
-
-//     if (!fromDate) return errorResponse(res, "From date is required", null, 400);
-//     if (!toDate) return errorResponse(res, "To date is required", null, 400);
-
-//     const newFrom = new Date(fromDate);
-//     const newTo = new Date(toDate);
-
-//     if (isNaN(newFrom.getTime()) || isNaN(newTo.getTime()))
-//       return errorResponse(res, "Invalid date format", null, 400);
-
-//     if (newFrom > newTo)
-//       return errorResponse(res, "From date must be before or equal to To date", null, 400);
-
-//     const order = await Order.findById(id);
-//     if (!order) return errorResponse(res, "Order not found", null, 404);
-
-//     const bookingItem = order.bookingItems[vIdx];
-//     if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
-
-//     const campaignFrom = new Date(bookingItem.fromDate);
-//     const campaignTo = new Date(bookingItem.toDate);
-
-//     if (newFrom < campaignFrom || newTo > campaignTo) {
-//       return errorResponse(
-//         res,
-//         `Dates must be within campaign range (${campaignFrom.toLocaleDateString("en-IN")} - ${campaignTo.toLocaleDateString("en-IN")})`,
-//         null,
-//         400
-//       );
-//     }
-
-//     let driverEntry = null;
-//     if (entryId) {
-//       driverEntry = order.onRoadExecutionArray.id(entryId);
-//       if (!driverEntry) return errorResponse(res, "Driver entry not found", null, 404);
-//     }
-
-//     if (!bookingItem.packageId)
-//       return errorResponse(res, "Package not linked to this vehicle", null, 400);
-
-//     const pkg = await Package.findById(bookingItem.packageId);
-//     if (!pkg) return errorResponse(res, "Package not found", null, 404);
-
-//     const perKmChargeRate = pkg.perKmCharge || 0;
-//     const additionalHourChargeRate = pkg.additionalHourCharges || 0;
-
-//     const extraKmCost = km * perKmChargeRate;
-//     const extraHourCost = hrs * additionalHourChargeRate;
-//     const totalCost = extraKmCost + extraHourCost;
-
-//     const addedBy =
-//       Number(req.user.isAdmin) === 0
-//         ? req.user.username
-//         : order.handlerName || req.user?.username || "Admin";
-
-//     order.extraKmDetailsArray.push({
-//       vehicleIndex: vIdx,
-//       entryId: driverEntry ? driverEntry._id : null,
-//       driverName: driverEntry?.driverName || "",
-//       driverPhone: driverEntry?.driverPhone || "",
-//       vehicleRegistrationNumber: driverEntry?.vehicleRegistrationNumber || "",
-//       extraKm: km,
-//       extraHours: hrs,
-//       fromDate: newFrom,
-//       toDate: newTo,
-//       perKmChargeRate,
-//       additionalHourChargeRate,
-//       extraKmCost,
-//       extraHourCost,
-//       totalCost,
-//       addedBy,
-//       addedAt: new Date(),
-//     });
-
-//     await order.save();
-//     return successResponse(res, "Extra KM details added successfully", { order }, 201);
-//   } catch (error) {
-//     return errorResponse(res, error.message, null, 500);
-//   }
-// };
-
-
-// exports.addExtraKmDetails = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const { vehicleIndex, entryId, extraKm, extraHours, fromDate, toDate } = req.body;
-
-//     const vIdx = Number(vehicleIndex);
-//     const km = Number(extraKm) || 0;
-//     const hrs = Number(extraHours) || 0;
-
-//     if (km <= 0 && hrs <= 0)
-//       return errorResponse(res, "Enter extra KM or extra hours", null, 400);
-
-//     if (!fromDate) return errorResponse(res, "From date is required", null, 400);
-//     if (!toDate) return errorResponse(res, "To date is required", null, 400);
-
-//     const newFrom = new Date(fromDate);
-//     const newTo = new Date(toDate);
-
-//     if (isNaN(newFrom.getTime()) || isNaN(newTo.getTime()))
-//       return errorResponse(res, "Invalid date format", null, 400);
-
-//     if (newFrom > newTo)
-//       return errorResponse(res, "From date must be before or equal to To date", null, 400);
-
-//     const order = await Order.findById(id);
-//     if (!order) return errorResponse(res, "Order not found", null, 404);
-
-//     const bookingItem = order.bookingItems[vIdx];
-//     if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
-
-//     const campaignFrom = new Date(bookingItem.fromDate);
-//     const campaignTo = new Date(bookingItem.toDate);
-
-//     if (newFrom < campaignFrom || newTo > campaignTo) {
-//       return errorResponse(
-//         res,
-//         `Dates must be within campaign range (${campaignFrom.toLocaleDateString("en-IN")} - ${campaignTo.toLocaleDateString("en-IN")})`,
-//         null,
-//         400
-//       );
-//     }
-
-//     let driverEntry = null;
-//     if (entryId) {
-//       driverEntry = order.onRoadExecutionArray.id(entryId);
-//       if (!driverEntry) return errorResponse(res, "Driver entry not found", null, 404);
-//     }
-
-//     if (!bookingItem.packageId)
-//       return errorResponse(res, "Package not linked to this vehicle", null, 400);
-
-//     const pkg = await Package.findById(bookingItem.packageId);
-//     if (!pkg) return errorResponse(res, "Package not found", null, 404);
-
-//     const perKmChargeRate = pkg.perKmCharge || 0;
-//     const additionalHourChargeRate = pkg.additionalHourCharges || 0;
-
-//     const extraKmCost = km * perKmChargeRate;
-//     const extraHourCost = hrs * additionalHourChargeRate;
-//     const totalCost = extraKmCost + extraHourCost;
-
-//     const addedBy =
-//       Number(req.user.isAdmin) === 0
-//         ? req.user.username
-//         : order.handlerName || req.user?.username || "Admin";
-
-//     const extraKmPayload = {
-//       vehicleIndex: vIdx,
-//       entryId: driverEntry ? driverEntry._id : null,
-//       driverName: driverEntry?.driverName || "",
-//       driverPhone: driverEntry?.driverPhone || "",
-//       vehicleRegistrationNumber: driverEntry?.vehicleRegistrationNumber || "",
-//       extraKm: km,
-//       extraHours: hrs,
-//       fromDate: newFrom,
-//       toDate: newTo,
-//       perKmChargeRate,
-//       additionalHourChargeRate,
-//       extraKmCost,
-//       extraHourCost,
-//       totalCost,
-//       addedBy,
-//       addedAt: new Date(),
-//     };
-
-//     // History array - ella time-um oru puthu entry push pannum
-//     order.extraKmDetailsArray.push(extraKmPayload);
-
-//     // Current array - entryId per oru object mattum
-//     // First time -> push, already irundha -> update
-//     if (driverEntry) {
-//       const existingCurrent = order.onRoadExtraKm.find(
-//         (e) => String(e.entryId) === String(driverEntry._id)
-//       );
-
-//       if (existingCurrent) {
-//         existingCurrent.extraKm = km;
-//         existingCurrent.extraHours = hrs;
-//         existingCurrent.fromDate = newFrom;
-//         existingCurrent.toDate = newTo;
-//         existingCurrent.perKmChargeRate = perKmChargeRate;
-//         existingCurrent.additionalHourChargeRate = additionalHourChargeRate;
-//         existingCurrent.extraKmCost = extraKmCost;
-//         existingCurrent.extraHourCost = extraHourCost;
-//         existingCurrent.totalCost = totalCost;
-//         existingCurrent.addedBy = addedBy;
-//         existingCurrent.addedAt = new Date();
-//       } else {
-//         order.onRoadExtraKm.push(extraKmPayload);
-//       }
-//     }
-
-//     await order.save();
-//     return successResponse(res, "Extra KM details added successfully", { order }, 201);
-//   } catch (error) {
-//     return errorResponse(res, error.message, null, 500);
-//   }
-// };
 
 
 

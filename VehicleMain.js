@@ -37,6 +37,7 @@ const gstDetailRoutes = require('./Routes/GstDetailRoutes/gstDetailRoutes');
 const promoterroutes = require('./Routes/Promoterroutes/Promoterroutes');
 const Driverdetailsroutes = require('./Routes/DriverdetailsRoutes/Driverdetailsroute');
 const RoadshowQuotationRoutes  = require('./Routes/roadshowQuotation/roadshowQuotationRoute')
+const clientRequestRoutes = require('./Routes/ClientRequestRoutes/ClientRequestRoutes');
 //Image upload requirements
 const multer = require("multer");
 const path = require("path");
@@ -216,6 +217,7 @@ app.use('/gstdetails', gstDetailRoutes);
 app.use('/promoters', promoterroutes);
 app.use('/drivers', Driverdetailsroutes);
 app.use("/api/roadshow-quotations", RoadshowQuotationRoutes);
+app.use('/client-requests', clientRequestRoutes);
 
 // VEHICLE DETAILS STORED WITH CRUD OPERATIONS
 //IMAGE UPLOAD CLOUDINARY CORRECTED CODE
