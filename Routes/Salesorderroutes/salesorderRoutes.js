@@ -91,5 +91,6 @@ router.post("/pipeline/:id/documents", protect, salesUpload, ctrl.uploadStageDoc
 router.post("/pipeline/:id/send-project-mail", ctrl.sendProjectMail);
 router.post("/pipeline/:id/save-project-code", ctrl.saveProjectCode);
 router.patch("/pipeline/:id/enquiry-name", protect, ctrl.saveEnquiryName);
+router.get("/pipeline/:id/date-conflicts", ctrl.getDateConflicts);
 
 module.exports = router;
