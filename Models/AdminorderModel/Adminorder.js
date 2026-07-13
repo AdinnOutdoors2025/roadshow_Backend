@@ -245,6 +245,7 @@ const onRoadUnavailableHistorySchema = new mongoose.Schema({
 
 const onRoadIssueSchema = new mongoose.Schema({
   vehicleIndex: { type: Number, required: true },
+  entryId: { type: mongoose.Schema.Types.ObjectId, default: null },
   driverName: { type: String, default: "" },
   vehicleRegNo: { type: String, default: "" },
   issueDescription: { type: String, required: true },
