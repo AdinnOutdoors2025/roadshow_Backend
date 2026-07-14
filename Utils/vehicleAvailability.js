@@ -42,6 +42,7 @@ async function checkVehicleAvailability({ vehicleType, quantity, fromDate, toDat
     requiredQuantity: requestedQty,
     currentlyAvailable,
     soonToBeFree,
+     totalFleet: vehicleGroup.registrationVehicles.length,
   };
 }
 

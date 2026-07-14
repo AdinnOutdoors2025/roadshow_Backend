@@ -7,6 +7,7 @@ const FormData = require("form-data");
 const Order = require("../../Models/AdminorderModel/Adminorder");
 const vehicletypes = require("../../Models/VehicleTypeSchema");
 const { successResponse, errorResponse } = require("../../Utils/response");
+const { findDateConflictsForOrder } = require("../../Utils/dateConflictChecker");
 
 const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
 const CDN_BASE_URL =
@@ -56,16 +57,84 @@ const validateFile = (file, label) => {
 };
 
 
+// exports.getSalesPipeline = async (req, res) => {
+//   try {
+//     const orders = await Order.find({ pipelineStatus: "todo" })
+//       .sort({ createdAt: -1 })
+//       .lean();
+
+//     const grouped = {};
+//     SALES_STAGE_ORDER.forEach((s) => (grouped[s] = []));
+
+//     orders.forEach((o) => {
+//       const stage = o.salesPipelineStatus || "enquiry";
+//       if (grouped[stage]) {
+//         grouped[stage].push(o);
+//       } else {
+//         grouped["enquiry"].push(o);
+//       }
+//     });
+
+//     return successResponse(res, "Sales pipeline fetched", {
+//       grouped,
+//       stages: SALES_STAGE_ORDER,
+//     });
+//   } catch (error) {
+//     return errorResponse(res, error.message);
+//   }
+// };
+
+
 exports.getSalesPipeline = async (req, res) => {
   try {
     const orders = await Order.find({ pipelineStatus: "todo" })
       .sort({ createdAt: -1 })
       .lean();
 
+    // ── Date Conflict Check (Board Badge) ──────────────────────────
+    // DB la irukura ELLA orders oda bookingItems (vehicleType + dates) mattum
+    // light-a fetch pannurom (extra per-order query varaadhu nu single pass la calculate pannurathukku)
+    const allBookingSnapshots = await Order.find({})
+      .select("_id bookingItems")
+      .lean();
+
+    const vehicleTypeMap = {};
+    allBookingSnapshots.forEach((o) => {
+      (o.bookingItems || []).forEach((item) => {
+        if (!item.vehicleType || !item.fromDate || !item.toDate) return;
+        const key = String(item.vehicleType);
+        if (!vehicleTypeMap[key]) vehicleTypeMap[key] = [];
+        vehicleTypeMap[key].push({
+          orderId: String(o._id),
+          fromDate: new Date(item.fromDate),
+          toDate: new Date(item.toDate),
+        });
+      });
+    });
+
+    const conflictedOrderIds = new Set();
+    allBookingSnapshots.forEach((o) => {
+      const oId = String(o._id);
+      let hasConflict = false;
+      (o.bookingItems || []).forEach((item) => {
+        if (hasConflict || !item.vehicleType || !item.fromDate || !item.toDate) return;
+        const bucket = vehicleTypeMap[String(item.vehicleType)] || [];
+        const thisFrom = new Date(item.fromDate);
+        const thisTo = new Date(item.toDate);
+        const overlap = bucket.some(
+          (b) => b.orderId !== oId && b.fromDate <= thisTo && b.toDate >= thisFrom
+        );
+        if (overlap) hasConflict = true;
+      });
+      if (hasConflict) conflictedOrderIds.add(oId);
+    });
+    // ─────────────────────────────────────────────────────────────
+
     const grouped = {};
     SALES_STAGE_ORDER.forEach((s) => (grouped[s] = []));
 
     orders.forEach((o) => {
+      o.hasDateConflict = conflictedOrderIds.has(String(o._id));
       const stage = o.salesPipelineStatus || "enquiry";
       if (grouped[stage]) {
         grouped[stage].push(o);
@@ -83,7 +152,6 @@ exports.getSalesPipeline = async (req, res) => {
   }
 };
 
-
 exports.getSalesOrderById = async (req, res) => {
   try {
     const order = await Order.findOne({ orderId: req.params.orderId });
@@ -91,6 +159,19 @@ exports.getSalesOrderById = async (req, res) => {
     return successResponse(res, "Sales order fetched", { order });
   } catch (error) {
     return errorResponse(res, error.message);
+  }
+};
+
+exports.getDateConflicts = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const conflicts = await findDateConflictsForOrder(order);
+    return successResponse(res, "Date conflicts fetched", { conflicts });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
   }
 };
 

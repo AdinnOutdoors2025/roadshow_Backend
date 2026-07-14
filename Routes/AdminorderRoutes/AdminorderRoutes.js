@@ -82,7 +82,7 @@ const pipelineUpload = multer({
 // ── Routes ─────────────────────────────────────────────────────────────────
 router.get("/pipeline", protect, ctrl.getOrdersByPipeline);
 router.patch("/pipeline/:orderId", protect, pipelineUpload, ctrl.updateOrderPipeline);
-
+router.put("/orders/:id", protect, adminOrderUpload, ctrl.updateAdminOrder);
 
 router.post(
   "/pipeline/:id/documents",
