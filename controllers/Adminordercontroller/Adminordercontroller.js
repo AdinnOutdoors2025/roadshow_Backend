@@ -145,6 +145,7 @@ function getFileUrl(file) {
 
 
 exports.createAdminOrder = async (req, res) => {
+
   try {
     const {
       customerName, customerPhone, customerAddress, customerEmail,
@@ -356,6 +357,261 @@ exports.createAdminOrder = async (req, res) => {
   }
 };
 
+// exports.updateAdminOrder = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     const order = await Order.findById(id);
+//     if (!order) return errorResponse(res, "Order not found", null, 404);
+
+   
+//     const LOCKED_STAGES = ["closedWon", "projectCodeCreation", "closedLost"];
+//     if (LOCKED_STAGES.includes(order.salesPipelineStatus)) {
+//       return errorResponse(
+//         res,
+//         `Order cannot be edited in "${order.salesPipelineStatus}" stage`,
+//         null,
+//         400
+//       );
+//     }
+
+//     const {
+//       customerName, customerPhone, customerAddress, customerEmail,
+//       customerCategory, companyName, clientName, designation, gstNumber,
+//     } = req.body;
+
+//     const category = customerCategory || "individual";
+
+//     // ── Same validation as create ──
+//     if (category === "individual") {
+//       if (!customerName?.trim()) return errorResponse(res, "Customer name is required", null, 400);
+//       if (!customerPhone) return errorResponse(res, "Phone number is required", null, 400);
+//       if (!/^[6-9]\d{9}$/.test(customerPhone.toString().trim()))
+//         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
+//       if (!customerEmail?.trim()) return errorResponse(res, "Email is required", null, 400);
+//     } else {
+//       if (!companyName?.trim()) return errorResponse(res, "Company name is required", null, 400);
+//       if (!clientName?.trim()) return errorResponse(res, "Client name is required", null, 400);
+//       if (!designation?.trim()) return errorResponse(res, "Designation is required", null, 400);
+//       if (!customerPhone) return errorResponse(res, "Phone number is required", null, 400);
+//       if (!/^[6-9]\d{9}$/.test(customerPhone.toString().trim()))
+//         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
+//       if (!customerEmail?.trim()) return errorResponse(res, "Email is required", null, 400);
+//       if (!gstNumber?.trim()) return errorResponse(res, "GST number is required", null, 400);
+//     }
+
+//     // ── Parse vehicles ──
+//     const vehicles = [];
+//     let idx = 0;
+//     while (req.body[`vehicle_${idx}`] !== undefined) {
+//       try { vehicles.push(JSON.parse(req.body[`vehicle_${idx}`])); }
+//       catch { return errorResponse(res, `vehicle_${idx} is not valid JSON`, null, 400); }
+//       idx++;
+//     }
+
+//     if (!vehicles || vehicles.length === 0)
+//       return errorResponse(res, "At least one vehicle is required", null, 400);
+
+//     const bookingItems = [];
+
+//     for (let i = 0; i < vehicles.length; i++) {
+//       const v = vehicles[i];
+//       const missing = [];
+//       if (!v.packageId) missing.push("packageId");
+//       if (!v.campaignType) missing.push("campaignType");
+//       if (!v.campaignName?.trim()) missing.push("campaignName");
+//       if (v.campaignType === "Other" && !v.otherCampaignType) missing.push("otherCampaignType");
+//       if (!v.fromDate) missing.push("fromDate");
+//       if (!v.toDate) missing.push("toDate");
+//       if (!v.state) missing.push("state");
+//       if (!v.city) missing.push("city");
+//       if (!v.fromLocation) missing.push("fromLocation");
+//       if (!v.toLocation) missing.push("toLocation");
+//       if (!v.quantity || Number(v.quantity) < 1) missing.push("quantity");
+//       if (missing.length > 0)
+//         return errorResponse(res, `Vehicle ${i + 1}: Missing fields — ${missing.join(", ")}`, null, 400);
+
+//       if (new Date(v.fromDate) >= new Date(v.toDate))
+//         return errorResponse(res, `Vehicle ${i + 1}: fromDate must be before toDate`, null, 400);
+
+//       const pkg = await Package.findById(v.packageId);
+//       if (!pkg) return errorResponse(res, `Vehicle ${i + 1}: Package not found`, null, 404);
+
+//       const fp = calcPricingBackend(pkg, v);
+
+//       const additionalFields = (v.additionalCharges || []).map((c) => ({
+//         label: (c.label || "").trim() || "Custom charge",
+//         mode: c.mode === "-" ? "-" : "+",
+//         amount: Math.max(0, Number(c.amount) || 0),
+//       }));
+
+//       // ── Campaign type handling (same as create) ──
+//       let campaignTypeRef = null;
+//       let campaignTypeName = v.campaignType;
+//       if (v.campaignType && v.campaignType !== "Other") {
+//         const ct = await CampaignType.findById(v.campaignType).catch(() => null);
+//         if (ct) { campaignTypeRef = ct._id; campaignTypeName = ct.name; }
+//       } else if (v.campaignType === "Other" && v.otherCampaignType?.trim()) {
+//         let ct = await CampaignType.findOne({
+//           name: { $regex: `^${v.otherCampaignType.trim()}$`, $options: "i" },
+//         });
+//         if (!ct) ct = await CampaignType.create({ name: v.otherCampaignType.trim() });
+//         campaignTypeRef = ct._id;
+//         campaignTypeName = ct.name;
+//       }
+
+//       // ── Media: existing URLs keep + new files append ──
+//       const uploadedFiles = req.files || [];
+
+//       let existingImages = [];
+//       let existingVideos = [];
+//       try { existingImages = JSON.parse(req.body[`existingImages_${i}`] || "[]"); } catch {}
+//       try { existingVideos = JSON.parse(req.body[`existingVideos_${i}`] || "[]"); } catch {}
+
+//       const newImages = uploadedFiles
+//         .filter((f) => f.fieldname === `campaignImages_${i}`)
+//         .map((f) => getFileUrl(f));
+//       const newVideos = uploadedFiles
+//         .filter((f) => f.fieldname === `campaignVideos_${i}`)
+//         .map((f) => getFileUrl(f));
+
+//       bookingItems.push({
+//         packageId: pkg._id,
+//         vehicleType: pkg.vehicleType,
+//         vehicleModel: pkg.vehicleModel,
+//         bookingFor: v.bookingFor,
+//         gstNumber: v.bookingFor === "Agency" ? (v.gstNumber || "").trim() : "",
+//         campaignType: campaignTypeName,
+//         campaignName: (v.campaignName || "").trim(),
+//         campaignTypeRef,
+//         otherCampaignType: v.campaignType === "Other" ? (v.otherCampaignType || "") : "",
+//         promoterGender: v.needPromoter ? (v.promoterGender || "") : "",
+//         promoterLanguage: v.needPromoter ? (v.promoterLanguage || []) : [],
+//         promoterQuantity: v.needPromoter ? (Number(v.promoterQuantity) || 0) : 0,
+//         fromDate: new Date(v.fromDate),
+//         toDate: new Date(v.toDate),
+//         state: v.state,
+//         city: v.city,
+//         fromLocation: v.fromLocation,
+//         toLocation: v.toLocation,
+//         quantity: Number(v.quantity),
+//         extraKm: Number(v.extraKm) || 0,
+//         extraDays: Number(v.extraDays) || 0,
+//         extraHours: Number(v.extraHours) || 0,
+//         needPromoter: !!v.needPromoter,
+//         promoterType: v.needPromoter ? v.promoterType : "",
+//         otherPromoterType: v.needPromoter && v.promoterType === "Other" ? v.otherPromoterType : "",
+//         campaignImages: [...existingImages, ...newImages],
+//         campaignVideos: [...existingVideos, ...newVideos],
+//         totalDays: fp.totalDays,
+//         perDayRentalCost: fp.perDayRentalCost,
+//         driverCharges: fp.driverCharges,
+//         promoterChargePerDay: fp.promoterChargePerDay,
+//         rtoCharges: fp.rtoCharges,
+//         additionalHourCharges: fp.additionalHourCharges,
+//         dailyKmcharges: fp.dailyKmcharges,
+//         dailyKmLimit: fp.dailyKmLimit,
+//         rentalCost: fp.rentalCost,
+//         driverCost: fp.driverCost,
+//         promoterCost: fp.promoterCost,
+//         rtoCost: fp.rtoCost,
+//         extraKmCost: fp.extraKmCost,
+//         extraHourCost: fp.extraHourCost,
+//         additionalNet: fp.additionalNet,
+//         subtotal: fp.subtotal,
+//         totalAmount: fp.totalAmount,
+//         additionalFields,
+//       });
+//     }
+
+//     // ── Totals re-calc ──
+//     const taxableAmount = bookingItems.reduce((s, item) => s + item.totalAmount, 0);
+//     const grandGst = Math.floor(taxableAmount * 0.18);
+//     const grandTotal = taxableAmount + grandGst;
+
+//     // ── Customer fields update ──
+//     order.name = category === "individual" ? (customerName || "").trim() : (clientName || "").trim();
+//     order.phone = customerPhone.toString().trim();
+//     order.address = customerAddress || "";
+//     order.email = customerEmail || "";
+//     order.customerType = category === "individual" ? 0 : 1;
+//     order.customerCategory = category;
+//     order.companyName = category === "organization" ? (companyName || "").trim() : "";
+//     order.clientName = category === "organization" ? (clientName || "").trim() : "";
+//     order.designation = category === "organization" ? (designation || "").trim() : "";
+//     order.gstNumber = category === "organization" ? (gstNumber || "").trim() : "";
+
+//     if (req.body.gstVerifyDetails) {
+//       try { order.gstVerifyDetails = JSON.parse(req.body.gstVerifyDetails); } catch {}
+//     }
+
+//     order.bookingItems = bookingItems;
+//     order.grandTotal = grandTotal;
+//     order.grandGst = grandGst;
+
+//     // ── Negotiation nadanthirundha final amount recalc ──
+//     if ((order.salesNegotiationArray || []).length > 0) {
+//       const totalNegotiated = order.salesNegotiationArray.reduce(
+//         (sum, n) => sum + (n.amount || 0), 0
+//       );
+//       order.salesNegotiationFinalAmount = Math.max(grandTotal - totalNegotiated, 0);
+//     }
+
+//     // ── Audit log ──
+//     const editedBy = req.user?.username || "Admin";
+//     order.salesPipelineLogs.push({
+//       fromStage: order.salesPipelineStatus,
+//       toStage: order.salesPipelineStatus,
+//       movedBy: editedBy,
+//       handlerName: order.salesHandlerName || "",
+//       movedAt: new Date(),
+//       notes: `Order details edited by ${editedBy}`,
+//     });
+
+//     await order.save();
+//     return successResponse(res, "Order updated successfully", { orderId: order.orderId, order });
+//   } catch (error) {
+//     return errorResponse(res, error.message);
+//   }
+// };
+
+
+
+// exports.getAllOrders = async (req, res) => {
+//   try {
+//     const { pipelineStatus, orderStatus, search, page = 1, limit = 50 } = req.query;
+//     const filter = {};
+//     if (pipelineStatus && pipelineStatus !== "all") filter.pipelineStatus = pipelineStatus;
+//     if (orderStatus && orderStatus !== "all") filter.orderStatus = orderStatus;
+//     if (search && search.trim().length >= 2) {
+//       const q = search.trim();
+//       filter.$or = [
+//         { orderId: { $regex: q, $options: "i" } },
+//         { name: { $regex: q, $options: "i" } },
+//         { phone: { $regex: q, $options: "i" } },
+//       ];
+//     }
+//     const skip = (Number(page) - 1) * Number(limit);
+//     const total = await Order.countDocuments(filter);
+//     const orders = await Order.find(filter)
+//       .sort({ createdAt: -1 })
+//       .skip(skip)
+//       .limit(Number(limit))
+//       .select(
+//         "orderId name phone address email customerType " +
+//         "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
+//         "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
+//         "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
+//         "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues  "
+//       );
+//     return successResponse(res, "Orders fetched successfully", {
+//       total, page: Number(page), totalPages: Math.ceil(total / Number(limit)), orders,
+//     });
+//   } catch (error) {
+//     return errorResponse(res, error.message);
+//   }
+// };
+
 exports.updateAdminOrder = async (req, res) => {
   try {
     const { id } = req.params;
@@ -363,7 +619,6 @@ exports.updateAdminOrder = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-   
     const LOCKED_STAGES = ["closedWon", "projectCodeCreation", "closedLost"];
     if (LOCKED_STAGES.includes(order.salesPipelineStatus)) {
       return errorResponse(
@@ -398,6 +653,20 @@ exports.updateAdminOrder = async (req, res) => {
       if (!customerEmail?.trim()) return errorResponse(res, "Email is required", null, 400);
       if (!gstNumber?.trim()) return errorResponse(res, "GST number is required", null, 400);
     }
+
+    // ── snapshot BEFORE any mutation (for Edit History diff) ──────────────
+    const oldCustomerSnapshot = {
+      name: order.name,
+      phone: order.phone,
+      address: order.address,
+      email: order.email,
+      companyName: order.companyName,
+      clientName: order.clientName,
+      designation: order.designation,
+      gstNumber: order.gstNumber,
+    };
+    const oldBookingItemsSnapshot = JSON.parse(JSON.stringify(order.bookingItems || []));
+    // ────────────────────────────────────────────────────────────────────
 
     // ── Parse vehicles ──
     const vehicles = [];
@@ -557,7 +826,7 @@ exports.updateAdminOrder = async (req, res) => {
     }
 
     // ── Audit log ──
-    const editedBy = req.user?.username || "Admin";
+    const editedBy = order.salesHandlerName || req.user?.username || "Admin";
     order.salesPipelineLogs.push({
       fromStage: order.salesPipelineStatus,
       toStage: order.salesPipelineStatus,
@@ -567,49 +836,149 @@ exports.updateAdminOrder = async (req, res) => {
       notes: `Order details edited by ${editedBy}`,
     });
 
+    // ── Build field-level Edit History (customer diff) ─────────────────────
+    const FIELD_LABELS = {
+      name: "Customer Name",
+      phone: "Phone",
+      address: "Address",
+      email: "Email",
+      companyName: "Company Name",
+      clientName: "Client Name",
+      designation: "Designation",
+      gstNumber: "GST Number",
+    };
+
+    const customerChanges = [];
+    Object.keys(FIELD_LABELS).forEach((key) => {
+      const oldVal = oldCustomerSnapshot[key] || "";
+      const newVal = order[key] || "";
+      if (String(oldVal) !== String(newVal)) {
+        customerChanges.push({
+          field: FIELD_LABELS[key],
+          oldValue: oldVal,
+          newValue: newVal,
+        });
+      }
+    });
+
+    // ── Vehicle-level diff (modified / added / removed with FULL details) ──
+    const VEHICLE_FIELD_LABELS = {
+       vehicleType: "Vehicle Type",
+      bookingFor: "Booking For",
+      campaignName: "Campaign Name",
+      campaignType: "Campaign Type",
+      otherCampaignType: "Other Campaign Type",
+      fromDate: "From Date",
+      toDate: "To Date",
+      state: "State",
+      city: "City",
+      fromLocation: "From Location",
+      toLocation: "To Location",
+      quantity: "Quantity",
+      extraKm: "Extra KM",
+      extraDays: "Extra Days",
+      extraHours: "Extra Hours",
+      needPromoter: "Need Promoter",
+      promoterType: "Promoter Type",
+      promoterGender: "Promoter Gender",
+      promoterQuantity: "Promoter Quantity",
+      gstNumber: "GST Number",
+      totalAmount: "Total Amount",
+    };
+
+    const formatVal = (key, val) => {
+      if (val === undefined || val === null) return "";
+      if (key.toLowerCase().includes("date")) {
+        return val ? new Date(val).toISOString().slice(0, 10) : "";
+      }
+      if (typeof val === "boolean") return val;
+      return val;
+    };
+
+   const buildVehicleLabel = (v) =>
+  `${v.campaignName || "Campaign"}${v.city ? " · " + v.city : ""}`;
+
+    const vehicleChanges = [];
+    const maxLen = Math.max(oldBookingItemsSnapshot.length, bookingItems.length);
+
+    for (let i = 0; i < maxLen; i++) {
+      const oldV = oldBookingItemsSnapshot[i];
+      const newV = bookingItems[i];
+
+      // ── Vehicle REMOVED: dump full old details ──
+      if (oldV && !newV) {
+        const changes = Object.keys(VEHICLE_FIELD_LABELS)
+          .map((key) => ({
+            field: VEHICLE_FIELD_LABELS[key],
+            oldValue: formatVal(key, oldV[key]),
+            newValue: null,
+          }))
+          .filter((c) => c.oldValue !== "" && c.oldValue !== undefined);
+
+        vehicleChanges.push({
+          vehicleIndex: i,
+          action: "removed",
+          vehicleLabel: buildVehicleLabel(oldV),
+          changes,
+        });
+        continue;
+      }
+
+      // ── Vehicle ADDED: dump full new details ──
+      if (!oldV && newV) {
+        const changes = Object.keys(VEHICLE_FIELD_LABELS)
+          .map((key) => ({
+            field: VEHICLE_FIELD_LABELS[key],
+            oldValue: null,
+            newValue: formatVal(key, newV[key]),
+          }))
+          .filter((c) => c.newValue !== "" && c.newValue !== undefined);
+
+        vehicleChanges.push({
+          vehicleIndex: i,
+          action: "added",
+          vehicleLabel: buildVehicleLabel(newV),
+          changes,
+        });
+        continue;
+      }
+
+      // ── Vehicle MODIFIED: only changed fields ──
+      const changes = [];
+      Object.keys(VEHICLE_FIELD_LABELS).forEach((key) => {
+        const ov = formatVal(key, oldV[key]);
+        const nv = formatVal(key, newV[key]);
+        if (String(ov ?? "") !== String(nv ?? "")) {
+          changes.push({ field: VEHICLE_FIELD_LABELS[key], oldValue: ov, newValue: nv });
+        }
+      });
+
+      if (changes.length > 0) {
+        vehicleChanges.push({
+          vehicleIndex: i,
+          action: "modified",
+          vehicleLabel: buildVehicleLabel(newV),
+          changes,
+        });
+      }
+    }
+
+    if (customerChanges.length > 0 || vehicleChanges.length > 0) {
+      order.orderEditHistory.push({
+        editedBy,
+        editedAt: new Date(),
+        customerChanges,
+        vehicleChanges,
+      });
+    }
+    // ───────────────────────────────────────────────────────────────────
+
     await order.save();
     return successResponse(res, "Order updated successfully", { orderId: order.orderId, order });
   } catch (error) {
     return errorResponse(res, error.message);
   }
 };
-
-
-
-// exports.getAllOrders = async (req, res) => {
-//   try {
-//     const { pipelineStatus, orderStatus, search, page = 1, limit = 50 } = req.query;
-//     const filter = {};
-//     if (pipelineStatus && pipelineStatus !== "all") filter.pipelineStatus = pipelineStatus;
-//     if (orderStatus && orderStatus !== "all") filter.orderStatus = orderStatus;
-//     if (search && search.trim().length >= 2) {
-//       const q = search.trim();
-//       filter.$or = [
-//         { orderId: { $regex: q, $options: "i" } },
-//         { name: { $regex: q, $options: "i" } },
-//         { phone: { $regex: q, $options: "i" } },
-//       ];
-//     }
-//     const skip = (Number(page) - 1) * Number(limit);
-//     const total = await Order.countDocuments(filter);
-//     const orders = await Order.find(filter)
-//       .sort({ createdAt: -1 })
-//       .skip(skip)
-//       .limit(Number(limit))
-//       .select(
-//         "orderId name phone address email customerType " +
-//         "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
-//         "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
-//         "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
-//         "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues  "
-//       );
-//     return successResponse(res, "Orders fetched successfully", {
-//       total, page: Number(page), totalPages: Math.ceil(total / Number(limit)), orders,
-//     });
-//   } catch (error) {
-//     return errorResponse(res, error.message);
-//   }
-// };
 
 
 exports.getAllOrders = async (req, res) => {
@@ -705,7 +1074,7 @@ exports.getAllOrders = async (req, res) => {
   "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
   "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray " +
   "projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray " +
-  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray" 
+  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray orderEditHistory" 
 );
 
     return successResponse(res, "Orders fetched successfully", {
@@ -768,7 +1137,7 @@ exports.getOrdersByPipeline = async (req, res) => {
   "companyName clientName designation email address gstNumber customerCategory " +
   "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy " +
   "onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray " +
-  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray"   
+  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray orderEditHistory"   
 );
 
     const filteredOrders = orders.filter(
@@ -1039,9 +1408,9 @@ exports.submitOnRoadDetails = async (req, res) => {
     const requiredQty = bookingItem?.quantity || 1;
 
 
-    const savedForThisVehicle = order.onRoadExecutionArray.filter(
-      e => e.vehicleIndex === vIdx
-    );
+  const savedForThisVehicle = order.onRoadExecutionArray.filter(
+  e => e.vehicleIndex === vIdx && e.entryStatus !== "removed"
+);
 
     if (savedForThisVehicle.length >= requiredQty) {
       order.onRoadExecutionArray.forEach(e => {
@@ -2393,3 +2762,70 @@ exports.addExtraKmDetails = async (req, res) => {
     return errorResponse(res, error.message, null, 500);
   }
 };
+
+exports.releaseOnRoadVehicle = async (req, res) => {
+  try {
+    const { id, entryId } = req.params;
+    const { reason } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const entry = order.onRoadExecutionArray.id(entryId);
+    if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
+
+    if (entry.entryStatus === "removed") {
+      return errorResponse(res, "This vehicle is already released", null, 400);
+    }
+
+    const releasedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+   
+    entry.entryStatus = "removed";
+    // entry.onRoadStatus = 0; 
+    entry.removedAt = new Date();
+    entry.removedBy = releasedBy;
+    entry.removalReason = (reason || "").trim();
+
+    // 2. History log — "removed" action
+    order.onRoadDriverHistory.push({
+      vehicleIndex: entry.vehicleIndex,
+      entryId: entry._id,
+      action: "removed",
+      driverName: entry.driverName,
+      driverPhone: entry.driverPhone,
+      vehicleRegistrationNumber: entry.vehicleRegistrationNumber,
+      changedBy: releasedBy,
+      changedAt: new Date(),
+      changedFields: { reason: (reason || "").trim() },
+    });
+
+    await order.save();
+
+    // 3. Release the vehicle back to Vehicle Master pool (so it's bookable again)
+    try {
+      await VehicleMaster.updateOne(
+        { "registrationVehicles.registrationNumber": entry.vehicleRegistrationNumber },
+        {
+          $set: {
+            "registrationVehicles.$.statusAvailability.currentStatus": "Available",
+            "registrationVehicles.$.statusAvailability.orderId": "",
+            "registrationVehicles.$.statusAvailability.orderDisplayId": "",
+            "registrationVehicles.$.statusAvailability.fromDate": null,
+            "registrationVehicles.$.statusAvailability.toDate": null,
+          },
+        }
+      );
+    } catch (err) {
+      console.error(`Failed to release vehicle ${entry.vehicleRegistrationNumber}:`, err.message);
+    }
+
+    return successResponse(res, "Vehicle released from campaign successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+

@@ -18,7 +18,8 @@ const {
   getVehicleGroupByType,
   updateVehicleStep,
   checkAvailability,
-updateRegistrationVehicleByRegNo
+updateRegistrationVehicleByRegNo,
+
 } = require("../../controllers/VehicleDetailsController/vehicledetails");
 
 const vehicleUpload = require("../../Middleware/vehicleDetailsUpload");
@@ -51,7 +52,7 @@ router.get("/getVehicleGroupByType/:typeId", getVehicleGroupByType);
 // Statistics
 router.get("/statistics", getVehicleStatistics);
 //STEP STATUS
-// router.put("/updateVehicleStep/:id", updateVehicleStep);
+
 router.put("/updateVehicleStep/:id", vehicleUpload, updateVehicleStep);
 
 

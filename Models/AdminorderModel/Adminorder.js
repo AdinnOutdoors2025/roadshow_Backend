@@ -130,6 +130,36 @@ const onRoadExtraKmSchema = new mongoose.Schema({
 }, { _id: true });
 
 
+
+const orderFieldChangeSchema = new mongoose.Schema(
+  {
+    field: { type: String, required: true },      // e.g. "Customer Name"
+    oldValue: { type: mongoose.Schema.Types.Mixed, default: null },
+    newValue: { type: mongoose.Schema.Types.Mixed, default: null },
+  },
+  { _id: false }
+);
+
+const vehicleChangeSchema = new mongoose.Schema(
+  {
+    vehicleIndex: { type: Number, required: true },
+    action: { type: String, enum: ["modified", "added", "removed"], default: "modified" },
+    vehicleLabel: { type: String, default: "" },   // ← NEW: e.g. "2 Sided LED Models · Thoubal"
+    changes: { type: [orderFieldChangeSchema], default: [] },
+  },
+  { _id: false }
+);
+
+const orderEditHistorySchema = new mongoose.Schema(
+  {
+    editedBy: { type: String, default: "" },
+    editedAt: { type: Date, default: Date.now },
+    customerChanges: { type: [orderFieldChangeSchema], default: [] },
+    vehicleChanges: { type: [vehicleChangeSchema], default: [] },
+  },
+  { _id: true }
+);
+
 const projectExecutionDocSchema = new mongoose.Schema(
   {
     document: { type: String, default: "" },
@@ -243,6 +273,7 @@ const onRoadUnavailableHistorySchema = new mongoose.Schema({
 }, { _id: true });
 
 
+
 const onRoadIssueSchema = new mongoose.Schema({
   vehicleIndex: { type: Number, required: true },
   entryId: { type: mongoose.Schema.Types.ObjectId, default: null },
@@ -289,8 +320,8 @@ const projectMailLogSchema = new mongoose.Schema(
 
 const onRoadDriverHistorySchema = new mongoose.Schema({
   vehicleIndex: { type: Number, required: true },
-  entryId: { type: mongoose.Schema.Types.ObjectId, default: null },   // ← NEW
-  action: { type: String, enum: ["created", "updated"], default: "created" },
+  entryId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  action: { type: String, enum: ["created", "updated", "removed"], default: "created" }, // ← "removed" added
   driverName: { type: String, default: "" },
   driverPhone: { type: String, default: "" },
   vehicleRegistrationNumber: { type: String, default: "" },
@@ -299,7 +330,6 @@ const onRoadDriverHistorySchema = new mongoose.Schema({
   changedAt: { type: Date, default: Date.now },
   changedFields: { type: Object, default: {} },
 }, { _id: true });
-
 
 const clientFeedbackSchema = new mongoose.Schema({
   bookingItemId: { type: mongoose.Schema.Types.ObjectId, default: null }, // ADD THIS
@@ -540,23 +570,31 @@ const orderSchema = new mongoose.Schema(
 
     driverLocationArray: { type: [driverLocationSchema], default: [] },
 
-    onRoadExecutionArray: [
-      {
-        vehicleIndex: { type: Number, required: true },
-        driverName: { type: String, required: true, default: "" },
-        driverPhone: { type: String, required: true, default: "" },
-        vehicleRegistrationNumber: { type: String, required: true, default: "" },
-        gatepassPhoto: { type: String, default: "" },
-        onRoadStatus: { type: Number, enum: [0, 1], default: 0 },
-        uploadedBy: { type: String, default: "" },
-        uploadedAt: { type: Date, default: Date.now },
-        unavailableStatus: { type: Boolean, default: false },
-        unavailableReason: { type: String, default: "" },
-      }
-    ],
+   onRoadExecutionArray: [
+  {
+    vehicleIndex: { type: Number, required: true },
+    driverName: { type: String, required: true, default: "" },
+    driverPhone: { type: String, required: true, default: "" },
+    vehicleRegistrationNumber: { type: String, required: true, default: "" },
+    gatepassPhoto: { type: String, default: "" },
+    onRoadStatus: { type: Number, enum: [0, 1], default: 0 },
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+    unavailableStatus: { type: Boolean, default: false },
+    unavailableReason: { type: String, default: "" },
 
+    // ── NEW: for release/remove feature ──
+    entryStatus: { type: String, enum: ["active", "removed"], default: "active" },
+    removedAt: { type: Date, default: null },
+    removedBy: { type: String, default: "" },
+    removalReason: { type: String, default: "" },
+     removalStatus: { type: String, default: "" },
+  }
+],
 
+orderEditHistory: { type: [orderEditHistorySchema], default: [] },
     onRoadUnavailableHistory: { type: [onRoadUnavailableHistorySchema], default: [] },
+    
     onRoadHistory: { type: [onRoadHistorySchema], default: [] },
     onRoadIssues: { type: [onRoadIssueSchema], default: [] },
     onRoadDriverHistory: { type: [onRoadDriverHistorySchema], default: [] },

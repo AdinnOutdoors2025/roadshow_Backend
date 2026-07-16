@@ -57,19 +57,16 @@ const registrationVehicleSchema = new mongoose.Schema(
     //   remarks: { type: String, default: "" },
     // },
     statusAvailability: {
-      currentStatus: {
-        type: String,
-        // enum: ["Waiting for Status", "Available", "Unavailable", "Maintenance", "Booked", "Running", "Damaged"],
-        default: "Waiting for Status",
-      },
-      statusPriority: {
-        type: Number,
-        default: 0,  // 0 = Waiting for Status
-      },
+      currentStatus: { type: String, default: "Waiting for Status" },
       availableFrom: { type: Date, default: null },
       remarks: { type: String, default: "" },
+      statusPriority: { type: Number, default: 0 },
+
+
       fromDate: { type: Date, default: null },
       toDate: { type: Date, default: null },
+      orderId: { type: String, default: "" },
+      orderDisplayId: { type: String, default: "" },
     },
 
     // Maintenance Details
