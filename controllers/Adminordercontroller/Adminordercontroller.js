@@ -1405,12 +1405,19 @@ exports.submitOnRoadDetails = async (req, res) => {
 
     const vIdx = Number(vehicleIndex);
     const bookingItem = order.bookingItems[vIdx];
+
+    const savedForThisVehicle = order.onRoadExecutionArray.filter(
+      e => e.vehicleIndex === vIdx && e.entryStatus !== "removed"
+    );
+
+    // Adding a vehicle beyond the originally booked quantity bumps the
+    // booking's quantity to match, so drivers/quantity ratios (and
+    // downstream billing in Campaign Calculator) stay consistent.
+    if (bookingItem && savedForThisVehicle.length > (bookingItem.quantity || 1)) {
+      bookingItem.quantity = savedForThisVehicle.length;
+    }
+
     const requiredQty = bookingItem?.quantity || 1;
-
-
-  const savedForThisVehicle = order.onRoadExecutionArray.filter(
-  e => e.vehicleIndex === vIdx && e.entryStatus !== "removed"
-);
 
     if (savedForThisVehicle.length >= requiredQty) {
       order.onRoadExecutionArray.forEach(e => {
@@ -2554,6 +2561,7 @@ exports.submitOrderClosedWon = async (req, res) => {
       uploadedAt: new Date(),
     });
 
+    const RELEASE_VEHICLE_FROM_STAGES = ["projectExecution", "onRoad", "clientClosure"];
     const oldStage = order.pipelineStatus;
     order.pipelineStatus = "closedWon";
     order.pipelineLogs.push({
@@ -2565,19 +2573,21 @@ exports.submitOrderClosedWon = async (req, res) => {
 
     await order.save();
 
+    if (RELEASE_VEHICLE_FROM_STAGES.includes(oldStage)) {
+      const regNumbers = (order.onRoadExecutionArray || [])
+        .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
+        .map((e) => e.vehicleRegistrationNumber)
+        .filter(Boolean);
 
-    const regNumbers = (order.onRoadExecutionArray || [])
-      .map((e) => e.vehicleRegistrationNumber)
-      .filter(Boolean);
-
-    for (const regNo of regNumbers) {
-      try {
-        await VehicleMaster.updateOne(
-          { "registrationVehicles.registrationNumber": regNo },
-          { $set: { "registrationVehicles.$.statusAvailability.currentStatus": "Available" } }
-        );
-      } catch (err) {
-        console.error(`Failed to release vehicle ${regNo}:`, err.message);
+      for (const regNo of regNumbers) {
+        try {
+          await VehicleMaster.updateOne(
+            { "registrationVehicles.registrationNumber": regNo },
+            { $set: { "registrationVehicles.$.statusAvailability.currentStatus": "Available" } }
+          );
+        } catch (err) {
+          console.error(`Failed to release vehicle ${regNo}:`, err.message);
+        }
       }
     }
 
@@ -2638,6 +2648,7 @@ exports.submitOrderClosedLost = async (req, res) => {
 
     if (RELEASE_VEHICLE_FROM_STAGES.includes(oldStage)) {
       const regNumbers = (order.onRoadExecutionArray || [])
+        .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
         .map((e) => e.vehicleRegistrationNumber)
         .filter(Boolean);
 
