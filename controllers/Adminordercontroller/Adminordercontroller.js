@@ -1847,7 +1847,7 @@ exports.editOnRoadDetails = async (req, res) => {
 exports.markVehicleUnavailable = async (req, res) => {
   try {
     const { id } = req.params;
-    const { vehicleIndex, vehicleRegistrationNumber, reason } = req.body;
+    const { vehicleIndex, vehicleRegistrationNumber, entryId, reason } = req.body;
 
     if (!reason?.trim())
       return errorResponse(res, "Reason is required", null, 400);
@@ -1855,10 +1855,20 @@ exports.markVehicleUnavailable = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-    const entry = order.onRoadExecutionArray.find(
-      (e) => e.vehicleRegistrationNumber === vehicleRegistrationNumber?.trim()?.toUpperCase()
-    );
+    const regNoUpper = vehicleRegistrationNumber?.trim()?.toUpperCase();
+    const entry = entryId
+      ? order.onRoadExecutionArray.id(entryId)
+      : order.onRoadExecutionArray.find(
+          (e) =>
+            e.vehicleRegistrationNumber === regNoUpper &&
+            e.entryStatus !== "removed" &&
+            !e.unavailableStatus
+        );
     if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
+    if (entry.entryStatus === "removed")
+      return errorResponse(res, "This vehicle entry has already been released", null, 400);
+    if (entry.unavailableStatus)
+      return errorResponse(res, "This vehicle is already marked unavailable", null, 400);
 
     const reportedBy =
       Number(req.user.isAdmin) === 0
@@ -1879,11 +1889,14 @@ exports.markVehicleUnavailable = async (req, res) => {
 
     order.onRoadUnavailableHistory.push({
       vehicleIndex: entry.vehicleIndex,
+      entryId: entry._id,
       vehicleRegNo: entry.vehicleRegistrationNumber,
       driverName: entry.driverName,
+      driverPhone: entry.driverPhone,
       reason: reason.trim(),
       photo: photoUrl,
       status: "unavailable",
+      eventType: "unavailable",
       reportedBy,
       reportedAt: new Date(),
       resolvedBy: "",
@@ -1891,7 +1904,178 @@ exports.markVehicleUnavailable = async (req, res) => {
     });
 
     await order.save();
+
+    // Sync Vehicle Master inventory so this reg no. is no longer assignable
+    try {
+      await VehicleMaster.updateOne(
+        { "registrationVehicles.registrationNumber": entry.vehicleRegistrationNumber },
+        {
+          $set: {
+            "registrationVehicles.$.statusAvailability.currentStatus": "Unavailable",
+            "registrationVehicles.$.statusAvailability.remarks": `Marked unavailable on Order ${order.orderId} — ${reason.trim()}`,
+          },
+        }
+      );
+    } catch (err) {
+      console.error(`Failed to flag vehicle ${entry.vehicleRegistrationNumber} unavailable:`, err.message);
+    }
+
     return successResponse(res, "Vehicle marked as unavailable", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+// ── Replace a broken-down on-road vehicle with another one ─────────────────
+// Releases the old vehicle (flags it unavailable + moves it into the Vehicle
+// Unavailable stage), assigns a fresh registration number to the same slot,
+// and links both sides together for full replacement history.
+exports.replaceOnRoadVehicle = async (req, res) => {
+  try {
+    const { id, entryId } = req.params;
+    const { newVehicleRegistrationNumber, reason, driverName, driverPhone } = req.body;
+
+    if (!newVehicleRegistrationNumber?.trim())
+      return errorResponse(res, "Replacement vehicle registration number is required", null, 400);
+    if (!reason?.trim())
+      return errorResponse(res, "Reason/comments are required", null, 400);
+    if (!driverName?.trim())
+      return errorResponse(res, "Driver name is required", null, 400);
+    if (!/^\d{10}$/.test(driverPhone || ""))
+      return errorResponse(res, "Enter a valid 10-digit driver phone number", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const oldEntry = order.onRoadExecutionArray.id(entryId);
+    if (!oldEntry) return errorResponse(res, "Vehicle entry not found", null, 404);
+    if (oldEntry.entryStatus === "removed") {
+      return errorResponse(res, "This vehicle has already been released", null, 400);
+    }
+    if (oldEntry.unavailableStatus) {
+      return errorResponse(res, "This vehicle is already marked unavailable", null, 400);
+    }
+
+    const newReg = newVehicleRegistrationNumber.trim().toUpperCase().replace(/\s+/g, "");
+    const oldReg = (oldEntry.vehicleRegistrationNumber || "").trim().toUpperCase().replace(/\s+/g, "");
+
+    if (newReg === oldReg) {
+      return errorResponse(res, "Replacement vehicle must be different from the current vehicle", null, 400);
+    }
+
+    const alreadyActive = order.onRoadExecutionArray.some(
+      (e) => e.entryStatus !== "removed" && e.vehicleRegistrationNumber === newReg
+    );
+    if (alreadyActive) {
+      return errorResponse(res, "That vehicle is already assigned on this order", null, 400);
+    }
+
+    const performedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const now = new Date();
+    const reasonTrim = reason.trim();
+
+    // 1. Old entry → mark unavailable (kept visible/active on the roster, just flagged)
+    oldEntry.unavailableStatus = true;
+    oldEntry.unavailableReason = reasonTrim;
+
+    // 2. New entry → same slot, new (or re-entered) driver, new registration number
+    order.onRoadExecutionArray.push({
+      vehicleIndex: oldEntry.vehicleIndex,
+      driverName: driverName.trim(),
+      driverPhone: driverPhone.trim(),
+      vehicleRegistrationNumber: newReg,
+      onRoadStatus: oldEntry.onRoadStatus,
+      uploadedBy: performedBy,
+      uploadedAt: now,
+      entryStatus: "active",
+    });
+    const newEntry = order.onRoadExecutionArray[order.onRoadExecutionArray.length - 1];
+
+    // 3. Driver/vehicle history — mirrors the "release + add" pattern used elsewhere
+    order.onRoadDriverHistory.push({
+      vehicleIndex: oldEntry.vehicleIndex,
+      entryId: oldEntry._id,
+      action: "removed",
+      driverName: oldEntry.driverName,
+      driverPhone: oldEntry.driverPhone,
+      vehicleRegistrationNumber: oldEntry.vehicleRegistrationNumber,
+      changedBy: performedBy,
+      changedAt: now,
+      changedFields: { reason: reasonTrim, replacedBy: newReg },
+    });
+    order.onRoadDriverHistory.push({
+      vehicleIndex: oldEntry.vehicleIndex,
+      entryId: newEntry._id,
+      action: "created",
+      driverName: newEntry.driverName,
+      driverPhone: newEntry.driverPhone,
+      vehicleRegistrationNumber: newEntry.vehicleRegistrationNumber,
+      changedBy: performedBy,
+      changedAt: now,
+      changedFields: { reason: reasonTrim, replacementFor: oldEntry.vehicleRegistrationNumber },
+    });
+
+    // 4. Single combined Vehicle Unavailable record holding BOTH old + new vehicle details
+    order.onRoadUnavailableHistory.push({
+      vehicleIndex: oldEntry.vehicleIndex,
+      entryId: oldEntry._id,
+      vehicleRegNo: oldEntry.vehicleRegistrationNumber,
+      driverName: oldEntry.driverName,
+      driverPhone: oldEntry.driverPhone,
+      reason: reasonTrim,
+      status: "unavailable",
+      eventType: "replaced",
+      replacementEntryId: newEntry._id,
+      replacementVehicleRegNo: newReg,
+      replacementDriverName: newEntry.driverName,
+      replacementDriverPhone: newEntry.driverPhone,
+      replacedAt: now,
+      reportedBy: performedBy,
+      reportedAt: now,
+    });
+
+    await order.save();
+
+    // 5. Sync Vehicle Master inventory: old vehicle → Unavailable, new vehicle → Booked
+    try {
+      await VehicleMaster.updateOne(
+        { "registrationVehicles.registrationNumber": oldReg },
+        {
+          $set: {
+            "registrationVehicles.$.statusAvailability.currentStatus": "Unavailable",
+            "registrationVehicles.$.statusAvailability.remarks": `Replaced on Order ${order.orderId} — ${reasonTrim}`,
+          },
+        }
+      );
+    } catch (err) {
+      console.error(`Failed to flag old vehicle ${oldReg} unavailable:`, err.message);
+    }
+
+    try {
+      const bookingItem = order.bookingItems?.[oldEntry.vehicleIndex];
+      const normalizeDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+      await VehicleMaster.updateOne(
+        { "registrationVehicles.registrationNumber": newReg },
+        {
+          $set: {
+            "registrationVehicles.$.statusAvailability.currentStatus": "Booked",
+            "registrationVehicles.$.statusAvailability.fromDate": normalizeDate(bookingItem?.fromDate),
+            "registrationVehicles.$.statusAvailability.toDate": normalizeDate(bookingItem?.toDate),
+            "registrationVehicles.$.statusAvailability.remarks": `Replacement vehicle for Order ${order.orderId} - ${order.name || "Customer"}`,
+            "registrationVehicles.$.statusAvailability.orderId": order._id.toString(),
+            "registrationVehicles.$.statusAvailability.orderDisplayId": order.orderId || "",
+          },
+        }
+      );
+    } catch (err) {
+      console.error(`Failed to book replacement vehicle ${newReg}:`, err.message);
+    }
+
+    return successResponse(res, "Vehicle replaced successfully", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
@@ -1928,15 +2112,32 @@ exports.markVehicleAvailable = async (req, res) => {
     history.resolveDescription = (resolveDescription || "").trim();
     history.resolvePhoto = photoUrl;
 
-    const entry = order.onRoadExecutionArray.find(
-      (e) => e.vehicleRegistrationNumber === history.vehicleRegNo
-    );
+    const entry = history.entryId
+      ? order.onRoadExecutionArray.id(history.entryId)
+      : order.onRoadExecutionArray.find(
+          (e) => e.vehicleRegistrationNumber === history.vehicleRegNo
+        );
     if (entry) {
       entry.unavailableStatus = false;
       entry.unavailableReason = "";
     }
 
     await order.save();
+
+    try {
+      await VehicleMaster.updateOne(
+        { "registrationVehicles.registrationNumber": history.vehicleRegNo },
+        {
+          $set: {
+            "registrationVehicles.$.statusAvailability.currentStatus": "Booked",
+            "registrationVehicles.$.statusAvailability.remarks": `Resumed on Order ${order.orderId} — ${(resolveDescription || "").trim()}`,
+          },
+        }
+      );
+    } catch (err) {
+      console.error(`Failed to restore vehicle ${history.vehicleRegNo} status:`, err.message);
+    }
+
     return successResponse(res, "Vehicle marked as available", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
@@ -2824,6 +3025,601 @@ exports.releaseOnRoadVehicle = async (req, res) => {
     }
 
     return successResponse(res, "Vehicle released from campaign successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+// ── Campaign Calculator ────────────────────────────────────────────────────
+// Pure read-only derivation from existing data (onRoadExecutionArray,
+// onRoadDriverHistory, extraKmDetailsArray) — no new persisted state.
+// Gives a day-by-day, vehicle-wise billing breakdown for a running campaign.
+
+const dateKey = (d) => new Date(d).toISOString().slice(0, 10);
+
+function addDaysUTC(dateKeyStr, days) {
+  const d = new Date(dateKeyStr + "T00:00:00.000Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return dateKey(d);
+}
+
+// Replays onRoadDriverHistory events for one entry to find its
+// driver/registration state as of a given day, and whether it was
+// active (created & not yet removed) on that day.
+function resolveEntryStateForDay(entry, historyForEntry, dayKey) {
+  const eventsUpToDay = historyForEntry.filter((h) => dateKey(h.changedAt) <= dayKey);
+  if (eventsUpToDay.length === 0) return null; // not created yet as of this day
+
+  let state = null;
+  let removed = false;
+  let createdOnThisDay = false;
+  let releasedOnThisDay = false;
+
+  for (const ev of historyForEntry) {
+    const evKey = dateKey(ev.changedAt);
+    if (evKey > dayKey) break;
+
+    if (ev.action === "created") {
+      state = {
+        driverName: ev.driverName,
+        driverPhone: ev.driverPhone,
+        vehicleRegistrationNumber: ev.vehicleRegistrationNumber,
+      };
+      removed = false;
+      if (evKey === dayKey) createdOnThisDay = true;
+    } else if (ev.action === "updated" && state) {
+      const cf = ev.changedFields || {};
+      if (cf.driverName?.new !== undefined) state.driverName = cf.driverName.new;
+      if (cf.driverPhone?.new !== undefined) state.driverPhone = cf.driverPhone.new;
+      if (cf.vehicleRegistrationNumber?.new !== undefined) {
+        state.vehicleRegistrationNumber = cf.vehicleRegistrationNumber.new;
+      }
+    } else if (ev.action === "removed") {
+      removed = true;
+      if (evKey === dayKey) releasedOnThisDay = true;
+    }
+  }
+
+  if (!state || removed) return removed ? { removed: true, releasedOnThisDay } : null;
+
+  return {
+    entryId: String(entry._id),
+    driverName: state.driverName,
+    driverPhone: state.driverPhone,
+    vehicleRegistrationNumber: state.vehicleRegistrationNumber,
+    createdOnThisDay,
+    // "replacement" = this slot's vehicle was created after the campaign's
+    // own start date, i.e. it filled in mid-campaign rather than at kickoff.
+    isReplacement: false, // set by caller once campaignStart is known
+  };
+}
+
+// Among overlapping extra-km/hour submissions for the same entry, only the
+// most recently added one counts toward billing — older ones stay in history.
+function pickActiveExtraKmEntries(extraKmDetailsArray, entryId) {
+  const forEntry = extraKmDetailsArray
+    .filter((e) => e.entryId && String(e.entryId) === String(entryId))
+    .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt)); // newest first
+
+  const active = [];
+  const coveredRanges = []; // [fromKey, toKey] already claimed by a newer entry
+
+  for (const e of forEntry) {
+    const fromK = dateKey(e.fromDate);
+    const toK = dateKey(e.toDate);
+    const overlapsCovered = coveredRanges.some(
+      ([cf, ct]) => fromK <= ct && toK >= cf
+    );
+    if (!overlapsCovered) {
+      active.push(e);
+      coveredRanges.push([fromK, toK]);
+    }
+  }
+  return active;
+}
+
+exports.getCampaignCalculator = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await Order.findById(id).lean();
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const bookingItems = order.bookingItems || [];
+    if (bookingItems.length === 0) {
+      return errorResponse(res, "This order has no vehicles to calculate", null, 400);
+    }
+
+    const onRoadExecutionArray = order.onRoadExecutionArray || [];
+    const onRoadDriverHistory = order.onRoadDriverHistory || [];
+    const extraKmDetailsArray = order.extraKmDetailsArray || [];
+
+    const campaignStart = bookingItems
+      .map((b) => dateKey(b.fromDate))
+      .sort()[0];
+    const campaignEnd = bookingItems
+      .map((b) => dateKey(b.toDate))
+      .sort()
+      .slice(-1)[0];
+
+    if (!campaignStart || !campaignEnd) {
+      return errorResponse(res, "Campaign dates are missing on this order", null, 400);
+    }
+
+    // Pre-group history + extras by entryId for fast lookup per day.
+    const historyByEntry = {};
+    for (const h of onRoadDriverHistory) {
+      const key = h.entryId ? String(h.entryId) : `vi-${h.vehicleIndex}`;
+      (historyByEntry[key] = historyByEntry[key] || []).push(h);
+    }
+    Object.values(historyByEntry).forEach((arr) =>
+      arr.sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt))
+    );
+
+    const bookingItemsMeta = bookingItems.map((b, idx) => ({
+      vehicleIndex: idx,
+      vehicleType: b.vehicleType,
+      vehicleModel: b.vehicleModel,
+      quantity: b.quantity || 0,
+      fromDate: b.fromDate,
+      toDate: b.toDate,
+      totalDays: b.totalDays || 0,
+      perDayRentalCost: b.perDayRentalCost || 0,
+      driverCharges: b.driverCharges || 0,
+      rtoCost: b.rtoCost || 0,
+      needPromoter: !!b.needPromoter,
+      promoterCost: b.promoterCost || 0,
+    }));
+
+    const days = [];
+    let cumulativeTotal = 0;
+    let cursor = campaignStart;
+
+    while (cursor <= campaignEnd) {
+      const dayKey = cursor;
+      const vehicles = [];
+      let dayTotal = 0;
+
+      bookingItems.forEach((item, vehicleIndex) => {
+        const itemFrom = dateKey(item.fromDate);
+        const itemTo = dateKey(item.toDate);
+        if (dayKey < itemFrom || dayKey > itemTo) return; // this vehicle-type's window doesn't include today
+
+        const entriesForSlot = onRoadExecutionArray.filter(
+          (e) => e.vehicleIndex === vehicleIndex
+        );
+
+        const activeEntries = [];
+        const releasedToday = [];
+
+        for (const entry of entriesForSlot) {
+          const histKey = entry._id ? String(entry._id) : `vi-${vehicleIndex}`;
+          const hist = historyByEntry[histKey] || [];
+          const resolved = resolveEntryStateForDay(entry, hist, dayKey);
+          if (!resolved) continue;
+          if (resolved.removed) {
+            if (resolved.releasedOnThisDay) releasedToday.push(entry.vehicleRegistrationNumber);
+            continue;
+          }
+          // Mark as replacement if this entry's very first ("created") event
+          // happened after the vehicle-type's own campaign start date.
+          const createdEvent = hist.find((h) => h.action === "created");
+          resolved.isReplacement = !!(createdEvent && dateKey(createdEvent.changedAt) > itemFrom);
+          activeEntries.push(resolved);
+        }
+
+        const activeCount = activeEntries.length;
+        const baseDailyRate = (item.perDayRentalCost || 0) + (item.driverCharges || 0);
+        const dailyVehicleAmount = activeCount * baseDailyRate;
+
+        let extraKmCost = 0;
+        let extraHourCost = 0;
+        const extraDetailsToday = [];
+        for (const entry of activeEntries) {
+          const picked = pickActiveExtraKmEntries(extraKmDetailsArray, entry.entryId);
+          for (const p of picked) {
+            // Attribute the (one-time) extra-usage cost to the last day of
+            // its logged range, so it isn't double-counted across the range.
+            if (dateKey(p.toDate) === dayKey) {
+              extraKmCost += p.extraKmCost || 0;
+              extraHourCost += p.extraHourCost || 0;
+              extraDetailsToday.push({
+                registrationNumber: entry.vehicleRegistrationNumber,
+                extraKm: p.extraKm,
+                extraHours: p.extraHours,
+                extraKmCost: p.extraKmCost,
+                extraHourCost: p.extraHourCost,
+                loggedFor: `${dateKey(p.fromDate)} to ${dateKey(p.toDate)}`,
+                addedBy: p.addedBy,
+              });
+            }
+          }
+        }
+
+        const rtoAppliedToday = dayKey === itemFrom ? item.rtoCost || 0 : 0;
+
+        const promoterAmountToday =
+          item.needPromoter && item.totalDays
+            ? Math.round(((item.promoterCost || 0) / item.totalDays) * 100) / 100
+            : 0;
+
+        const itemDayTotal =
+          dailyVehicleAmount + extraKmCost + extraHourCost + rtoAppliedToday + promoterAmountToday;
+
+        dayTotal += itemDayTotal;
+
+        vehicles.push({
+          vehicleIndex,
+          vehicleType: item.vehicleType,
+          vehicleModel: item.vehicleModel,
+          bookedQuantity: item.quantity || 0,
+          activeCount,
+          entries: activeEntries,
+          releasedToday,
+          baseDailyRate,
+          dailyVehicleAmount,
+          extraKmCost,
+          extraHourCost,
+          extraDetailsToday,
+          rtoAppliedToday,
+          promoterAmountToday,
+          itemDayTotal,
+        });
+      });
+
+      cumulativeTotal += dayTotal;
+
+      days.push({
+        date: dayKey,
+        vehicles,
+        dayTotal: Math.round(dayTotal * 100) / 100,
+        cumulativeTotal: Math.round(cumulativeTotal * 100) / 100,
+      });
+
+      cursor = addDaysUTC(cursor, 1);
+    }
+
+    const grandTotal = days.length ? days[days.length - 1].cumulativeTotal : 0;
+    const orderTaxableAmount =
+      order.taxableAmount ?? bookingItems.reduce((s, b) => s + (b.totalAmount || 0), 0);
+
+    return successResponse(res, "Campaign calculator generated", {
+      orderId: order._id,
+      orderDisplayId: order.orderId,
+      campaignStart,
+      campaignEnd,
+      bookingItemsMeta,
+      days,
+      grandTotal,
+      orderTaxableAmount,
+      reconciliationDiff: Math.round((grandTotal - orderTaxableAmount) * 100) / 100,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+// ── Day-by-Day History ──────────────────────────────────────────────────
+// Flat, pre-labeled event lists for six history categories, each event
+// tagged with { day, vehicleIndex, vehicleRegistrationNumber } so the
+// frontend can filter by Vehicle Type → Registration Number → Campaign Date
+// without recomputing anything client-side.
+exports.getDayByDayHistory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await Order.findById(id).lean();
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const bookingItems = order.bookingItems || [];
+    if (bookingItems.length === 0) {
+      return errorResponse(res, "This order has no vehicles", null, 400);
+    }
+
+    const onRoadExecutionArray = order.onRoadExecutionArray || [];
+    const onRoadDriverHistory = order.onRoadDriverHistory || [];
+    const onRoadIssues = order.onRoadIssues || [];
+    const onRoadUnavailableHistory = order.onRoadUnavailableHistory || [];
+    const extraKmDetailsArray = order.extraKmDetailsArray || [];
+
+    const campaignStart = bookingItems.map((b) => dateKey(b.fromDate)).sort()[0];
+    const campaignEnd = bookingItems.map((b) => dateKey(b.toDate)).sort().slice(-1)[0];
+
+    // ── vehicleTypes[] nav tree (level 1 + 2) ──
+    const vehicleTypes = bookingItems.map((b, vehicleIndex) => {
+      const regSet = new Set();
+      onRoadExecutionArray
+        .filter((e) => e.vehicleIndex === vehicleIndex)
+        .forEach((e) => e.vehicleRegistrationNumber && regSet.add(e.vehicleRegistrationNumber));
+      onRoadDriverHistory
+        .filter((h) => h.vehicleIndex === vehicleIndex)
+        .forEach((h) => h.vehicleRegistrationNumber && regSet.add(h.vehicleRegistrationNumber));
+      onRoadUnavailableHistory
+        .filter((h) => h.vehicleIndex === vehicleIndex)
+        .forEach((h) => {
+          if (h.vehicleRegNo) regSet.add(h.vehicleRegNo);
+          if (h.replacementVehicleRegNo) regSet.add(h.replacementVehicleRegNo);
+        });
+      extraKmDetailsArray
+        .filter((e) => e.vehicleIndex === vehicleIndex)
+        .forEach((e) => e.vehicleRegistrationNumber && regSet.add(e.vehicleRegistrationNumber));
+      onRoadIssues
+        .filter((iss) => iss.vehicleIndex === vehicleIndex)
+        .forEach((iss) => iss.vehicleRegNo && regSet.add(iss.vehicleRegNo));
+
+      // Status tag per registration number — resolved from the CURRENT
+      // onRoadExecutionArray state (most-recently-uploaded entry wins),
+      // so chained replacements (Vehicle1→2→3) are each labeled correctly.
+      const entriesForType = onRoadExecutionArray.filter((e) => e.vehicleIndex === vehicleIndex);
+      const registrationNumbers = Array.from(regSet).map((reg) => {
+        const matches = entriesForType
+          .filter((e) => e.vehicleRegistrationNumber === reg)
+          .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+        const latest = matches[0];
+
+        let status = "Historical";
+        if (latest) {
+          if (latest.entryStatus === "removed") status = "Released";
+          else if (latest.unavailableStatus) status = "Unavailable";
+          else if (latest.onRoadStatus === 1) status = "On Road";
+          else status = "Assigned";
+        }
+        return { registrationNumber: reg, status };
+      });
+
+      return {
+        vehicleIndex,
+        vehicleType: b.vehicleType,
+        vehicleModel: b.vehicleModel,
+        fromDate: b.fromDate,
+        toDate: b.toDate,
+        registrationNumbers,
+      };
+    });
+
+    // ── 2.1 / 2.4 Driver Change + Driver Status History ──
+    const driverChangeHistory = [];
+    const driverStatusHistory = [];
+    const ACTION_LABEL = { created: "Vehicle Added", updated: "Vehicle Updated", removed: "Vehicle Removed" };
+    const STATUS_LABEL = { created: "assigned", updated: "changed", removed: "removed" };
+
+    for (const h of onRoadDriverHistory) {
+      const day = dateKey(h.changedAt);
+      const base = {
+        day,
+        vehicleIndex: h.vehicleIndex,
+        entryId: h.entryId ? String(h.entryId) : null,
+        vehicleRegistrationNumber: h.vehicleRegistrationNumber,
+        driverName: h.driverName,
+        driverPhone: h.driverPhone,
+        changedBy: h.changedBy,
+        changedAt: h.changedAt,
+        comments: h.changedFields?.reason || "",
+      };
+      driverChangeHistory.push({
+        ...base,
+        eventType: ACTION_LABEL[h.action] || h.action,
+        changedFields: h.changedFields || {},
+      });
+      driverStatusHistory.push({
+        ...base,
+        statusEvent: STATUS_LABEL[h.action] || h.action,
+      });
+    }
+
+    // Replacement events surface as "Vehicle Replaced" on BOTH the old and new reg.
+    for (const h of onRoadUnavailableHistory.filter((h) => h.eventType === "replaced")) {
+      const day = dateKey(h.replacedAt || h.reportedAt);
+      driverChangeHistory.push({
+        day,
+        vehicleIndex: h.vehicleIndex,
+        entryId: h.entryId ? String(h.entryId) : null,
+        vehicleRegistrationNumber: h.vehicleRegNo,
+        eventType: "Vehicle Replaced (Outgoing)",
+        oldDriverName: h.driverName,
+        oldDriverPhone: h.driverPhone,
+        newVehicleRegistrationNumber: h.replacementVehicleRegNo,
+        newDriverName: h.replacementDriverName,
+        newDriverPhone: h.replacementDriverPhone,
+        changedBy: h.reportedBy,
+        changedAt: h.replacedAt || h.reportedAt,
+        comments: h.reason,
+      });
+      driverChangeHistory.push({
+        day,
+        vehicleIndex: h.vehicleIndex,
+        entryId: h.replacementEntryId ? String(h.replacementEntryId) : null,
+        vehicleRegistrationNumber: h.replacementVehicleRegNo,
+        eventType: "Vehicle Replaced (Incoming)",
+        oldVehicleRegistrationNumber: h.vehicleRegNo,
+        oldDriverName: h.driverName,
+        oldDriverPhone: h.driverPhone,
+        newDriverName: h.replacementDriverName,
+        newDriverPhone: h.replacementDriverPhone,
+        changedBy: h.reportedBy,
+        changedAt: h.replacedAt || h.reportedAt,
+        comments: h.reason,
+      });
+    }
+
+    // ── 2.2 Issue / Escalation History ──
+    const issueHistory = [];
+    for (const iss of onRoadIssues) {
+      issueHistory.push({
+        day: dateKey(iss.reportedAt),
+        vehicleIndex: iss.vehicleIndex,
+        entryId: iss.entryId ? String(iss.entryId) : null,
+        vehicleRegistrationNumber: iss.vehicleRegNo,
+        driverName: iss.driverName,
+        issueDescription: iss.issueDescription,
+        issuePhoto: iss.issuePhoto,
+        status: iss.status,
+        resolveDescription: iss.resolveDescription,
+        resolvePhoto: iss.resolvePhoto,
+        createdBy: iss.reportedBy,
+        createdAt: iss.reportedAt,
+        resolvedBy: iss.resolvedBy,
+        resolvedAt: iss.resolvedAt,
+      });
+      if (iss.status === "resolved" && iss.resolvedAt && dateKey(iss.resolvedAt) !== dateKey(iss.reportedAt)) {
+        issueHistory.push({
+          day: dateKey(iss.resolvedAt),
+          vehicleIndex: iss.vehicleIndex,
+          entryId: iss.entryId ? String(iss.entryId) : null,
+          vehicleRegistrationNumber: iss.vehicleRegNo,
+          driverName: iss.driverName,
+          issueDescription: iss.issueDescription,
+          issuePhoto: iss.issuePhoto,
+          status: "resolved-today",
+          resolveDescription: iss.resolveDescription,
+          resolvePhoto: iss.resolvePhoto,
+          createdBy: iss.reportedBy,
+          createdAt: iss.reportedAt,
+          resolvedBy: iss.resolvedBy,
+          resolvedAt: iss.resolvedAt,
+        });
+      }
+    }
+
+    // ── 2.3 Extra KM History ──
+    const extraKmHistory = extraKmDetailsArray.map((e) => ({
+      day: dateKey(e.addedAt),
+      vehicleIndex: e.vehicleIndex,
+      entryId: e.entryId ? String(e.entryId) : null,
+      vehicleRegistrationNumber: e.vehicleRegistrationNumber,
+      driverName: e.driverName,
+      extraKm: e.extraKm,
+      extraHours: e.extraHours,
+      extraKmCost: e.extraKmCost,
+      extraHourCost: e.extraHourCost,
+      totalCost: e.totalCost,
+      loggedFor: `${dateKey(e.fromDate)} to ${dateKey(e.toDate)}`,
+      comments: "",
+      updatedBy: e.addedBy,
+      updatedAt: e.addedAt,
+    }));
+
+    // ── 2.6 Vehicle Unavailable History ──
+    const unavailableHistory = onRoadUnavailableHistory.map((h) => ({
+      day: dateKey(h.reportedAt),
+      vehicleIndex: h.vehicleIndex,
+      entryId: h.entryId ? String(h.entryId) : null,
+      vehicleRegistrationNumber: h.vehicleRegNo,
+      driverName: h.driverName,
+      driverPhone: h.driverPhone,
+      reason: h.reason,
+      photo: h.photo,
+      eventType: h.eventType,
+      status: h.status,
+      replacementVehicleRegistrationNumber: h.replacementVehicleRegNo,
+      replacementDriverName: h.replacementDriverName,
+      replacementDriverPhone: h.replacementDriverPhone,
+      replacedAt: h.replacedAt,
+      reportedBy: h.reportedBy,
+      reportedAt: h.reportedAt,
+      resolvedBy: h.resolvedBy,
+      resolvedAt: h.resolvedAt,
+      resolveDescription: h.resolveDescription,
+      resolvePhoto: h.resolvePhoto,
+    }));
+
+    // ── 2.5 Campaign Vehicle Status Timeline (day-by-day, per entry) ──
+    const historyByEntry = {};
+    for (const h of onRoadDriverHistory) {
+      const key = h.entryId ? String(h.entryId) : `vi-${h.vehicleIndex}`;
+      (historyByEntry[key] = historyByEntry[key] || []).push(h);
+    }
+    Object.values(historyByEntry).forEach((arr) =>
+      arr.sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt))
+    );
+    const unavailableByEntryDay = {}; // `${entryId}|${day}` -> unavailableHistory record
+    for (const h of onRoadUnavailableHistory) {
+      const key = `${h.entryId ? String(h.entryId) : ""}|${dateKey(h.reportedAt)}`;
+      unavailableByEntryDay[key] = h;
+    }
+
+    const vehicleStatusTimeline = [];
+    bookingItems.forEach((item, vehicleIndex) => {
+      const itemFrom = dateKey(item.fromDate);
+      const itemTo = dateKey(item.toDate);
+      const entries = onRoadExecutionArray.filter((e) => e.vehicleIndex === vehicleIndex);
+
+      for (const entry of entries) {
+        const histKey = entry._id ? String(entry._id) : `vi-${vehicleIndex}`;
+        const hist = historyByEntry[histKey] || [];
+        let cursor = itemFrom;
+        while (cursor <= itemTo) {
+          const resolved = resolveEntryStateForDay(entry, hist, cursor);
+          let statusLabel = "Not Active";
+          let performedBy = "";
+          let comments = "";
+
+          if (resolved && !resolved.removed) {
+            if (resolved.createdOnThisDay) {
+              statusLabel = "Vehicle Assigned";
+            } else {
+              const todaysEvent = hist.find(
+                (h) => h.action === "updated" && dateKey(h.changedAt) === cursor
+              );
+              if (todaysEvent) {
+                const cf = todaysEvent.changedFields || {};
+                statusLabel = cf.vehicleRegistrationNumber?.new !== undefined
+                  ? "Vehicle Updated"
+                  : "Driver Updated";
+                performedBy = todaysEvent.changedBy;
+                comments = cf.reason || "";
+              } else {
+                const unavailToday = unavailableByEntryDay[`${String(entry._id)}|${cursor}`];
+                if (unavailToday) {
+                  statusLabel = unavailToday.eventType === "replaced"
+                    ? "Old Vehicle Released & New Vehicle Assigned"
+                    : "Marked Unavailable";
+                  performedBy = unavailToday.reportedBy;
+                  comments = unavailToday.reason;
+                } else {
+                  statusLabel = "No Changes";
+                }
+              }
+            }
+          } else if (resolved && resolved.removed) {
+            if (resolved.releasedOnThisDay) {
+              const linkedReplacement = onRoadUnavailableHistory.find(
+                (h) => h.eventType === "replaced" && String(h.entryId) === String(entry._id) && dateKey(h.replacedAt) === cursor
+              );
+              statusLabel = linkedReplacement ? "Old Vehicle Released & New Vehicle Assigned" : "Vehicle Released";
+              performedBy = linkedReplacement?.reportedBy || "";
+              comments = linkedReplacement?.reason || "";
+            } else {
+              statusLabel = "Not Active";
+            }
+          }
+
+          vehicleStatusTimeline.push({
+            day: cursor,
+            vehicleIndex,
+            entryId: String(entry._id),
+            vehicleRegistrationNumber: entry.vehicleRegistrationNumber,
+            statusLabel,
+            performedBy,
+            comments,
+          });
+
+          cursor = addDaysUTC(cursor, 1);
+        }
+      }
+    });
+
+    return successResponse(res, "Day-by-day history generated", {
+      orderId: order._id,
+      orderDisplayId: order.orderId,
+      campaignStart,
+      campaignEnd,
+      vehicleTypes,
+      driverChangeHistory,
+      issueHistory,
+      extraKmHistory,
+      driverStatusHistory,
+      vehicleStatusTimeline,
+      unavailableHistory,
+    });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }

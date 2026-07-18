@@ -259,11 +259,23 @@ const onRoadHistorySchema = new mongoose.Schema({
 
 const onRoadUnavailableHistorySchema = new mongoose.Schema({
   vehicleIndex: { type: Number, required: true },
+  entryId: { type: mongoose.Schema.Types.ObjectId, default: null }, // the old/unavailable on-road entry this record is about
   vehicleRegNo: { type: String, default: "" },
   driverName: { type: String, default: "" },
+  driverPhone: { type: String, default: "" },
   reason: { type: String, default: "" },
   photo: { type: String, default: "" },
   status: { type: String, enum: ["unavailable", "available"], default: "unavailable" },
+  // "unavailable" = plain mark-unavailable report; "replaced" = a replacement vehicle was dispatched
+  eventType: { type: String, enum: ["unavailable", "replaced"], default: "unavailable" },
+
+  // ── Replacement linkage (only set when eventType === "replaced") ──
+  replacementEntryId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  replacementVehicleRegNo: { type: String, default: "" },
+  replacementDriverName: { type: String, default: "" },
+  replacementDriverPhone: { type: String, default: "" },
+  replacedAt: { type: Date, default: null },
+
   reportedBy: { type: String, default: "" },
   reportedAt: { type: Date, default: Date.now },
   resolvedBy: { type: String, default: "" },

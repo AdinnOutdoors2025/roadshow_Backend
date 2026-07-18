@@ -96,6 +96,7 @@ router.patch("/pipeline/:id/onroad-driver/:entryId", protect, ctrl.updateOnRoadD
 router.post("/pipeline/:id/onroad-issue", protect, pipelineUpload, ctrl.addOnRoadIssue);
 router.patch("/pipeline/:id/onroad-issue/:issueId/resolve", protect, pipelineUpload, ctrl.resolveOnRoadIssue);
 router.post("/pipeline/:id/onroad-unavailable", protect, pipelineUpload, ctrl.markVehicleUnavailable);
+router.post("/pipeline/:id/onroad-replace/:entryId", protect, pipelineUpload, ctrl.replaceOnRoadVehicle);
 router.patch("/pipeline/:id/onroad-unavailable/:historyId/available", protect, pipelineUpload, ctrl.markVehicleAvailable);
 
 router.patch("/pipeline/:id/todo-uploader", protect, ctrl.saveTodoUploadedBy);
@@ -134,13 +135,15 @@ router.patch(
   ctrl.approveFocEntry
 );
 router.post(
-  "/pipeline/:id/foc/create-and-approve",
+  "/pipeline/:id/foc/create-and-approve", 
   protect,
   pipelineUpload,
   ctrl.createAndApproveFocEntry
 );
 
 router.post("/pipeline/:id/extra-km", protect, ctrl.addExtraKmDetails);
+router.get("/pipeline/:id/campaign-calculator", protect, ctrl.getCampaignCalculator);
+router.get("/pipeline/:id/day-by-day-history", protect, ctrl.getDayByDayHistory);
 
 router.get("/orders", protect, ctrl.getAllOrders);  
 router.get("/orders/:orderId", ctrl.getOrderById);
