@@ -1983,8 +1983,12 @@ exports.replaceOnRoadVehicle = async (req, res) => {
       return errorResponse(res, "Replacement vehicle must be different from the current vehicle", null, 400);
     }
 
+    // Entries flagged unavailableStatus are inactive/superseded slots (either
+    // still waiting for a replacement or already replaced) — they don't hold
+    // a live assignment, so a reg no. sitting only in such an entry is free
+    // to be reused elsewhere on the same order.
     const alreadyActive = order.onRoadExecutionArray.some(
-      (e) => e.entryStatus !== "removed" && e.vehicleRegistrationNumber === newReg
+      (e) => e.entryStatus !== "removed" && !e.unavailableStatus && e.vehicleRegistrationNumber === newReg
     );
     if (alreadyActive) {
       return errorResponse(res, "That vehicle is already assigned on this order", null, 400);
@@ -1996,7 +2000,9 @@ exports.replaceOnRoadVehicle = async (req, res) => {
         : order.handlerName || req.user?.username || "Admin";
 
     const now = new Date();
+    const replacedAt = new Date(now.getTime() + 1000);
     const reasonTrim = reason.trim();
+    const wasAlreadyUnavailable = !!oldEntry.unavailableStatus;
 
     // 1. Old entry → mark unavailable (kept visible/active on the roster, just flagged)
     oldEntry.unavailableStatus = true;
@@ -2039,7 +2045,26 @@ exports.replaceOnRoadVehicle = async (req, res) => {
       changedFields: { reason: reasonTrim, replacementFor: oldEntry.vehicleRegistrationNumber },
     });
 
-    // 4. Single combined Vehicle Unavailable record holding BOTH old + new vehicle details
+    // 4. If this vehicle wasn't already flagged unavailable (a direct Replace
+    // from On Road, not from the Unavailable stage), log that as its own
+    // history record first, so it shows as a separate timeline entry instead
+    // of being folded into the replacement event below.
+    if (!wasAlreadyUnavailable) {
+      order.onRoadUnavailableHistory.push({
+        vehicleIndex: oldEntry.vehicleIndex,
+        entryId: oldEntry._id,
+        vehicleRegNo: oldEntry.vehicleRegistrationNumber,
+        driverName: oldEntry.driverName,
+        driverPhone: oldEntry.driverPhone,
+        reason: reasonTrim,
+        status: "unavailable",
+        eventType: "unavailable",
+        reportedBy: performedBy,
+        reportedAt: now,
+      });
+    }
+
+    // 5. Separate replacement record holding BOTH old + new vehicle details
     order.onRoadUnavailableHistory.push({
       vehicleIndex: oldEntry.vehicleIndex,
       entryId: oldEntry._id,
@@ -2053,9 +2078,9 @@ exports.replaceOnRoadVehicle = async (req, res) => {
       replacementVehicleRegNo: newReg,
       replacementDriverName: newEntry.driverName,
       replacementDriverPhone: newEntry.driverPhone,
-      replacedAt: now,
+      replacedAt: replacedAt,
       reportedBy: performedBy,
-      reportedAt: now,
+      reportedAt: replacedAt,
     });
 
     await order.save();
