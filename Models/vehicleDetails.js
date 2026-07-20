@@ -45,17 +45,6 @@ const registrationVehicleSchema = new mongoose.Schema(
     },
     gpsEnabled: { type: Boolean, default: true },
     activeStatus: { type: Boolean, default: true },
-
-    // // Status & Availability
-    // statusAvailability: {
-    //   currentStatus: {
-    //     type: String,
-    //     enum: ["Available", "Unavailable", "Maintenance", "Booked", "Running"],
-    //     default: "Available",
-    //   },
-    //   availableFrom: { type: Date, default: null },
-    //   remarks: { type: String, default: "" },
-    // },
     statusAvailability: {
       currentStatus: {
         type: String,
@@ -123,36 +112,6 @@ const vehicleSchema = new mongoose.Schema(
 
     // Vehicle Description 
     vehicleDescription: { type: String, default: "" },
-
-    // Technical Specifications (Shared) - UPDATED with separate Width/Height fields
-    // techSpecs: {
-    //   screenType: { type: String, default: "LED Only" },
-    //   numberOfScreens: { type: String, default: "" },
-
-    //   // Left/Right Screen Size (ft) - Separate W & H
-    //   leftRightScreenWidth: { type: String, default: "" },
-    //   leftRightScreenHeight: { type: String, default: "" },
-
-    //   // Back Screen Size (ft) - Separate W & H
-    //   backScreenWidth: { type: String, default: "" },
-    //   backScreenHeight: { type: String, default: "" },
-
-    //   // Left/Right Resolution (px) - Separate W & H
-    //   leftRightResolutionWidth: { type: String, default: "" },
-    //   leftRightResolutionHeight: { type: String, default: "" },
-
-    //   // Back Resolution (px) - Separate W & H
-    //   backResolutionWidth: { type: String, default: "" },
-    //   backResolutionHeight: { type: String, default: "" },
-
-    //   audioOutput: { type: String, default: "" },
-    //   brightness: { type: String, default: "" },
-    //   displayVersion: { type: String, default: "" },
-    //   // soundQuality: { type: String, default: "" },
-    //   generatorCapacity: { type: String, default: "" },
-    //   additionalFeatures: { type: String, default: "" },
-    // },
-
     techSpecs: {
       screenType: { type: String, default: "LED Only" },
       numberOfScreens: { type: String, default: "" },
