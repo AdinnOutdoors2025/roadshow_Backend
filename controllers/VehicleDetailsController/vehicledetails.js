@@ -1897,6 +1897,14 @@ const updateRegistrationVehicle = async (req, res) => {
         vehicle.registrationVehicles[regIndex].statusAvailability.toDate = updateData.toDate || null;
         vehicle.registrationVehicles[regIndex].statusAvailability.orderId = updateData.orderId || "";
         vehicle.registrationVehicles[regIndex].statusAvailability.orderDisplayId = updateData.orderDisplayId || "";
+      } else if (
+        oldStatus === "Booked" &&
+        oldOrderId &&
+        RELEASE_TRIGGER_STATUSES.includes(updateData.currentStatus)
+      ) {
+        // Unavailable / Maintenance / Damaged from an active booking is a
+        // status change, not a release — keep the booking identity intact
+        // so Operation Handling can still resolve this vehicle to its order.
       } else {
         vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = null;
         vehicle.registrationVehicles[regIndex].statusAvailability.toDate = null;
@@ -1947,36 +1955,40 @@ const updateRegistrationVehicle = async (req, res) => {
               cleanRegistrationNumber(e.vehicleRegistrationNumber) === cleanOld
           );
 
-          if (entry) {
-            const releasedBy = req.user?.username || "System (Inventory)";
+          if (entry && !entry.unavailableStatus && entry.entryStatus !== "removed") {
+            const reportedBy = req.user?.username || "System (Inventory)";
             const reasonText =
               `Vehicle marked "${updateData.currentStatus}" from Vehicle Inventory` +
               (updateData.remarks ? ` — ${updateData.remarks}` : "");
+            const inventoryStatus = updateData.currentStatus === "Maintenance" ? "Under Maintenance" : updateData.currentStatus;
 
-            entry.entryStatus = "removed";
-            entry.onRoadStatus = 0;
-            entry.removedAt = new Date();
-            entry.removedBy = releasedBy;
-            entry.removalReason = reasonText;
+            // Status change from Inventory moves the vehicle to the
+            // Unavailable stage on its existing order — it must not be
+            // released, since the booking (dates/orderId) is still active.
+            entry.unavailableStatus = true;
+            entry.unavailableReason = reasonText;
+            entry.inventoryStatus = inventoryStatus;
 
-            linkedOrder.onRoadDriverHistory.push({
+            linkedOrder.onRoadUnavailableHistory.push({
               vehicleIndex: entry.vehicleIndex,
               entryId: entry._id,
-              action: "removed",
+              vehicleRegNo: entry.vehicleRegistrationNumber,
               driverName: entry.driverName,
               driverPhone: entry.driverPhone,
-              vehicleRegistrationNumber: entry.vehicleRegistrationNumber,
-              changedBy: releasedBy,
-              changedAt: new Date(),
-              changedFields: { reason: reasonText },
+              reason: reasonText,
+              inventoryStatus,
+              status: "unavailable",
+              eventType: "unavailable",
+              reportedBy,
+              reportedAt: new Date(),
             });
 
             await linkedOrder.save();
           }
         }
       } catch (linkErr) {
-        console.error("Auto-release failed (updateRegistrationVehicle):", linkErr.message);
-        
+        console.error("Auto-unavailable failed (updateRegistrationVehicle):", linkErr.message);
+
       }
     }
 
@@ -2659,6 +2671,14 @@ const updateRegistrationVehicleByRegNo = async (req, res) => {
         vehicle.registrationVehicles[regIndex].statusAvailability.toDate = updateData.toDate || null;
         vehicle.registrationVehicles[regIndex].statusAvailability.orderId = updateData.orderId || "";
         vehicle.registrationVehicles[regIndex].statusAvailability.orderDisplayId = updateData.orderDisplayId || "";
+      } else if (
+        oldStatus === "Booked" &&
+        oldOrderId &&
+        RELEASE_TRIGGER_STATUSES.includes(updateData.currentStatus)
+      ) {
+        // Unavailable / Maintenance / Damaged from an active booking is a
+        // status change, not a release — keep the booking identity intact
+        // so Operation Handling can still resolve this vehicle to its order.
       } else {
         vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = null;
         vehicle.registrationVehicles[regIndex].statusAvailability.toDate = null;
@@ -2709,36 +2729,40 @@ const updateRegistrationVehicleByRegNo = async (req, res) => {
               cleanRegistrationNumber(e.vehicleRegistrationNumber) === cleanOld
           );
 
-          if (entry) {
-            const releasedBy = req.user?.username || "System (Inventory)";
+          if (entry && !entry.unavailableStatus && entry.entryStatus !== "removed") {
+            const reportedBy = req.user?.username || "System (Inventory)";
             const reasonText =
               `Vehicle marked "${updateData.currentStatus}" from Vehicle Inventory` +
               (updateData.remarks ? ` — ${updateData.remarks}` : "");
+            const inventoryStatus = updateData.currentStatus === "Maintenance" ? "Under Maintenance" : updateData.currentStatus;
 
-            entry.entryStatus = "removed";
-            entry.onRoadStatus = 0;
-            entry.removedAt = new Date();
-            entry.removedBy = releasedBy;
-            entry.removalReason = reasonText;
+            // Status change from Inventory moves the vehicle to the
+            // Unavailable stage on its existing order — it must not be
+            // released, since the booking (dates/orderId) is still active.
+            entry.unavailableStatus = true;
+            entry.unavailableReason = reasonText;
+            entry.inventoryStatus = inventoryStatus;
 
-            linkedOrder.onRoadDriverHistory.push({
+            linkedOrder.onRoadUnavailableHistory.push({
               vehicleIndex: entry.vehicleIndex,
               entryId: entry._id,
-              action: "removed",
+              vehicleRegNo: entry.vehicleRegistrationNumber,
               driverName: entry.driverName,
               driverPhone: entry.driverPhone,
-              vehicleRegistrationNumber: entry.vehicleRegistrationNumber,
-              changedBy: releasedBy,
-              changedAt: new Date(),
-              changedFields: { reason: reasonText },
+              reason: reasonText,
+              inventoryStatus,
+              status: "unavailable",
+              eventType: "unavailable",
+              reportedBy,
+              reportedAt: new Date(),
             });
 
             await linkedOrder.save();
           }
         }
       } catch (linkErr) {
-        console.error("Auto-release failed (updateRegistrationVehicleByRegNo):", linkErr.message);
-        
+        console.error("Auto-unavailable failed (updateRegistrationVehicleByRegNo):", linkErr.message);
+
       }
     }
 

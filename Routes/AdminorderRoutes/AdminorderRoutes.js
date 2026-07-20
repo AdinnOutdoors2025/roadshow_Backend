@@ -142,6 +142,7 @@ router.post(
 );
 
 router.post("/pipeline/:id/extra-km", protect, ctrl.addExtraKmDetails);
+router.post("/pipeline/:id/daily-hours", protect, ctrl.addDailyHoursLog);
 router.get("/pipeline/:id/campaign-calculator", protect, ctrl.getCampaignCalculator);
 router.get("/pipeline/:id/day-by-day-history", protect, ctrl.getDayByDayHistory);
 

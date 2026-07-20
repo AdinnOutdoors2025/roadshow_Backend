@@ -29,7 +29,7 @@ async function generateAdminOrderId() {
 function calcPricingBackend(pkg, v) {
   const from = new Date(v.fromDate);
   const to = new Date(v.toDate);
-  const baseDays = Math.ceil((to - from) / 86400000);
+  const baseDays = Math.ceil((to - from) / 86400000) + 1;
   const totalDays = baseDays + (Number(v.extraDays) || 0);
   const quantity = Number(v.quantity) || 1;
   const extraKm = Number(v.extraKm) || 0;
@@ -1550,7 +1550,10 @@ exports.submitOnRoadDetails = async (req, res) => {
 exports.updateOnRoadDriver = async (req, res) => {
   try {
     const { id, entryId } = req.params;
-    const { driverName, driverPhone, vehicleRegistrationNumber } = req.body;
+    const { driverName, driverPhone, vehicleRegistrationNumber, reason } = req.body;
+
+    if (!reason?.trim())
+      return errorResponse(res, "Reason for this update is required", null, 400);
 
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
@@ -1586,6 +1589,7 @@ exports.updateOnRoadDriver = async (req, res) => {
       changedBy,
       changedAt: new Date(),
       changedFields,
+      reason: reason.trim(),
     });
 
     await order.save();
@@ -1854,10 +1858,15 @@ exports.editOnRoadDetails = async (req, res) => {
 exports.markVehicleUnavailable = async (req, res) => {
   try {
     const { id } = req.params;
-    const { vehicleIndex, vehicleRegistrationNumber, entryId, reason } = req.body;
+    const { vehicleIndex, vehicleRegistrationNumber, entryId, reason, inventoryStatus } = req.body;
 
     if (!reason?.trim())
       return errorResponse(res, "Reason is required", null, 400);
+
+    const ALLOWED_INVENTORY_STATUSES = ["Unavailable", "Damaged", "Under Maintenance"];
+    const resolvedInventoryStatus = ALLOWED_INVENTORY_STATUSES.includes(inventoryStatus)
+      ? inventoryStatus
+      : "Unavailable";
 
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
@@ -1893,6 +1902,7 @@ exports.markVehicleUnavailable = async (req, res) => {
 
     entry.unavailableStatus = true;
     entry.unavailableReason = reason.trim();
+    entry.inventoryStatus = resolvedInventoryStatus;
 
     order.onRoadUnavailableHistory.push({
       vehicleIndex: entry.vehicleIndex,
@@ -1901,6 +1911,7 @@ exports.markVehicleUnavailable = async (req, res) => {
       driverName: entry.driverName,
       driverPhone: entry.driverPhone,
       reason: reason.trim(),
+      inventoryStatus: resolvedInventoryStatus,
       photo: photoUrl,
       status: "unavailable",
       eventType: "unavailable",
@@ -1912,19 +1923,21 @@ exports.markVehicleUnavailable = async (req, res) => {
 
     await order.save();
 
-    // Sync Vehicle Master inventory so this reg no. is no longer assignable
+    // Sync Vehicle Master inventory to the selected status (Unavailable /
+    // Damaged / Under Maintenance) so this reg no. is no longer assignable
+    // — this is the on-road vehicle's status change, not a release.
     try {
       await VehicleMaster.updateOne(
         { "registrationVehicles.registrationNumber": entry.vehicleRegistrationNumber },
         {
           $set: {
-            "registrationVehicles.$.statusAvailability.currentStatus": "Unavailable",
-            "registrationVehicles.$.statusAvailability.remarks": `Marked unavailable on Order ${order.orderId} — ${reason.trim()}`,
+            "registrationVehicles.$.statusAvailability.currentStatus": resolvedInventoryStatus,
+            "registrationVehicles.$.statusAvailability.remarks": `Marked ${resolvedInventoryStatus} on Order ${order.orderId} — ${reason.trim()}`,
           },
         }
       );
     } catch (err) {
-      console.error(`Failed to flag vehicle ${entry.vehicleRegistrationNumber} unavailable:`, err.message);
+      console.error(`Failed to flag vehicle ${entry.vehicleRegistrationNumber} as ${resolvedInventoryStatus}:`, err.message);
     }
 
     return successResponse(res, "Vehicle marked as unavailable", { order });
@@ -1959,9 +1972,9 @@ exports.replaceOnRoadVehicle = async (req, res) => {
     if (oldEntry.entryStatus === "removed") {
       return errorResponse(res, "This vehicle has already been released", null, 400);
     }
-    if (oldEntry.unavailableStatus) {
-      return errorResponse(res, "This vehicle is already marked unavailable", null, 400);
-    }
+    // Replace is valid both from On Road (not yet flagged) and from the
+    // Vehicle Unavailable stage (already flagged unavailableStatus) — that's
+    // the normal path now that Unavailable vehicles get a Replace button.
 
     const newReg = newVehicleRegistrationNumber.trim().toUpperCase().replace(/\s+/g, "");
     const oldReg = (oldEntry.vehicleRegistrationNumber || "").trim().toUpperCase().replace(/\s+/g, "");
@@ -2975,6 +2988,92 @@ exports.addExtraKmDetails = async (req, res) => {
   }
 };
 
+const CAMPAIGN_HOURS_PER_DAY = Number(process.env.CAMPAIGN_HOURS_PER_DAY) || 8;
+const GST_PERCENT = Number(process.env.GST_PERCENT) || 18;
+
+exports.addDailyHoursLog = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vehicleIndex, entryId, day, startTime, endTime, remarks, logId } = req.body;
+
+    const vIdx = Number(vehicleIndex);
+    if (!day) return errorResponse(res, "Day is required", null, 400);
+    if (!startTime) return errorResponse(res, "Start time is required", null, 400);
+    if (!endTime) return errorResponse(res, "End time is required", null, 400);
+
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return errorResponse(res, "Invalid time format", null, 400);
+    }
+    if (end <= start) {
+      return errorResponse(res, "End time must be after start time", null, 400);
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const bookingItem = order.bookingItems[vIdx];
+    if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
+
+    const campaignFrom = new Date(bookingItem.fromDate).toISOString().slice(0, 10);
+    const campaignTo = new Date(bookingItem.toDate).toISOString().slice(0, 10);
+    if (day < campaignFrom || day > campaignTo) {
+      return errorResponse(res, "Day must be within campaign range", null, 400);
+    }
+
+    let entry = null;
+    if (entryId) {
+      entry = order.onRoadExecutionArray.id(entryId);
+      if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
+    }
+
+    const runningHours = Math.round(((end - start) / (1000 * 60 * 60)) * 100) / 100;
+    const absentHours = Math.max(Math.round((CAMPAIGN_HOURS_PER_DAY - runningHours) * 100) / 100, 0);
+
+    const loggedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const payload = {
+      vehicleIndex: vIdx,
+      entryId: entry ? entry._id : null,
+      driverName: entry?.driverName || "",
+      driverPhone: entry?.driverPhone || "",
+      vehicleRegistrationNumber: entry?.vehicleRegistrationNumber || "",
+      day,
+      startTime: start,
+      endTime: end,
+      campaignHours: CAMPAIGN_HOURS_PER_DAY,
+      runningHours,
+      absentHours,
+      remarks: remarks || "",
+      loggedBy,
+      loggedAt: new Date(),
+    };
+
+    const existing = logId
+      ? order.dailyHoursLogArray.id(logId)
+      : order.dailyHoursLogArray.find(
+          (l) => l.entryId && entry && l.entryId.toString() === entry._id.toString() && l.day === day
+        );
+
+    if (existing) {
+      Object.assign(existing, payload);
+    } else {
+      order.dailyHoursLogArray.push(payload);
+    }
+
+    await order.save();
+
+    return successResponse(res, "Daily hours logged successfully", { order }, 201);
+  } catch (error) {
+    console.error("Error in addDailyHoursLog:", error);
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
 exports.releaseOnRoadVehicle = async (req, res) => {
   try {
     const { id, entryId } = req.params;
@@ -3143,6 +3242,14 @@ exports.getCampaignCalculator = async (req, res) => {
     const onRoadExecutionArray = order.onRoadExecutionArray || [];
     const onRoadDriverHistory = order.onRoadDriverHistory || [];
     const extraKmDetailsArray = order.extraKmDetailsArray || [];
+    const dailyHoursLogArray = order.dailyHoursLogArray || [];
+
+    // Pre-group actual-hours logs by entryId + day for O(1) lookup.
+    const hoursLogByEntryDay = {};
+    for (const l of dailyHoursLogArray) {
+      if (!l.entryId) continue;
+      hoursLogByEntryDay[`${String(l.entryId)}|${l.day}`] = l;
+    }
 
     const campaignStart = bookingItems
       .map((b) => dateKey(b.fromDate))
@@ -3179,10 +3286,56 @@ exports.getCampaignCalculator = async (req, res) => {
       rtoCost: b.rtoCost || 0,
       needPromoter: !!b.needPromoter,
       promoterCost: b.promoterCost || 0,
+      // Estimate figures as stored at Order Creation time — used only to
+      // show the client the Estimated-vs-Actual breakdown, never re-billed.
+      estimatedRentalCost: (b.rentalCost || 0) + (b.driverCost || 0),
+      estimatedExtraKmCost: b.extraKmCost || 0,
+      estimatedExtraHourCost: b.extraHourCost || 0,
+      estimatedTotalAmount: b.totalAmount || 0,
     }));
+
+    // ── Extra KM / Hours balance ──────────────────────────────────────────
+    // The client pre-purchases a KM/hour pool at Order Creation (bookingItem
+    // .extraKm/.extraHours, already priced into the contract). Usage logged
+    // on-road first draws down that pool for free; only usage beyond the
+    // pool ("overage") is a genuinely new billable charge. We compute, per
+    // vehicle slot, what fraction of all logged usage is overage, then use
+    // that fraction to scale every individual logged entry's cost so the
+    // day-by-day breakdown and the aggregate total stay consistent.
+    const extraKmBalanceByVehicle = {};
+    bookingItems.forEach((item, vehicleIndex) => {
+      const entriesForVehicle = extraKmDetailsArray.filter((e) => e.vehicleIndex === vehicleIndex);
+      const usedKm = entriesForVehicle.reduce((s, e) => s + (e.extraKm || 0), 0);
+      const usedHours = entriesForVehicle.reduce((s, e) => s + (e.extraHours || 0), 0);
+      const loggedKmCost = entriesForVehicle.reduce((s, e) => s + (e.extraKmCost || 0), 0);
+      const loggedHourCost = entriesForVehicle.reduce((s, e) => s + (e.extraHourCost || 0), 0);
+      const purchasedKm = item.extraKm || 0;
+      const purchasedHours = item.extraHours || 0;
+      const overageKm = Math.max(usedKm - purchasedKm, 0);
+      const overageHours = Math.max(usedHours - purchasedHours, 0);
+      const kmRatio = usedKm > 0 ? overageKm / usedKm : 0;
+      const hourRatio = usedHours > 0 ? overageHours / usedHours : 0;
+
+      extraKmBalanceByVehicle[vehicleIndex] = {
+        vehicleIndex,
+        purchasedKm,
+        purchasedHours,
+        usedKm,
+        usedHours,
+        remainingKm: Math.max(purchasedKm - usedKm, 0),
+        remainingHours: Math.max(purchasedHours - usedHours, 0),
+        overageKm: Math.round(overageKm * 100) / 100,
+        overageHours: Math.round(overageHours * 100) / 100,
+        overageKmCost: Math.round(loggedKmCost * kmRatio * 100) / 100,
+        overageHourCost: Math.round(loggedHourCost * hourRatio * 100) / 100,
+        kmRatio,
+        hourRatio,
+      };
+    });
 
     const days = [];
     let cumulativeTotal = 0;
+    let cumulativeCompensation = 0;
     let cursor = campaignStart;
 
     while (cursor <= campaignEnd) {
@@ -3215,6 +3368,16 @@ exports.getCampaignCalculator = async (req, res) => {
           // happened after the vehicle-type's own campaign start date.
           const createdEvent = hist.find((h) => h.action === "created");
           resolved.isReplacement = !!(createdEvent && dateKey(createdEvent.changedAt) > itemFrom);
+
+          // Attach actual hours logged for this entry on this day, if any,
+          // and dock a proportional share of the daily rate for absent hours.
+          const hoursLog = hoursLogByEntryDay[`${resolved.entryId}|${dayKey}`];
+          if (hoursLog) {
+            resolved.runningHours = hoursLog.runningHours;
+            resolved.absentHours = hoursLog.absentHours;
+            resolved.campaignHours = hoursLog.campaignHours;
+          }
+
           activeEntries.push(resolved);
         }
 
@@ -3222,8 +3385,28 @@ exports.getCampaignCalculator = async (req, res) => {
         const baseDailyRate = (item.perDayRentalCost || 0) + (item.driverCharges || 0);
         const dailyVehicleAmount = activeCount * baseDailyRate;
 
-        let extraKmCost = 0;
-        let extraHourCost = 0;
+        // Compensation: for every entry with a logged absence today, dock a
+        // proportional share of that entry's daily rate.
+        let compensationToday = 0;
+        for (const entry of activeEntries) {
+          if (!entry.absentHours || !entry.campaignHours) continue;
+          const deduction =
+            Math.round(((baseDailyRate * entry.absentHours) / entry.campaignHours) * 100) / 100;
+          entry.compensationDeduction = deduction;
+          compensationToday += deduction;
+        }
+
+        const balance = extraKmBalanceByVehicle[vehicleIndex] || { kmRatio: 0, hourRatio: 0 };
+
+        // The client already paid for the purchased Extra KM/Hours pool at
+        // Order Creation (item.extraKmCost/extraHourCost) — that flat fee is
+        // part of the actual bill regardless of how much of the pool gets
+        // used, charged once on the vehicle's first campaign day, same as RTO.
+        const extraKmPoolFeeToday = dayKey === itemFrom ? item.extraKmCost || 0 : 0;
+        const extraHourPoolFeeToday = dayKey === itemFrom ? item.extraHourCost || 0 : 0;
+
+        let extraKmCost = extraKmPoolFeeToday;
+        let extraHourCost = extraHourPoolFeeToday;
         const extraDetailsToday = [];
         for (const entry of activeEntries) {
           const picked = pickActiveExtraKmEntries(extraKmDetailsArray, entry.entryId);
@@ -3231,14 +3414,20 @@ exports.getCampaignCalculator = async (req, res) => {
             // Attribute the (one-time) extra-usage cost to the last day of
             // its logged range, so it isn't double-counted across the range.
             if (dateKey(p.toDate) === dayKey) {
-              extraKmCost += p.extraKmCost || 0;
-              extraHourCost += p.extraHourCost || 0;
+              // Only the overage fraction (usage beyond the purchased KM/hour
+              // pool) is billable — usage within the pool is already paid
+              // for in the original contract.
+              const billableKmCost = Math.round((p.extraKmCost || 0) * balance.kmRatio * 100) / 100;
+              const billableHourCost = Math.round((p.extraHourCost || 0) * balance.hourRatio * 100) / 100;
+              extraKmCost += billableKmCost;
+              extraHourCost += billableHourCost;
               extraDetailsToday.push({
                 registrationNumber: entry.vehicleRegistrationNumber,
                 extraKm: p.extraKm,
                 extraHours: p.extraHours,
-                extraKmCost: p.extraKmCost,
-                extraHourCost: p.extraHourCost,
+                extraKmCost: billableKmCost,
+                extraHourCost: billableHourCost,
+                withinPurchasedBalance: billableKmCost === 0 && billableHourCost === 0,
                 loggedFor: `${dateKey(p.fromDate)} to ${dateKey(p.toDate)}`,
                 addedBy: p.addedBy,
               });
@@ -3254,7 +3443,12 @@ exports.getCampaignCalculator = async (req, res) => {
             : 0;
 
         const itemDayTotal =
-          dailyVehicleAmount + extraKmCost + extraHourCost + rtoAppliedToday + promoterAmountToday;
+          dailyVehicleAmount +
+          extraKmCost +
+          extraHourCost +
+          rtoAppliedToday +
+          promoterAmountToday -
+          compensationToday;
 
         dayTotal += itemDayTotal;
 
@@ -3270,14 +3464,18 @@ exports.getCampaignCalculator = async (req, res) => {
           dailyVehicleAmount,
           extraKmCost,
           extraHourCost,
+          extraKmPoolFeeToday,
+          extraHourPoolFeeToday,
           extraDetailsToday,
           rtoAppliedToday,
           promoterAmountToday,
+          compensationToday: Math.round(compensationToday * 100) / 100,
           itemDayTotal,
         });
       });
 
       cumulativeTotal += dayTotal;
+      cumulativeCompensation += vehicles.reduce((s, v) => s + (v.compensationToday || 0), 0);
 
       days.push({
         date: dayKey,
@@ -3293,16 +3491,63 @@ exports.getCampaignCalculator = async (req, res) => {
     const orderTaxableAmount =
       order.taxableAmount ?? bookingItems.reduce((s, b) => s + (b.totalAmount || 0), 0);
 
+    // ── Final Billing summary: actual usage rolled up across every day ──
+    const allVehicles = days.flatMap((d) => d.vehicles);
+    const actualRental = allVehicles.reduce((s, v) => s + (v.dailyVehicleAmount || 0), 0);
+    const actualExtraKm = allVehicles.reduce((s, v) => s + (v.extraKmCost || 0), 0);
+    const actualExtraHours = allVehicles.reduce((s, v) => s + (v.extraHourCost || 0), 0);
+    const actualRto = allVehicles.reduce((s, v) => s + (v.rtoAppliedToday || 0), 0);
+    const actualPromoter = allVehicles.reduce((s, v) => s + (v.promoterAmountToday || 0), 0);
+    const totalCompensation = Math.round(cumulativeCompensation * 100) / 100;
+    const campaignExtensionAmount = 0; // extension approval workflow not yet implemented
+
+    const finalAmountBeforeGst = Math.round(grandTotal * 100) / 100;
+    const gstPercent = GST_PERCENT;
+    const gstAmount = Math.round(((finalAmountBeforeGst * gstPercent) / 100) * 100) / 100;
+    const finalInvoiceAmount = Math.round((finalAmountBeforeGst + gstAmount) * 100) / 100;
+
+    // Estimate figures as stored at Order Creation — shown next to actuals so
+    // any gap (e.g. extra KM/hours guessed at booking time but not yet
+    // logged by Operations) is visible instead of collapsing into one
+    // unexplained "reconciliation" number.
+    const estimatedRental = bookingItemsMeta.reduce((s, b) => s + (b.estimatedRentalCost || 0), 0);
+    const estimatedRto = bookingItemsMeta.reduce((s, b) => s + (b.rtoCost || 0), 0);
+    const estimatedPromoter = bookingItemsMeta.reduce((s, b) => s + (b.promoterCost || 0), 0);
+    const estimatedExtraKm = bookingItemsMeta.reduce((s, b) => s + (b.estimatedExtraKmCost || 0), 0);
+    const estimatedExtraHours = bookingItemsMeta.reduce((s, b) => s + (b.estimatedExtraHourCost || 0), 0);
+
+    const finalBilling = {
+      estimatedAmount: orderTaxableAmount,
+      estimatedRental: Math.round(estimatedRental * 100) / 100,
+      estimatedRto: Math.round(estimatedRto * 100) / 100,
+      estimatedPromoter: Math.round(estimatedPromoter * 100) / 100,
+      estimatedExtraKm: Math.round(estimatedExtraKm * 100) / 100,
+      estimatedExtraHours: Math.round(estimatedExtraHours * 100) / 100,
+      actualRental: Math.round(actualRental * 100) / 100,
+      actualExtraKm: Math.round(actualExtraKm * 100) / 100,
+      actualExtraHours: Math.round(actualExtraHours * 100) / 100,
+      actualRto: Math.round(actualRto * 100) / 100,
+      actualPromoter: Math.round(actualPromoter * 100) / 100,
+      totalCompensation,
+      campaignExtensionAmount,
+      finalAmountBeforeGst,
+      gstPercent,
+      gstAmount,
+      finalInvoiceAmount,
+    };
+
     return successResponse(res, "Campaign calculator generated", {
       orderId: order._id,
       orderDisplayId: order.orderId,
       campaignStart,
       campaignEnd,
       bookingItemsMeta,
+      extraKmBalances: Object.values(extraKmBalanceByVehicle),
       days,
       grandTotal,
       orderTaxableAmount,
       reconciliationDiff: Math.round((grandTotal - orderTaxableAmount) * 100) / 100,
+      finalBilling,
     });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
@@ -3330,6 +3575,7 @@ exports.getDayByDayHistory = async (req, res) => {
     const onRoadIssues = order.onRoadIssues || [];
     const onRoadUnavailableHistory = order.onRoadUnavailableHistory || [];
     const extraKmDetailsArray = order.extraKmDetailsArray || [];
+    const dailyHoursLogArray = order.dailyHoursLogArray || [];
 
     const campaignStart = bookingItems.map((b) => dateKey(b.fromDate)).sort()[0];
     const campaignEnd = bookingItems.map((b) => dateKey(b.toDate)).sort().slice(-1)[0];
@@ -3508,6 +3754,23 @@ exports.getDayByDayHistory = async (req, res) => {
       updatedAt: e.addedAt,
     }));
 
+    // ── 2.4 Daily Hours History ──
+    const dailyHoursHistory = dailyHoursLogArray.map((l) => ({
+      day: l.day,
+      vehicleIndex: l.vehicleIndex,
+      entryId: l.entryId ? String(l.entryId) : null,
+      vehicleRegistrationNumber: l.vehicleRegistrationNumber,
+      driverName: l.driverName,
+      startTime: l.startTime,
+      endTime: l.endTime,
+      campaignHours: l.campaignHours,
+      runningHours: l.runningHours,
+      absentHours: l.absentHours,
+      remarks: l.remarks,
+      loggedBy: l.loggedBy,
+      loggedAt: l.loggedAt,
+    }));
+
     // ── 2.6 Vehicle Unavailable History ──
     const unavailableHistory = onRoadUnavailableHistory.map((h) => ({
       day: dateKey(h.reportedAt),
@@ -3627,6 +3890,7 @@ exports.getDayByDayHistory = async (req, res) => {
       driverChangeHistory,
       issueHistory,
       extraKmHistory,
+      dailyHoursHistory,
       driverStatusHistory,
       vehicleStatusTimeline,
       unavailableHistory,

@@ -110,6 +110,24 @@ const extraKmHistorySchema = new mongoose.Schema({
 }, { _id: true });
 
 
+const dailyHoursLogSchema = new mongoose.Schema({
+  vehicleIndex: { type: Number, required: true },
+  entryId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  driverName: { type: String, default: "" },
+  driverPhone: { type: String, default: "" },
+  vehicleRegistrationNumber: { type: String, default: "" },
+  day: { type: String, required: true }, // YYYY-MM-DD
+  startTime: { type: Date, required: true },
+  endTime: { type: Date, required: true },
+  campaignHours: { type: Number, default: 8 },
+  runningHours: { type: Number, default: 0 },
+  absentHours: { type: Number, default: 0 },
+  remarks: { type: String, default: "" },
+  loggedBy: { type: String, default: "" },
+  loggedAt: { type: Date, default: Date.now },
+}, { _id: true });
+
+
 const onRoadExtraKmSchema = new mongoose.Schema({
   vehicleIndex: { type: Number, required: true },
   entryId: { type: mongoose.Schema.Types.ObjectId, required: true },
@@ -264,6 +282,7 @@ const onRoadUnavailableHistorySchema = new mongoose.Schema({
   driverName: { type: String, default: "" },
   driverPhone: { type: String, default: "" },
   reason: { type: String, default: "" },
+  inventoryStatus: { type: String, enum: ["Unavailable", "Damaged", "Under Maintenance"], default: "Unavailable" },
   photo: { type: String, default: "" },
   status: { type: String, enum: ["unavailable", "available"], default: "unavailable" },
   // "unavailable" = plain mark-unavailable report; "replaced" = a replacement vehicle was dispatched
@@ -341,6 +360,7 @@ const onRoadDriverHistorySchema = new mongoose.Schema({
   changedBy: { type: String, default: "" },
   changedAt: { type: Date, default: Date.now },
   changedFields: { type: Object, default: {} },
+  reason: { type: String, default: "" },
 }, { _id: true });
 
 const clientFeedbackSchema = new mongoose.Schema({
@@ -594,6 +614,7 @@ const orderSchema = new mongoose.Schema(
     uploadedAt: { type: Date, default: Date.now },
     unavailableStatus: { type: Boolean, default: false },
     unavailableReason: { type: String, default: "" },
+    inventoryStatus: { type: String, enum: ["Unavailable", "Damaged", "Under Maintenance"], default: "Unavailable" },
 
     // ── NEW: for release/remove feature ──
     entryStatus: { type: String, enum: ["active", "removed"], default: "active" },
@@ -612,6 +633,7 @@ orderEditHistory: { type: [orderEditHistorySchema], default: [] },
     onRoadDriverHistory: { type: [onRoadDriverHistorySchema], default: [] },
     extraKmDetailsArray: { type: [extraKmHistorySchema], default: [] },
     onRoadExtraKm: { type: [onRoadExtraKmSchema], default: [] },
+    dailyHoursLogArray: { type: [dailyHoursLogSchema], default: [] },
     clientFeedbackHistory: { type: [clientFeedbackSchema], default: [] },
     campaignClosureArray: { type: [campaignClosureSchema], default: [] },
 
