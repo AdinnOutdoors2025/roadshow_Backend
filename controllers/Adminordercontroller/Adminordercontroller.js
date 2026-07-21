@@ -2832,11 +2832,12 @@ exports.getVehicleLocationsProxy = async (req, res) => {
 exports.addExtraKmDetails = async (req, res) => {
   try {
     const { id } = req.params;
-    const { vehicleIndex, entryId, extraKm, extraHours, fromDate, toDate, extraKmId } = req.body;
+    const { vehicleIndex, entryId, extraKm, extraHours, fromDate, toDate, extraKmId, distributionMethod } = req.body;
 
     const vIdx = Number(vehicleIndex);
     const km = Number(extraKm) || 0;
     const hrs = Number(extraHours) || 0;
+    const distMethod = distributionMethod === "split" ? "split" : "daily";
 
    
     if (km <= 0 && hrs <= 0) {
@@ -2935,9 +2936,10 @@ exports.addExtraKmDetails = async (req, res) => {
       totalCost,
       addedBy,
       addedAt: new Date(),
+      distributionMethod: distMethod,
     };
 
-    
+
     order.extraKmDetailsArray.push(extraKmPayload);
 
  
@@ -2960,6 +2962,7 @@ exports.addExtraKmDetails = async (req, res) => {
           existingEntry.totalCost = totalCost;
           existingEntry.addedBy = addedBy;
           existingEntry.addedAt = new Date();
+          existingEntry.distributionMethod = distMethod;
           existingEntry.driverName = driverEntry?.driverName || "";
           existingEntry.driverPhone = driverEntry?.driverPhone || "";
           existingEntry.vehicleRegistrationNumber = driverEntry?.vehicleRegistrationNumber || "";
@@ -2989,6 +2992,7 @@ exports.addExtraKmDetails = async (req, res) => {
           latestEntry.totalCost = totalCost;
           latestEntry.addedBy = addedBy;
           latestEntry.addedAt = new Date();
+          latestEntry.distributionMethod = distMethod;
           latestEntry.driverName = driverEntry?.driverName || "";
           latestEntry.driverPhone = driverEntry?.driverPhone || "";
           latestEntry.vehicleRegistrationNumber = driverEntry?.vehicleRegistrationNumber || "";
@@ -3019,11 +3023,35 @@ const GST_PERCENT = Number(process.env.GST_PERCENT) || 18;
 exports.addDailyHoursLog = async (req, res) => {
   try {
     const { id } = req.params;
-    const { vehicleIndex, entryId, day, startTime, endTime, remarks, logId, isAbsentDay } = req.body;
+    const { vehicleIndex, entryId, day, startTime, endTime, remarks, logId, isAbsentDay, billingMode, absentDayResolution } = req.body;
 
     const vIdx = Number(vehicleIndex);
     const absentDayFlag = !!isAbsentDay;
     if (!day) return errorResponse(res, "Day is required", null, 400);
+
+    // Absent Day with mandatory Extend/Close choice: when the day is marked
+    // fully absent, ops must say whether the vehicle-type slot's schedule
+    // extends by a day or the campaign end date stays as contracted.
+    let resolvedAbsentDayResolution = null;
+    if (absentDayFlag) {
+      if (absentDayResolution !== "extend" && absentDayResolution !== "close") {
+        return errorResponse(
+          res,
+          "absentDayResolution ('extend' or 'close') is required when isAbsentDay is true",
+          null,
+          400
+        );
+      }
+      resolvedAbsentDayResolution = absentDayResolution;
+    }
+
+    // "Bill partial running day" feature — independent of isAbsentDay.
+    const allowedBillingModes = ["full", "partial", "absent"];
+    let resolvedBillingMode = allowedBillingModes.includes(billingMode) ? billingMode : "full";
+    if (absentDayFlag) {
+      // A fully absent day always bills as absent regardless of what was sent.
+      resolvedBillingMode = "absent";
+    }
 
     // Vehicle Absent Calculation: a full-day absence doesn't need real
     // start/end times — the whole day is logged as 0 running / full absent.
@@ -3085,6 +3113,8 @@ exports.addDailyHoursLog = async (req, res) => {
       runningHours,
       absentHours,
       isAbsentDay: absentDayFlag,
+      absentDayResolution: resolvedAbsentDayResolution,
+      billingMode: resolvedBillingMode,
       remarks: remarks || "",
       loggedBy,
       loggedAt: new Date(),
@@ -3311,6 +3341,15 @@ function addDaysUTC(dateKeyStr, days) {
   return dateKey(d);
 }
 
+// Inclusive day count between two YYYY-MM-DD keys, used to resolve the
+// "split" Extra KM/Hours distributionMethod (value ÷ number of days in the
+// record's own fromDate-toDate range).
+function daysBetweenInclusive(fromKeyStr, toKeyStr) {
+  const f = new Date(fromKeyStr + "T00:00:00.000Z");
+  const t = new Date(toKeyStr + "T00:00:00.000Z");
+  return Math.round((t - f) / 86400000) + 1;
+}
+
 // Replays onRoadDriverHistory events for one entry to find its
 // driver/registration state as of a given day, and whether it was
 // active (created & not yet removed) on that day.
@@ -3375,49 +3414,18 @@ function resolveEntryStateForDay(entry, historyForEntry, dayKey) {
   };
 }
 
-// Among overlapping extra-km/hour submissions for the same entry, only the
-// most recently added one counts toward billing — older ones stay in history.
-function pickActiveExtraKmEntries(extraKmDetailsArray, entryId) {
-  const forEntry = extraKmDetailsArray
-    .filter((e) => e.entryId && String(e.entryId) === String(entryId))
-    .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt)); // newest first
-
-  const active = [];
-  const coveredRanges = []; // [fromKey, toKey] already claimed by a newer entry
-
-  for (const e of forEntry) {
-    const fromK = dateKey(e.fromDate);
-    const toK = dateKey(e.toDate);
-    const overlapsCovered = coveredRanges.some(
-      ([cf, ct]) => fromK <= ct && toK >= cf
-    );
-    if (!overlapsCovered) {
-      active.push(e);
-      coveredRanges.push([fromK, toK]);
-    }
-  }
-  return active;
-}
-
-// Among campaign-level (entryId null) extra-km/hour submissions for a
-// vehicleIndex, only the most recently added, non-superseded ones count.
-function pickActiveVehicleLevelExtraKmEntries(extraKmDetailsArray, vehicleIndex) {
-  const forVehicle = extraKmDetailsArray
-    .filter((e) => !e.entryId && e.vehicleIndex === vehicleIndex)
-    .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt));
-
-  const active = [];
-  const coveredRanges = [];
-  for (const e of forVehicle) {
-    const fromK = dateKey(e.fromDate);
-    const toK = dateKey(e.toDate);
-    const overlapsCovered = coveredRanges.some(([cf, ct]) => fromK <= ct && toK >= cf);
-    if (!overlapsCovered) {
-      active.push(e);
-      coveredRanges.push([fromK, toK]);
-    }
-  }
-  return active;
+// Extra KM/Hours are resolved per vehicle-type SLOT (vehicleIndex), not per
+// currently-active entryId — a record logged against a replaced-out vehicle
+// (entryId of Vehicle A) keeps applying to any day within its own
+// fromDate-toDate range even after Vehicle B takes over the slot. Records
+// are never deleted/migrated/duplicated for this; this only changes which
+// records are "in scope" during resolution. Inclusive day-count between two
+// day-key strings (or dates), used to divide a "split"-distribution record's
+// total evenly across its fromDate-toDate range.
+function daysBetweenInclusive(fromDate, toDate) {
+  const f = new Date(`${dateKey(fromDate)}T00:00:00.000Z`);
+  const t = new Date(`${dateKey(toDate)}T00:00:00.000Z`);
+  return Math.max(Math.round((t - f) / (1000 * 60 * 60 * 24)) + 1, 1);
 }
 
 // Default campaign working window when no actual hours were logged for an
@@ -3615,15 +3623,31 @@ exports.getCampaignCalculator = async (req, res) => {
         .reduce((s, c) => s + (c.compensationValue || 0), 0);
     });
 
+    // Absent Day "extend" resolution — cumulative, one calendar day per
+    // extend-resolved absent day, scoped to that vehicle-type slot only.
+    // This is a purely computed extension for calculator purposes; the
+    // stored bookingItem.toDate is never mutated.
+    const absentExtendDaysByVehicle = {};
+    bookingItems.forEach((_, vehicleIndex) => {
+      absentExtendDaysByVehicle[vehicleIndex] = dailyHoursLogArray.filter(
+        (l) => l.vehicleIndex === vehicleIndex && l.isAbsentDay && l.absentDayResolution === "extend"
+      ).length;
+    });
+
+    // effectiveToDate per vehicleIndex = bookingItem.toDate + campaign-
+    // compensation "days" grants + absent-day "extend" days (cumulative).
+    const effectiveToDateByVehicle = {};
+    bookingItems.forEach((b, idx) => {
+      const baseTo = dateKey(b.toDate);
+      const extra = (extraDaysByVehicle[idx] || 0) + (absentExtendDaysByVehicle[idx] || 0);
+      effectiveToDateByVehicle[idx] = extra > 0 ? addDaysUTC(baseTo, extra) : baseTo;
+    });
+
     const campaignStart = bookingItems
       .map((b) => dateKey(b.fromDate))
       .sort()[0];
     const campaignEnd = bookingItems
-      .map((b, idx) => {
-        const baseTo = dateKey(b.toDate);
-        const extra = extraDaysByVehicle[idx] || 0;
-        return extra > 0 ? addDaysUTC(baseTo, extra) : baseTo;
-      })
+      .map((b, idx) => effectiveToDateByVehicle[idx])
       .sort()
       .slice(-1)[0];
 
@@ -3700,6 +3724,11 @@ exports.getCampaignCalculator = async (req, res) => {
         toDate: b.toDate,
         totalDays: b.totalDays || 0,
         extraDaysGranted,
+        absentExtendDaysGranted: absentExtendDaysByVehicle[idx] || 0,
+        // Computed end date for calculator purposes only (never persisted to
+        // bookingItem.toDate): b.toDate + campaign-compensation days +
+        // cumulative absent-day "extend" days, for this vehicle-type slot.
+        effectiveToDate: effectiveToDateByVehicle[idx],
         totalScheduledDays,
         absentDaysCount,
         completedCampaignDays,
@@ -3719,49 +3748,54 @@ exports.getCampaignCalculator = async (req, res) => {
 
     // ── Extra KM / Hours balance ──────────────────────────────────────────
     // The client pre-purchases a KM/hour pool at Order Creation (bookingItem
-    // .extraKm/.extraHours, already priced into the contract). Usage logged
-    // on-road first draws down that pool for free; only usage beyond the
-    // pool ("overage") is a genuinely new billable charge. We compute, per
-    // vehicle slot, what fraction of all logged usage is overage, then use
-    // that fraction to scale every individual logged entry's cost so the
-    // day-by-day breakdown and the aggregate total stay consistent.
+    // .extraKm/.extraHours). That pool is billed as its own flat, one-time
+    // fee (item.extraKmCost/item.extraHourCost — charged once on the
+    // vehicle's first campaign day, see extraKmPoolFeeToday below) — it is
+    // NOT a free-usage allowance that offsets on-road-logged Extra KM/Hours.
+    // Every on-road-logged record is billed in full, in addition to the
+    // one-time pool fee. This block therefore only computes informational
+    // totals (how much was purchased vs how much was actually logged) for
+    // the Vehicle Breakdown summary card — it no longer reduces any cost.
     const extraKmBalanceByVehicle = {};
     bookingItems.forEach((item, vehicleIndex) => {
-      // The purchased pool is only "available" against usage logged inside
-      // this window — defaults to the vehicle-type slot's full campaign
-      // window when ops haven't narrowed it. Usage logged outside the
-      // window can't draw against the pool at all and falls straight to
-      // overage (billed in full), same as if no pool existed for that day.
       const purchasedWindowFrom = item.purchasedExtraKmFromDate
         ? dateKey(item.purchasedExtraKmFromDate)
         : dateKey(item.fromDate);
       const purchasedWindowTo = item.purchasedExtraKmToDate
         ? dateKey(item.purchasedExtraKmToDate)
         : dateKey(item.toDate);
-      const inPurchasedWindow = (e) =>
-        dateKey(e.fromDate) <= purchasedWindowTo && dateKey(e.toDate) >= purchasedWindowFrom;
+      const slotItemFrom = dateKey(item.fromDate);
+      const slotItemToExtended = effectiveToDateByVehicle[vehicleIndex] || dateKey(item.toDate);
+      const slotRecords = extraKmDetailsArray.filter((e) => e.vehicleIndex === vehicleIndex);
 
-      const entriesForVehicle = extraKmDetailsArray.filter((e) => e.vehicleIndex === vehicleIndex);
-      const entriesInWindow = entriesForVehicle.filter(inPurchasedWindow);
-      const entriesOutOfWindow = entriesForVehicle.filter((e) => !inPurchasedWindow(e));
+      let usedKm = 0, usedHours = 0, usedKmCost = 0, usedHourCost = 0;
 
-      const usedKm = entriesInWindow.reduce((s, e) => s + (e.extraKm || 0), 0);
-      const usedHours = entriesInWindow.reduce((s, e) => s + (e.extraHours || 0), 0);
-      const loggedKmCost = entriesInWindow.reduce((s, e) => s + (e.extraKmCost || 0), 0);
-      const loggedHourCost = entriesInWindow.reduce((s, e) => s + (e.extraHourCost || 0), 0);
+      let balCursor = slotItemFrom;
+      while (balCursor <= slotItemToExtended) {
+        const dayRecords = slotRecords.filter(
+          (e) => dateKey(e.fromDate) <= balCursor && dateKey(e.toDate) >= balCursor
+        );
+        if (dayRecords.length) {
+          const winner = dayRecords
+            .slice()
+            .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))[0];
+          const rangeDays = daysBetweenInclusive(dateKey(winner.fromDate), dateKey(winner.toDate));
+          const method = winner.distributionMethod === "split" ? "split" : "daily";
+          const dayKm = method === "split" ? (winner.extraKm || 0) / rangeDays : (winner.extraKm || 0);
+          const dayHours = method === "split" ? (winner.extraHours || 0) / rangeDays : (winner.extraHours || 0);
+          const dayKmCost = dayKm * (winner.perKmChargeRate || 0);
+          const dayHourCost = dayHours * (winner.additionalHourChargeRate || 0);
+
+          usedKm += dayKm;
+          usedHours += dayHours;
+          usedKmCost += dayKmCost;
+          usedHourCost += dayHourCost;
+        }
+        balCursor = addDaysUTC(balCursor, 1);
+      }
+
       const purchasedKm = item.extraKm || 0;
       const purchasedHours = item.extraHours || 0;
-      const overageKm = Math.max(usedKm - purchasedKm, 0);
-      const overageHours = Math.max(usedHours - purchasedHours, 0);
-      const kmRatio = usedKm > 0 ? overageKm / usedKm : 0;
-      const hourRatio = usedHours > 0 ? overageHours / usedHours : 0;
-
-      // Usage logged outside the purchased window is 100% overage — it
-      // never touches the pool ratio above.
-      const outOfWindowKmCost = entriesOutOfWindow.reduce((s, e) => s + (e.extraKmCost || 0), 0);
-      const outOfWindowHourCost = entriesOutOfWindow.reduce((s, e) => s + (e.extraHourCost || 0), 0);
-      const outOfWindowKm = entriesOutOfWindow.reduce((s, e) => s + (e.extraKm || 0), 0);
-      const outOfWindowHours = entriesOutOfWindow.reduce((s, e) => s + (e.extraHours || 0), 0);
 
       extraKmBalanceByVehicle[vehicleIndex] = {
         vehicleIndex,
@@ -3770,16 +3804,14 @@ exports.getCampaignCalculator = async (req, res) => {
         purchasedWindowFrom,
         purchasedWindowTo,
         isPurchasedWindowCustom: !!(item.purchasedExtraKmFromDate || item.purchasedExtraKmToDate),
-        usedKm,
-        usedHours,
-        remainingKm: Math.max(purchasedKm - usedKm, 0),
-        remainingHours: Math.max(purchasedHours - usedHours, 0),
-        overageKm: Math.round((overageKm + outOfWindowKm) * 100) / 100,
-        overageHours: Math.round((overageHours + outOfWindowHours) * 100) / 100,
-        overageKmCost: Math.round((loggedKmCost * kmRatio + outOfWindowKmCost) * 100) / 100,
-        overageHourCost: Math.round((loggedHourCost * hourRatio + outOfWindowHourCost) * 100) / 100,
-        kmRatio,
-        hourRatio,
+        usedKm: Math.round(usedKm * 10000) / 10000,
+        usedHours: Math.round(usedHours * 10000) / 10000,
+        // The purchased pool is a flat one-time fee, not consumable — the
+        // full logged amount is always billable in full alongside it.
+        overageKm: Math.round(usedKm * 10000) / 10000,
+        overageHours: Math.round(usedHours * 10000) / 10000,
+        overageKmCost: Math.round(usedKmCost * 100) / 100,
+        overageHourCost: Math.round(usedHourCost * 100) / 100,
       };
     });
 
@@ -3798,6 +3830,11 @@ exports.getCampaignCalculator = async (req, res) => {
         resolved.absentHours = hoursLog.absentHours;
         resolved.campaignHours = hoursLog.campaignHours;
         resolved.isAbsentDay = !!hoursLog.isAbsentDay;
+        resolved.billingMode = hoursLog.billingMode || "full";
+        resolved.absentDayResolution = hoursLog.absentDayResolution || null;
+      } else {
+        resolved.billingMode = "full";
+        resolved.absentDayResolution = null;
       }
 
       const issuesForEntry = issuesByEntry[resolved.entryId] || [];
@@ -3872,11 +3909,20 @@ exports.getCampaignCalculator = async (req, res) => {
       bookingItems.forEach((item, vehicleIndex) => {
         const itemFrom = dateKey(item.fromDate);
         const itemTo = dateKey(item.toDate);
-        // Campaign Compensation ("days" type) extends this slot's schedule.
+        // Campaign Compensation ("days" type) + Absent-Day "extend" grants
+        // extend this slot's schedule (effectiveToDate, computed earlier).
         const extraDaysGranted = extraDaysByVehicle[vehicleIndex] || 0;
-        const itemToExtended = extraDaysGranted > 0 ? addDaysUTC(itemTo, extraDaysGranted) : itemTo;
+        const extendDaysGranted = absentExtendDaysByVehicle[vehicleIndex] || 0;
+        const itemToExtended = effectiveToDateByVehicle[vehicleIndex] || itemTo;
         if (dayKey < itemFrom || dayKey > itemToExtended) return; // this vehicle-type's window doesn't include today
         const isCompensationExtensionDay = dayKey > itemTo;
+        // Days added purely by an "extend" absent-day resolution (beyond
+        // whatever campaign-compensation "days" already extended to) must
+        // NOT project a default full-day charge when nothing real has been
+        // logged yet — the compensation-days window comes first, the
+        // absent-day-extend window comes after it.
+        const compExtendedTo = extraDaysGranted > 0 ? addDaysUTC(itemTo, extraDaysGranted) : itemTo;
+        const isAbsentExtensionDay = extendDaysGranted > 0 && dayKey > compExtendedTo && dayKey <= itemToExtended;
 
         const entriesForSlot = onRoadExecutionArray.filter(
           (e) => e.vehicleIndex === vehicleIndex
@@ -3926,8 +3972,6 @@ exports.getCampaignCalculator = async (req, res) => {
           compensationToday += deduction;
         }
 
-        const balance = extraKmBalanceByVehicle[vehicleIndex] || { kmRatio: 0, hourRatio: 0 };
-
         // The client already paid for the purchased Extra KM/Hours pool at
         // Order Creation (item.extraKmCost/extraHourCost) — that flat fee is
         // part of the actual bill regardless of how much of the pool gets
@@ -3938,62 +3982,91 @@ exports.getCampaignCalculator = async (req, res) => {
         let extraKmCost = extraKmPoolFeeToday;
         let extraHourCost = extraHourPoolFeeToday;
         const extraDetailsToday = [];
-        for (const entry of activeEntries) {
-          // Reg-no-specific (entry-scoped) extra KM/hour grants take
-          // precedence over campaign-level (vehicleIndex-scoped, entryId
-          // null) grants for the same vehicle on overlapping dates.
-          const entryPicked = pickActiveExtraKmEntries(extraKmDetailsArray, entry.entryId);
-          const entryCoveredRanges = entryPicked.map((p) => [dateKey(p.fromDate), dateKey(p.toDate)]);
-          const vehiclePicked = pickActiveVehicleLevelExtraKmEntries(extraKmDetailsArray, vehicleIndex).filter(
-            (p) => {
-              const fromK = dateKey(p.fromDate);
-              const toK = dateKey(p.toDate);
-              return !entryCoveredRanges.some(([cf, ct]) => fromK <= ct && toK >= cf);
-            }
-          );
-          const picked = [...entryPicked, ...vehiclePicked];
-          for (const p of picked) {
-            // Attribute the (one-time) extra-usage cost to the last day of
-            // its logged range, so it isn't double-counted across the range.
-            if (dateKey(p.toDate) === dayKey) {
-              // Only the overage fraction (usage beyond the purchased KM/hour
-              // pool) is billable — usage within the pool is already paid
-              // for in the original contract. Usage logged outside the
-              // purchased pool's applicable date window never draws against
-              // the pool at all, so it's billed at full (100% overage) cost.
-              const pInPurchasedWindow =
-                balance.purchasedWindowFrom !== undefined
-                  ? dateKey(p.fromDate) <= balance.purchasedWindowTo &&
-                    dateKey(p.toDate) >= balance.purchasedWindowFrom
-                  : true;
-              const billableKmCost = pInPurchasedWindow
-                ? Math.round((p.extraKmCost || 0) * balance.kmRatio * 100) / 100
-                : Math.round((p.extraKmCost || 0) * 100) / 100;
-              const billableHourCost = pInPurchasedWindow
-                ? Math.round((p.extraHourCost || 0) * balance.hourRatio * 100) / 100
-                : Math.round((p.extraHourCost || 0) * 100) / 100;
-              extraKmCost += billableKmCost;
-              extraHourCost += billableHourCost;
-              extraDetailsToday.push({
-                registrationNumber: entry.vehicleRegistrationNumber,
-                extraKm: p.extraKm,
-                extraHours: p.extraHours,
-                extraKmCost: billableKmCost,
-                extraHourCost: billableHourCost,
-                withinPurchasedBalance: billableKmCost === 0 && billableHourCost === 0,
-                loggedFor: `${dateKey(p.fromDate)} to ${dateKey(p.toDate)}`,
-                addedBy: p.addedBy,
-              });
-            }
-          }
+
+        // Extra KM/Hours resolution is scoped to the vehicle-type SLOT's
+        // full entry history — ALL extraKmDetailsArray records ever created
+        // against ANY entryId that has occupied this vehicleIndex (active or
+        // replaced/removed) are eligible for any day inside their own
+        // fromDate-toDate range, not just the currently-active entryId.
+        const slotRecordsForDay = extraKmDetailsArray.filter(
+          (e) => e.vehicleIndex === vehicleIndex && dateKey(e.fromDate) <= dayKey && dateKey(e.toDate) >= dayKey
+        );
+        if (slotRecordsForDay.length) {
+          // Daily vs Split distribution, resolved per day; when multiple
+          // records apply to the same day, only the latest-added (addedAt)
+          // record's resolved value counts for that day's cost math — all
+          // records stay visible/returned for history/audit regardless.
+          const winner = slotRecordsForDay
+            .slice()
+            .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))[0];
+
+          const rangeDays = daysBetweenInclusive(dateKey(winner.fromDate), dateKey(winner.toDate));
+          const method = winner.distributionMethod === "split" ? "split" : "daily";
+          const resolvedKm = method === "split" ? (winner.extraKm || 0) / rangeDays : (winner.extraKm || 0);
+          const resolvedHours = method === "split" ? (winner.extraHours || 0) / rangeDays : (winner.extraHours || 0);
+
+          const resolvedKmCostRaw = resolvedKm * (winner.perKmChargeRate || 0);
+          const resolvedHourCostRaw = resolvedHours * (winner.additionalHourChargeRate || 0);
+
+          // The purchased Extra KM/Hours pool is already billed in full as
+          // its own one-time fee (extraKmPoolFeeToday/extraHourPoolFeeToday
+          // above) regardless of how much of it gets used — it is NOT a
+          // free-usage allowance that offsets on-road-logged KM/Hours. Every
+          // on-road-logged record is therefore billed in full at the
+          // package rate, independent of the pool.
+          const billableKmCost = Math.round(resolvedKmCostRaw * 100) / 100;
+          const billableHourCost = Math.round(resolvedHourCostRaw * 100) / 100;
+
+          extraKmCost += billableKmCost;
+          extraHourCost += billableHourCost;
+
+          extraDetailsToday.push({
+            registrationNumber: winner.vehicleRegistrationNumber,
+            entryId: winner.entryId ? String(winner.entryId) : null,
+            distributionMethod: method,
+            recordExtraKm: winner.extraKm || 0,
+            recordExtraHours: winner.extraHours || 0,
+            resolvedExtraKmToday: Math.round(resolvedKm * 10000) / 10000,
+            resolvedExtraHoursToday: Math.round(resolvedHours * 10000) / 10000,
+            extraKm: winner.extraKm,
+            extraHours: winner.extraHours,
+            extraKmCost: billableKmCost,
+            extraHourCost: billableHourCost,
+            // Purchased pool is billed separately as a flat one-time fee
+            // (see extraKmPoolFeeToday) — it never offsets this record's
+            // cost, so this is always billed in full.
+            withinPurchasedBalance: false,
+            loggedFor: `${dateKey(winner.fromDate)} to ${dateKey(winner.toDate)}`,
+            addedBy: winner.addedBy,
+            addedAt: winner.addedAt,
+          });
         }
 
-        const rtoAppliedToday = dayKey === itemFrom ? item.rtoCost || 0 : 0;
+        let rtoAppliedToday = dayKey === itemFrom ? item.rtoCost || 0 : 0;
 
-        const promoterAmountToday =
+        let promoterAmountToday =
           item.needPromoter && item.totalDays
             ? Math.round(((item.promoterCost || 0) / item.totalDays) * 100) / 100
             : 0;
+
+        // Bill Partial Running Day / Absent billingMode: scale (or zero) RTO
+        // and Promoter charges too (Rental/Driver are already handled above
+        // via the existing absentHours-based compensationToday deduction,
+        // which already nets a fully-absent day's rental/driver to zero).
+        if (activeEntries.length) {
+          const billingFactors = activeEntries.map((entry) => {
+            if (entry.isAbsentDay || entry.billingMode === "absent") return 0;
+            if (entry.billingMode === "partial") {
+              const expectedHours = entry.totalCampaignHours || CAMPAIGN_HOURS_PER_DAY;
+              return expectedHours > 0 ? Math.min((entry.runningHours || 0) / expectedHours, 1) : 0;
+            }
+            return 1;
+          });
+          const avgBillingFactor =
+            billingFactors.reduce((s, f) => s + f, 0) / billingFactors.length;
+          rtoAppliedToday = Math.round(rtoAppliedToday * avgBillingFactor * 100) / 100;
+          promoterAmountToday = Math.round(promoterAmountToday * avgBillingFactor * 100) / 100;
+        }
 
         const itemDayTotal =
           dailyVehicleAmount +
@@ -4327,6 +4400,7 @@ exports.getDayByDayHistory = async (req, res) => {
       extraKmCost: e.extraKmCost,
       extraHourCost: e.extraHourCost,
       totalCost: e.totalCost,
+      distributionMethod: e.distributionMethod || "daily",
       loggedFor: `${dateKey(e.fromDate)} to ${dateKey(e.toDate)}`,
       comments: "",
       updatedBy: e.addedBy,
@@ -4345,6 +4419,9 @@ exports.getDayByDayHistory = async (req, res) => {
       campaignHours: l.campaignHours,
       runningHours: l.runningHours,
       absentHours: l.absentHours,
+      isAbsentDay: !!l.isAbsentDay,
+      absentDayResolution: l.absentDayResolution || null,
+      billingMode: l.billingMode || "full",
       remarks: l.remarks,
       loggedBy: l.loggedBy,
       loggedAt: l.loggedAt,

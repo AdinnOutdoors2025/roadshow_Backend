@@ -113,6 +113,12 @@ const extraKmHistorySchema = new mongoose.Schema({
   totalCost: { type: Number, default: 0 },
   addedBy: { type: String, default: "" },
   addedAt: { type: Date, default: Date.now },
+  // Extra KM/Hours Daily vs Split distribution: "daily" (default) means the
+  // logged extraKm/extraHours value applies in full on EVERY day within
+  // fromDate-toDate (i.e. the value is a per-day rate); "split" means the
+  // logged value is a total for the whole range, divided evenly across the
+  // number of days in that range.
+  distributionMethod: { type: String, enum: ["daily", "split"], default: "daily" },
 }, { _id: true });
 
 
@@ -131,6 +137,16 @@ const dailyHoursLogSchema = new mongoose.Schema({
   // Vehicle Absent Calculation: when true, the entire day is excluded from
   // "completed campaign days" for this entry, regardless of runningHours.
   isAbsentDay: { type: Boolean, default: false },
+  // Mandatory when isAbsentDay is true (enforced in the controller, not
+  // here): "extend" pushes the vehicle-type slot's effective end date out by
+  // one day (cumulative across multiple extend-resolved absent days),
+  // "close" leaves the campaign end date unchanged. Stays null otherwise.
+  absentDayResolution: { type: String, enum: ["extend", "close", null], default: null },
+  // Separate "bill partial running day" feature: "full" (default) bills the
+  // day's Rental/Driver/RTO/Promoter charges in full, "partial" scales them
+  // by actual running hours ÷ CAMPAIGN_HOURS_PER_DAY (capped at 1.0), and
+  // "absent" zeroes them out entirely (independent of isAbsentDay).
+  billingMode: { type: String, enum: ["full", "partial", "absent"], default: "full" },
   remarks: { type: String, default: "" },
   loggedBy: { type: String, default: "" },
   loggedAt: { type: Date, default: Date.now },
