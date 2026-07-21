@@ -57,6 +57,12 @@ const bookingItemSchema = new mongoose.Schema({
   extraHours: { type: Number, default: 0 },
   extraHourCost: { type: Number, default: 0 },
   extraDays: { type: Number, default: 0 },
+  // Optional date-range scoping for the purchased Extra KM/Hours pool
+  // (extraKm/extraHours above). When unset, the pool is treated as
+  // applicable across the vehicle-type slot's full campaign window
+  // (fromDate–toDate). Ops can narrow this via the Campaign Calculator.
+  purchasedExtraKmFromDate: { type: Date, default: null },
+  purchasedExtraKmToDate: { type: Date, default: null },
   state: String,
   city: String,
   fromLocation: String,
@@ -122,9 +128,28 @@ const dailyHoursLogSchema = new mongoose.Schema({
   campaignHours: { type: Number, default: 8 },
   runningHours: { type: Number, default: 0 },
   absentHours: { type: Number, default: 0 },
+  // Vehicle Absent Calculation: when true, the entire day is excluded from
+  // "completed campaign days" for this entry, regardless of runningHours.
+  isAbsentDay: { type: Boolean, default: false },
   remarks: { type: String, default: "" },
   loggedBy: { type: String, default: "" },
   loggedAt: { type: Date, default: Date.now },
+}, { _id: true });
+
+// Campaign Compensation: extra working hours OR extra campaign days granted
+// for a date range (campaign-level, or scoped to one entry/reg-no), to make
+// up for downtime caused by issues/unavailability.
+const campaignCompensationSchema = new mongoose.Schema({
+  vehicleIndex: { type: Number, required: true },
+  entryId: { type: mongoose.Schema.Types.ObjectId, default: null }, // null = applies to every entry of this vehicleIndex
+  vehicleRegistrationNumber: { type: String, default: "" },
+  compensationType: { type: String, enum: ["hours", "days"], required: true },
+  compensationValue: { type: Number, required: true, min: 0 }, // hours granted per day, or extra days granted
+  fromDate: { type: Date, required: true },
+  toDate: { type: Date, required: true },
+  reason: { type: String, default: "" },
+  addedBy: { type: String, default: "" },
+  addedAt: { type: Date, default: Date.now },
 }, { _id: true });
 
 
@@ -634,6 +659,7 @@ orderEditHistory: { type: [orderEditHistorySchema], default: [] },
     extraKmDetailsArray: { type: [extraKmHistorySchema], default: [] },
     onRoadExtraKm: { type: [onRoadExtraKmSchema], default: [] },
     dailyHoursLogArray: { type: [dailyHoursLogSchema], default: [] },
+    campaignCompensationArray: { type: [campaignCompensationSchema], default: [] },
     clientFeedbackHistory: { type: [clientFeedbackSchema], default: [] },
     campaignClosureArray: { type: [campaignClosureSchema], default: [] },
 

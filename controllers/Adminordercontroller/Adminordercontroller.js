@@ -3019,20 +3019,34 @@ const GST_PERCENT = Number(process.env.GST_PERCENT) || 18;
 exports.addDailyHoursLog = async (req, res) => {
   try {
     const { id } = req.params;
-    const { vehicleIndex, entryId, day, startTime, endTime, remarks, logId } = req.body;
+    const { vehicleIndex, entryId, day, startTime, endTime, remarks, logId, isAbsentDay } = req.body;
 
     const vIdx = Number(vehicleIndex);
+    const absentDayFlag = !!isAbsentDay;
     if (!day) return errorResponse(res, "Day is required", null, 400);
-    if (!startTime) return errorResponse(res, "Start time is required", null, 400);
-    if (!endTime) return errorResponse(res, "End time is required", null, 400);
 
-    const start = new Date(startTime);
-    const end = new Date(endTime);
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      return errorResponse(res, "Invalid time format", null, 400);
-    }
-    if (end <= start) {
-      return errorResponse(res, "End time must be after start time", null, 400);
+    // Vehicle Absent Calculation: a full-day absence doesn't need real
+    // start/end times — the whole day is logged as 0 running / full absent.
+    let start, end, runningHours, absentHours;
+    if (absentDayFlag) {
+      start = new Date(`${day}T00:00:00.000Z`);
+      end = new Date(`${day}T00:00:01.000Z`);
+      runningHours = 0;
+      absentHours = CAMPAIGN_HOURS_PER_DAY;
+    } else {
+      if (!startTime) return errorResponse(res, "Start time is required", null, 400);
+      if (!endTime) return errorResponse(res, "End time is required", null, 400);
+
+      start = new Date(startTime);
+      end = new Date(endTime);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return errorResponse(res, "Invalid time format", null, 400);
+      }
+      if (end <= start) {
+        return errorResponse(res, "End time must be after start time", null, 400);
+      }
+      runningHours = Math.round(((end - start) / (1000 * 60 * 60)) * 100) / 100;
+      absentHours = Math.max(Math.round((CAMPAIGN_HOURS_PER_DAY - runningHours) * 100) / 100, 0);
     }
 
     const order = await Order.findById(id);
@@ -3053,9 +3067,6 @@ exports.addDailyHoursLog = async (req, res) => {
       if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
     }
 
-    const runningHours = Math.round(((end - start) / (1000 * 60 * 60)) * 100) / 100;
-    const absentHours = Math.max(Math.round((CAMPAIGN_HOURS_PER_DAY - runningHours) * 100) / 100, 0);
-
     const loggedBy =
       Number(req.user.isAdmin) === 0
         ? req.user.username
@@ -3073,6 +3084,7 @@ exports.addDailyHoursLog = async (req, res) => {
       campaignHours: CAMPAIGN_HOURS_PER_DAY,
       runningHours,
       absentHours,
+      isAbsentDay: absentDayFlag,
       remarks: remarks || "",
       loggedBy,
       loggedAt: new Date(),
@@ -3095,6 +3107,127 @@ exports.addDailyHoursLog = async (req, res) => {
     return successResponse(res, "Daily hours logged successfully", { order }, 201);
   } catch (error) {
     console.error("Error in addDailyHoursLog:", error);
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+// ── Campaign Compensation ───────────────────────────────────────────────
+// Grants extra working hours (added to a day's running time) or extra
+// campaign days for a date range, to make up for downtime caused by issues
+// or vehicle unavailability. Scope: whole vehicleIndex (entryId omitted) or
+// one specific entry/reg-no (entryId provided).
+// Sets/clears the date-range window within which the Order-Creation-purchased
+// Extra KM/Hours pool (bookingItem.extraKm/extraHours) is treated as
+// "available" against logged usage in the Campaign Calculator. Pass
+// fromDate/toDate to narrow it, or omit both (null) to reset to the vehicle
+// slot's full campaign window (the default behavior).
+exports.setPurchasedPoolWindow = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vehicleIndex, fromDate, toDate } = req.body;
+
+    const vIdx = Number(vehicleIndex);
+    if (Number.isNaN(vIdx)) {
+      return errorResponse(res, "vehicleIndex is required", null, 400);
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const bookingItem = order.bookingItems[vIdx];
+    if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
+
+    let newFrom = null;
+    let newTo = null;
+    if (fromDate || toDate) {
+      if (!fromDate || !toDate) {
+        return errorResponse(res, "Both From date and To date are required (or leave both empty to reset)", null, 400);
+      }
+      newFrom = new Date(fromDate);
+      newTo = new Date(toDate);
+      if (isNaN(newFrom.getTime()) || isNaN(newTo.getTime())) {
+        return errorResponse(res, "Invalid date format", null, 400);
+      }
+      if (newFrom > newTo) {
+        return errorResponse(res, "From date must be before or equal to To date", null, 400);
+      }
+      const itemFrom = new Date(bookingItem.fromDate);
+      const itemTo = new Date(bookingItem.toDate);
+      if (newFrom < itemFrom || newTo > itemTo) {
+        return errorResponse(res, "The pool window must fall within this vehicle's campaign dates", null, 400);
+      }
+    }
+
+    bookingItem.purchasedExtraKmFromDate = newFrom;
+    bookingItem.purchasedExtraKmToDate = newTo;
+
+    await order.save();
+
+    return successResponse(res, "Purchased Extra KM/Hours pool window updated successfully", { order }, 200);
+  } catch (error) {
+    console.error("Error in setPurchasedPoolWindow:", error);
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+exports.addCampaignCompensation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vehicleIndex, entryId, compensationType, compensationValue, fromDate, toDate, reason } = req.body;
+
+    const vIdx = Number(vehicleIndex);
+    const value = Number(compensationValue) || 0;
+    if (!["hours", "days"].includes(compensationType)) {
+      return errorResponse(res, "compensationType must be 'hours' or 'days'", null, 400);
+    }
+    if (value <= 0) return errorResponse(res, "Enter a compensation value greater than 0", null, 400);
+    if (!fromDate) return errorResponse(res, "From date is required", null, 400);
+    if (!toDate) return errorResponse(res, "To date is required", null, 400);
+
+    const newFrom = new Date(fromDate);
+    const newTo = new Date(toDate);
+    if (isNaN(newFrom.getTime()) || isNaN(newTo.getTime())) {
+      return errorResponse(res, "Invalid date format", null, 400);
+    }
+    if (newFrom > newTo) {
+      return errorResponse(res, "From date must be before or equal to To date", null, 400);
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const bookingItem = order.bookingItems[vIdx];
+    if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
+
+    let entry = null;
+    if (entryId) {
+      entry = order.onRoadExecutionArray.id(entryId);
+      if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
+    }
+
+    const addedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    order.campaignCompensationArray.push({
+      vehicleIndex: vIdx,
+      entryId: entry ? entry._id : null,
+      vehicleRegistrationNumber: entry?.vehicleRegistrationNumber || "",
+      compensationType,
+      compensationValue: value,
+      fromDate: newFrom,
+      toDate: newTo,
+      reason: reason || "",
+      addedBy,
+      addedAt: new Date(),
+    });
+
+    await order.save();
+
+    return successResponse(res, "Campaign compensation added successfully", { order }, 201);
+  } catch (error) {
+    console.error("Error in addCampaignCompensation:", error);
     return errorResponse(res, error.message, null, 500);
   }
 };
@@ -3215,7 +3348,20 @@ function resolveEntryStateForDay(entry, historyForEntry, dayKey) {
     }
   }
 
-  if (!state || removed) return removed ? { removed: true, releasedOnThisDay } : null;
+  if (!state || removed) {
+    return removed
+      ? {
+          removed: true,
+          releasedOnThisDay,
+          entryId: String(entry._id),
+          driverName: state ? state.driverName : entry.driverName,
+          driverPhone: state ? state.driverPhone : entry.driverPhone,
+          vehicleRegistrationNumber: state
+            ? state.vehicleRegistrationNumber
+            : entry.vehicleRegistrationNumber,
+        }
+      : null;
+  }
 
   return {
     entryId: String(entry._id),
@@ -3253,6 +3399,187 @@ function pickActiveExtraKmEntries(extraKmDetailsArray, entryId) {
   return active;
 }
 
+// Among campaign-level (entryId null) extra-km/hour submissions for a
+// vehicleIndex, only the most recently added, non-superseded ones count.
+function pickActiveVehicleLevelExtraKmEntries(extraKmDetailsArray, vehicleIndex) {
+  const forVehicle = extraKmDetailsArray
+    .filter((e) => !e.entryId && e.vehicleIndex === vehicleIndex)
+    .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt));
+
+  const active = [];
+  const coveredRanges = [];
+  for (const e of forVehicle) {
+    const fromK = dateKey(e.fromDate);
+    const toK = dateKey(e.toDate);
+    const overlapsCovered = coveredRanges.some(([cf, ct]) => fromK <= ct && toK >= cf);
+    if (!overlapsCovered) {
+      active.push(e);
+      coveredRanges.push([fromK, toK]);
+    }
+  }
+  return active;
+}
+
+// Default campaign working window when no actual hours were logged for an
+// entry/day: 4:00 PM – Midnight (8 hours), matching the frontend's
+// NEXT_PUBLIC_DEFAULT_LOGIN_TIME/NEXT_PUBLIC_DEFAULT_LOGOUT_TIME defaults
+// used by LogHoursModal. When an entry/day DOES have a real dailyHoursLog
+// entry, that log's own startTime/endTime is used as the window instead
+// (see resolveWorkWindow below) — this constant is only the fallback.
+const DEFAULT_WORK_START_HOUR = Number(process.env.DEFAULT_WORK_START_HOUR);
+const DEFAULT_WORK_END_HOUR = Number(process.env.DEFAULT_WORK_END_HOUR);
+
+// The default work window's hours (e.g. 16:00-24:00) are meant to represent
+// wall-clock IST hours ("4:00 PM - Midnight IST"), matching the frontend's
+// NEXT_PUBLIC_DEFAULT_LOGIN_TIME/LOGOUT_TIME which are entered/displayed as
+// IST times by staff. They must therefore be anchored as literal IST instants
+// (UTC+5:30), NOT as raw UTC hours — anchoring them as UTC hours previously
+// made a "4:00 PM-Midnight" window actually fall at 9:30 PM-5:30 AM IST once
+// rendered in the browser's local timezone, which is what every OTHER
+// timestamp in this response (real event timestamps) is rendered in. Building
+// every timeline boundary — synthetic default-window ones AND real
+// event-derived ones — as genuine instants that equal the intended IST
+// wall-clock time keeps a single, consistent local-time rendering convention
+// usable everywhere on the frontend (see fmtClock/fmtDatetime in
+// CampaignCalculatorTab.tsx).
+const IST_OFFSET = "+05:30";
+function istWallClock(dayKeyStr, hour) {
+  // hour may be 24 (midnight rollover into next day), handled via addDaysUTC
+  // on the *date* portion while the wall-clock hour itself stays 00.
+  if (hour >= 24) {
+    const nextDay = addDaysUTC(dayKeyStr, Math.floor(hour / 24));
+    return new Date(`${nextDay}T${String(hour % 24).padStart(2, "0")}:00:00${IST_OFFSET}`);
+  }
+  return new Date(`${dayKeyStr}T${String(hour).padStart(2, "0")}:00:00${IST_OFFSET}`);
+}
+
+// Resolves the actual working window [start,end] for one entry/day: prefers
+// the real logged startTime/endTime from dailyHoursLogArray for that
+// entry/day (when it's a real timed log, not a full-day-absence placeholder
+// entry); otherwise falls back to the default 4PM-Midnight IST window built
+// on top of dayKeyStr (see istWallClock above).
+function resolveWorkWindow(dayKeyStr, hoursLog) {
+  if (hoursLog && hoursLog.startTime && hoursLog.endTime && !hoursLog.isAbsentDay) {
+    const start = new Date(hoursLog.startTime);
+    const end = new Date(hoursLog.endTime);
+    if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end > start) {
+      return { start, end };
+    }
+  }
+  const start = istWallClock(dayKeyStr, DEFAULT_WORK_START_HOUR);
+  const end = istWallClock(dayKeyStr, DEFAULT_WORK_END_HOUR); // 24 correctly rolls into next-day 00:00 IST
+  return { start, end };
+}
+
+// Builds the classified running-time event sequence for one entry/day: a
+// sorted walk across window-start, every issue's reportedAt/resolvedAt, and
+// every (non-replacement) unavailable-history reportedAt/resolvedAt, all
+// clipped into [windowStart, entryEndCap]. Gaps are running by default;
+// they become "issue" while an issue is open, and "unavailable" while a
+// standalone unavailable-status record is open. If this entry was replaced
+// this day (a "replaced" record with a `replacedAt`), that timestamp caps
+// the entry's own day (the new entryId picks up the rest via its own
+// creation-clip) and — since the vehicle demonstrably never resumed running
+// after its first down event that day — every gap from that first down
+// event onward through the cap is treated as "unavailable" too, so an
+// informational "marked unavailable" status change sitting inside that span
+// doesn't get misread as a return to running.
+function buildEntryDayTimeline(windowStart, windowEnd, issuesForEntry, unavailForEntry, entryCreatedClip) {
+  const clip = (d) => {
+    if (!d) return null;
+    const t = new Date(d);
+    if (isNaN(t.getTime())) return null;
+    if (t < windowStart) return new Date(windowStart);
+    if (t > windowEnd) return new Date(windowEnd);
+    return t;
+  };
+
+  const replacedRecord = (unavailForEntry || [])
+    .filter((h) => h.eventType === "replaced" && h.replacedAt)
+    .sort((a, b) => new Date(a.replacedAt) - new Date(b.replacedAt))[0];
+  const entryEndCap = replacedRecord ? clip(replacedRecord.replacedAt) || windowEnd : windowEnd;
+
+  let effectiveStart = windowStart;
+  if (entryCreatedClip) {
+    const cc = clip(entryCreatedClip);
+    if (cc && cc > effectiveStart) effectiveStart = cc;
+  }
+
+  if (entryEndCap <= effectiveStart) {
+    return { timeline: [], runningHours: 0, issueHours: 0, unavailableHours: 0 };
+  }
+
+  const issueIntervals = [];
+  for (const iss of issuesForEntry || []) {
+    const s = clip(iss.reportedAt);
+    if (!s || s >= entryEndCap) continue;
+    let e = clip(iss.resolvedAt) || entryEndCap;
+    if (e > entryEndCap) e = entryEndCap;
+    if (e > s) issueIntervals.push([s, e]);
+  }
+
+  const unavailIntervals = [];
+  for (const h of unavailForEntry || []) {
+    if (h.eventType === "replaced") continue; // boundary marker only (entryEndCap), not its own segment
+    const s = clip(h.reportedAt);
+    if (!s || s >= entryEndCap) continue;
+    let e = clip(h.resolvedAt) || entryEndCap;
+    if (e > entryEndCap) e = entryEndCap;
+    if (e > s) unavailIntervals.push([s, e]);
+  }
+
+  const allDownStarts = [...issueIntervals, ...unavailIntervals].map(([s]) => s);
+  const downFloor =
+    replacedRecord && allDownStarts.length
+      ? allDownStarts.reduce((m, s) => (s < m ? s : m))
+      : null;
+
+  const points = new Set([effectiveStart.getTime(), entryEndCap.getTime()]);
+  issueIntervals.forEach(([s, e]) => { points.add(s.getTime()); points.add(e.getTime()); });
+  unavailIntervals.forEach(([s, e]) => { points.add(s.getTime()); points.add(e.getTime()); });
+  if (downFloor) points.add(downFloor.getTime());
+
+  const sorted = Array.from(points)
+    .filter((ms) => ms >= effectiveStart.getTime() && ms <= entryEndCap.getTime())
+    .sort((a, b) => a - b)
+    .map((ms) => new Date(ms));
+
+  const timeline = [];
+  let runningHours = 0;
+  let issueHours = 0;
+  let unavailableHours = 0;
+
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const segStart = sorted[i];
+    const segEnd = sorted[i + 1];
+    if (segEnd <= segStart) continue;
+    const hours = Math.round(((segEnd - segStart) / (1000 * 60 * 60)) * 100) / 100;
+    if (hours <= 0) continue;
+    const mid = new Date((segStart.getTime() + segEnd.getTime()) / 2);
+
+    let type = "running";
+    if (issueIntervals.some(([s, e]) => mid >= s && mid < e)) {
+      type = "issue";
+    } else if (unavailIntervals.some(([s, e]) => mid >= s && mid < e)) {
+      type = "unavailable";
+    } else if (downFloor && mid >= downFloor && mid < entryEndCap) {
+      type = "unavailable";
+    }
+
+    timeline.push({ type, start: segStart, end: segEnd, hours });
+    if (type === "running") runningHours += hours;
+    else if (type === "issue") issueHours += hours;
+    else unavailableHours += hours;
+  }
+
+  return {
+    timeline,
+    runningHours: Math.round(runningHours * 100) / 100,
+    issueHours: Math.round(issueHours * 100) / 100,
+    unavailableHours: Math.round(unavailableHours * 100) / 100,
+  };
+}
+
 exports.getCampaignCalculator = async (req, res) => {
   try {
     const { id } = req.params;
@@ -3266,8 +3593,11 @@ exports.getCampaignCalculator = async (req, res) => {
 
     const onRoadExecutionArray = order.onRoadExecutionArray || [];
     const onRoadDriverHistory = order.onRoadDriverHistory || [];
+    const onRoadIssues = order.onRoadIssues || [];
+    const onRoadUnavailableHistory = order.onRoadUnavailableHistory || [];
     const extraKmDetailsArray = order.extraKmDetailsArray || [];
     const dailyHoursLogArray = order.dailyHoursLogArray || [];
+    const campaignCompensationArray = order.campaignCompensationArray || [];
 
     // Pre-group actual-hours logs by entryId + day for O(1) lookup.
     const hoursLogByEntryDay = {};
@@ -3276,16 +3606,65 @@ exports.getCampaignCalculator = async (req, res) => {
       hoursLogByEntryDay[`${String(l.entryId)}|${l.day}`] = l;
     }
 
+    // Campaign Compensation ("days" type) — extra campaign days granted per
+    // vehicle-type slot, added to that slot's schedule window.
+    const extraDaysByVehicle = {};
+    bookingItems.forEach((_, vehicleIndex) => {
+      extraDaysByVehicle[vehicleIndex] = campaignCompensationArray
+        .filter((c) => c.compensationType === "days" && c.vehicleIndex === vehicleIndex)
+        .reduce((s, c) => s + (c.compensationValue || 0), 0);
+    });
+
     const campaignStart = bookingItems
       .map((b) => dateKey(b.fromDate))
       .sort()[0];
     const campaignEnd = bookingItems
-      .map((b) => dateKey(b.toDate))
+      .map((b, idx) => {
+        const baseTo = dateKey(b.toDate);
+        const extra = extraDaysByVehicle[idx] || 0;
+        return extra > 0 ? addDaysUTC(baseTo, extra) : baseTo;
+      })
       .sort()
       .slice(-1)[0];
 
     if (!campaignStart || !campaignEnd) {
       return errorResponse(res, "Campaign dates are missing on this order", null, 400);
+    }
+
+    // Vehicle Issue Duration + Vehicle Unavailable Duration: pre-group by
+    // entryId so per-day derivation below is O(1) per entry.
+    const issuesByEntry = {};
+    for (const iss of onRoadIssues) {
+      const key = iss.entryId ? String(iss.entryId) : `vi-${iss.vehicleIndex}`;
+      (issuesByEntry[key] = issuesByEntry[key] || []).push(iss);
+    }
+    const unavailByEntry = {};
+    for (const h of onRoadUnavailableHistory) {
+      const key = h.entryId ? String(h.entryId) : `vi-${h.vehicleIndex}`;
+      (unavailByEntry[key] = unavailByEntry[key] || []).push(h);
+    }
+
+    // Campaign Compensation ("hours" type) — pre-group so entry-specific
+    // grants (entryId set) can take precedence over campaign-level grants
+    // (entryId null) for the same vehicleIndex/day.
+    const hourCompByEntry = {};
+    const hourCompByVehicle = {};
+    for (const c of campaignCompensationArray) {
+      if (c.compensationType !== "hours") continue;
+      if (c.entryId) {
+        (hourCompByEntry[String(c.entryId)] = hourCompByEntry[String(c.entryId)] || []).push(c);
+      } else {
+        (hourCompByVehicle[c.vehicleIndex] = hourCompByVehicle[c.vehicleIndex] || []).push(c);
+      }
+    }
+    function compensationHoursFor(entryId, vehicleIndex, dayKeyStr) {
+      const inRange = (c) => dateKey(c.fromDate) <= dayKeyStr && dateKey(c.toDate) >= dayKeyStr;
+      const entryGrants = (hourCompByEntry[entryId] || []).filter(inRange);
+      if (entryGrants.length) {
+        return Math.round(entryGrants.reduce((s, c) => s + c.compensationValue, 0) * 100) / 100;
+      }
+      const vehicleGrants = (hourCompByVehicle[vehicleIndex] || []).filter(inRange);
+      return Math.round(vehicleGrants.reduce((s, c) => s + c.compensationValue, 0) * 100) / 100;
     }
 
     // Pre-group history + extras by entryId for fast lookup per day.
@@ -3298,26 +3677,45 @@ exports.getCampaignCalculator = async (req, res) => {
       arr.sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt))
     );
 
-    const bookingItemsMeta = bookingItems.map((b, idx) => ({
-      vehicleIndex: idx,
-      vehicleType: b.vehicleType,
-      vehicleModel: b.vehicleModel,
-      quantity: b.quantity || 0,
-      fromDate: b.fromDate,
-      toDate: b.toDate,
-      totalDays: b.totalDays || 0,
-      perDayRentalCost: b.perDayRentalCost || 0,
-      driverCharges: b.driverCharges || 0,
-      rtoCost: b.rtoCost || 0,
-      needPromoter: !!b.needPromoter,
-      promoterCost: b.promoterCost || 0,
-      // Estimate figures as stored at Order Creation time — used only to
-      // show the client the Estimated-vs-Actual breakdown, never re-billed.
-      estimatedRentalCost: (b.rentalCost || 0) + (b.driverCost || 0),
-      estimatedExtraKmCost: b.extraKmCost || 0,
-      estimatedExtraHourCost: b.extraHourCost || 0,
-      estimatedTotalAmount: b.totalAmount || 0,
-    }));
+    const bookingItemsMeta = bookingItems.map((b, idx) => {
+      // Vehicle Absent Calculation: a day marked fully absent for ANY active
+      // entry of this vehicle-type slot doesn't count as a completed
+      // campaign day for that slot.
+      const absentDaySet = new Set(
+        dailyHoursLogArray
+          .filter((l) => l.vehicleIndex === idx && l.isAbsentDay)
+          .map((l) => l.day)
+      );
+      const extraDaysGranted = extraDaysByVehicle[idx] || 0;
+      const totalScheduledDays = (b.totalDays || 0) + extraDaysGranted;
+      const absentDaysCount = absentDaySet.size;
+      const completedCampaignDays = Math.max(totalScheduledDays - absentDaysCount, 0);
+
+      return {
+        vehicleIndex: idx,
+        vehicleType: b.vehicleType,
+        vehicleModel: b.vehicleModel,
+        quantity: b.quantity || 0,
+        fromDate: b.fromDate,
+        toDate: b.toDate,
+        totalDays: b.totalDays || 0,
+        extraDaysGranted,
+        totalScheduledDays,
+        absentDaysCount,
+        completedCampaignDays,
+        perDayRentalCost: b.perDayRentalCost || 0,
+        driverCharges: b.driverCharges || 0,
+        rtoCost: b.rtoCost || 0,
+        needPromoter: !!b.needPromoter,
+        promoterCost: b.promoterCost || 0,
+        // Estimate figures as stored at Order Creation time — used only to
+        // show the client the Estimated-vs-Actual breakdown, never re-billed.
+        estimatedRentalCost: (b.rentalCost || 0) + (b.driverCost || 0),
+        estimatedExtraKmCost: b.extraKmCost || 0,
+        estimatedExtraHourCost: b.extraHourCost || 0,
+        estimatedTotalAmount: b.totalAmount || 0,
+      };
+    });
 
     // ── Extra KM / Hours balance ──────────────────────────────────────────
     // The client pre-purchases a KM/hour pool at Order Creation (bookingItem
@@ -3329,11 +3727,28 @@ exports.getCampaignCalculator = async (req, res) => {
     // day-by-day breakdown and the aggregate total stay consistent.
     const extraKmBalanceByVehicle = {};
     bookingItems.forEach((item, vehicleIndex) => {
+      // The purchased pool is only "available" against usage logged inside
+      // this window — defaults to the vehicle-type slot's full campaign
+      // window when ops haven't narrowed it. Usage logged outside the
+      // window can't draw against the pool at all and falls straight to
+      // overage (billed in full), same as if no pool existed for that day.
+      const purchasedWindowFrom = item.purchasedExtraKmFromDate
+        ? dateKey(item.purchasedExtraKmFromDate)
+        : dateKey(item.fromDate);
+      const purchasedWindowTo = item.purchasedExtraKmToDate
+        ? dateKey(item.purchasedExtraKmToDate)
+        : dateKey(item.toDate);
+      const inPurchasedWindow = (e) =>
+        dateKey(e.fromDate) <= purchasedWindowTo && dateKey(e.toDate) >= purchasedWindowFrom;
+
       const entriesForVehicle = extraKmDetailsArray.filter((e) => e.vehicleIndex === vehicleIndex);
-      const usedKm = entriesForVehicle.reduce((s, e) => s + (e.extraKm || 0), 0);
-      const usedHours = entriesForVehicle.reduce((s, e) => s + (e.extraHours || 0), 0);
-      const loggedKmCost = entriesForVehicle.reduce((s, e) => s + (e.extraKmCost || 0), 0);
-      const loggedHourCost = entriesForVehicle.reduce((s, e) => s + (e.extraHourCost || 0), 0);
+      const entriesInWindow = entriesForVehicle.filter(inPurchasedWindow);
+      const entriesOutOfWindow = entriesForVehicle.filter((e) => !inPurchasedWindow(e));
+
+      const usedKm = entriesInWindow.reduce((s, e) => s + (e.extraKm || 0), 0);
+      const usedHours = entriesInWindow.reduce((s, e) => s + (e.extraHours || 0), 0);
+      const loggedKmCost = entriesInWindow.reduce((s, e) => s + (e.extraKmCost || 0), 0);
+      const loggedHourCost = entriesInWindow.reduce((s, e) => s + (e.extraHourCost || 0), 0);
       const purchasedKm = item.extraKm || 0;
       const purchasedHours = item.extraHours || 0;
       const overageKm = Math.max(usedKm - purchasedKm, 0);
@@ -3341,22 +3756,108 @@ exports.getCampaignCalculator = async (req, res) => {
       const kmRatio = usedKm > 0 ? overageKm / usedKm : 0;
       const hourRatio = usedHours > 0 ? overageHours / usedHours : 0;
 
+      // Usage logged outside the purchased window is 100% overage — it
+      // never touches the pool ratio above.
+      const outOfWindowKmCost = entriesOutOfWindow.reduce((s, e) => s + (e.extraKmCost || 0), 0);
+      const outOfWindowHourCost = entriesOutOfWindow.reduce((s, e) => s + (e.extraHourCost || 0), 0);
+      const outOfWindowKm = entriesOutOfWindow.reduce((s, e) => s + (e.extraKm || 0), 0);
+      const outOfWindowHours = entriesOutOfWindow.reduce((s, e) => s + (e.extraHours || 0), 0);
+
       extraKmBalanceByVehicle[vehicleIndex] = {
         vehicleIndex,
         purchasedKm,
         purchasedHours,
+        purchasedWindowFrom,
+        purchasedWindowTo,
+        isPurchasedWindowCustom: !!(item.purchasedExtraKmFromDate || item.purchasedExtraKmToDate),
         usedKm,
         usedHours,
         remainingKm: Math.max(purchasedKm - usedKm, 0),
         remainingHours: Math.max(purchasedHours - usedHours, 0),
-        overageKm: Math.round(overageKm * 100) / 100,
-        overageHours: Math.round(overageHours * 100) / 100,
-        overageKmCost: Math.round(loggedKmCost * kmRatio * 100) / 100,
-        overageHourCost: Math.round(loggedHourCost * hourRatio * 100) / 100,
+        overageKm: Math.round((overageKm + outOfWindowKm) * 100) / 100,
+        overageHours: Math.round((overageHours + outOfWindowHours) * 100) / 100,
+        overageKmCost: Math.round((loggedKmCost * kmRatio + outOfWindowKmCost) * 100) / 100,
+        overageHourCost: Math.round((loggedHourCost * hourRatio + outOfWindowHourCost) * 100) / 100,
         kmRatio,
         hourRatio,
       };
     });
+
+    // Computes the running/issue/unavailable-hour figures for one entry on
+    // one day — shared by both still-active entries and entries that were
+    // released (removed) on this exact day, so a released entry gets the
+    // same real, event-derived figures instead of being reduced to a bare
+    // registration-number string.
+    function computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay) {
+      const createdEvent = hist.find((h) => h.action === "created");
+      resolved.isReplacement = !!(createdEvent && dateKey(createdEvent.changedAt) > itemFrom);
+
+      const hoursLog = hoursLogByEntryDay[`${resolved.entryId}|${dayKey}`];
+      if (hoursLog) {
+        resolved.runningHours = hoursLog.runningHours;
+        resolved.absentHours = hoursLog.absentHours;
+        resolved.campaignHours = hoursLog.campaignHours;
+        resolved.isAbsentDay = !!hoursLog.isAbsentDay;
+      }
+
+      const issuesForEntry = issuesByEntry[resolved.entryId] || [];
+      const unavailForEntry = unavailByEntry[resolved.entryId] || [];
+
+      let { start: dayWindowStart, end: dayWindowEnd } = resolveWorkWindow(dayKey, hoursLog);
+      // Bug C fix: for the current, still-in-progress calendar day, never
+      // project the timeline past the real current moment — a fresh entry
+      // with no down-events yet should show only its actual elapsed running
+      // time so far, not an assumed "runs uninterrupted to the end of the
+      // work window" projection. Past, fully-completed days keep the full
+      // window (legitimate for cost/reporting once the day is over).
+      const now = new Date();
+      if (dayKey === dateKey(now) && dayWindowEnd > now) {
+        dayWindowEnd = now;
+      }
+      const entryCreatedClip =
+        createdEvent && dateKey(createdEvent.changedAt) === dayKey
+          ? new Date(createdEvent.changedAt)
+          : null;
+
+      const entryTimeline = buildEntryDayTimeline(
+        dayWindowStart,
+        dayWindowEnd,
+        issuesForEntry,
+        unavailForEntry,
+        entryCreatedClip
+      );
+
+      const issueHours = entryTimeline.issueHours;
+      const unavailableHours = entryTimeline.unavailableHours;
+      const downtimeHours = Math.round((issueHours + unavailableHours) * 100) / 100;
+      resolved.totalCampaignHours = resolved.campaignHours || CAMPAIGN_HOURS_PER_DAY;
+      resolved.issueHours = issueHours;
+      resolved.unavailableHours = unavailableHours;
+      resolved.downtimeHours = downtimeHours;
+      resolved.timeline = entryTimeline.timeline;
+
+      if (!hoursLog) {
+        resolved.runningHours = entryTimeline.runningHours;
+      }
+
+      resolved.compensationHours = compensationHoursFor(resolved.entryId, vehicleIndex, dayKey);
+      resolved.isCompensationExtensionDay = isCompensationExtensionDay;
+
+      // Surface explicit replacement info: was this entry replaced by
+      // another vehicle on this day (per onRoadUnavailableHistory's
+      // "replaced" record)? Used so a released/removed entry's card can say
+      // "Replaced by <reg>" instead of silently vanishing into a bare name.
+      const replacedRecord = unavailForEntry
+        .filter((h) => h.eventType === "replaced" && h.replacedAt && dateKey(h.replacedAt) === dayKey)
+        .sort((a, b) => new Date(b.replacedAt) - new Date(a.replacedAt))[0];
+      if (replacedRecord) {
+        resolved.wasReplacedToday = true;
+        resolved.replacedByRegistrationNumber = replacedRecord.replacementVehicleRegNo || null;
+        resolved.replacedAt = replacedRecord.replacedAt;
+      }
+
+      return resolved;
+    }
 
     const days = [];
     let cumulativeTotal = 0;
@@ -3371,7 +3872,11 @@ exports.getCampaignCalculator = async (req, res) => {
       bookingItems.forEach((item, vehicleIndex) => {
         const itemFrom = dateKey(item.fromDate);
         const itemTo = dateKey(item.toDate);
-        if (dayKey < itemFrom || dayKey > itemTo) return; // this vehicle-type's window doesn't include today
+        // Campaign Compensation ("days" type) extends this slot's schedule.
+        const extraDaysGranted = extraDaysByVehicle[vehicleIndex] || 0;
+        const itemToExtended = extraDaysGranted > 0 ? addDaysUTC(itemTo, extraDaysGranted) : itemTo;
+        if (dayKey < itemFrom || dayKey > itemToExtended) return; // this vehicle-type's window doesn't include today
+        const isCompensationExtensionDay = dayKey > itemTo;
 
         const entriesForSlot = onRoadExecutionArray.filter(
           (e) => e.vehicleIndex === vehicleIndex
@@ -3386,22 +3891,22 @@ exports.getCampaignCalculator = async (req, res) => {
           const resolved = resolveEntryStateForDay(entry, hist, dayKey);
           if (!resolved) continue;
           if (resolved.removed) {
-            if (resolved.releasedOnThisDay) releasedToday.push(entry.vehicleRegistrationNumber);
+            if (resolved.releasedOnThisDay) {
+              // Give the released entry the same real, event-derived
+              // running/issue/unavailable figures (and replacement linkage)
+              // as an active entry gets, instead of collapsing it down to a
+              // bare registration-number string.
+              computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay);
+              releasedToday.push(resolved);
+            }
             continue;
           }
-          // Mark as replacement if this entry's very first ("created") event
-          // happened after the vehicle-type's own campaign start date.
-          const createdEvent = hist.find((h) => h.action === "created");
-          resolved.isReplacement = !!(createdEvent && dateKey(createdEvent.changedAt) > itemFrom);
-
-          // Attach actual hours logged for this entry on this day, if any,
-          // and dock a proportional share of the daily rate for absent hours.
-          const hoursLog = hoursLogByEntryDay[`${resolved.entryId}|${dayKey}`];
-          if (hoursLog) {
-            resolved.runningHours = hoursLog.runningHours;
-            resolved.absentHours = hoursLog.absentHours;
-            resolved.campaignHours = hoursLog.campaignHours;
-          }
+          // Vehicle Issue Duration + Vehicle Unavailable/Replacement Duration:
+          // derived (not stored) from onRoadIssues / onRoadUnavailableHistory
+          // timestamps, via a real event-sequence walk across this entry/
+          // day's actual working window (logged hours, or the default
+          // window) instead of a hardcoded 9AM-5PM clip.
+          computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay);
 
           activeEntries.push(resolved);
         }
@@ -3434,16 +3939,39 @@ exports.getCampaignCalculator = async (req, res) => {
         let extraHourCost = extraHourPoolFeeToday;
         const extraDetailsToday = [];
         for (const entry of activeEntries) {
-          const picked = pickActiveExtraKmEntries(extraKmDetailsArray, entry.entryId);
+          // Reg-no-specific (entry-scoped) extra KM/hour grants take
+          // precedence over campaign-level (vehicleIndex-scoped, entryId
+          // null) grants for the same vehicle on overlapping dates.
+          const entryPicked = pickActiveExtraKmEntries(extraKmDetailsArray, entry.entryId);
+          const entryCoveredRanges = entryPicked.map((p) => [dateKey(p.fromDate), dateKey(p.toDate)]);
+          const vehiclePicked = pickActiveVehicleLevelExtraKmEntries(extraKmDetailsArray, vehicleIndex).filter(
+            (p) => {
+              const fromK = dateKey(p.fromDate);
+              const toK = dateKey(p.toDate);
+              return !entryCoveredRanges.some(([cf, ct]) => fromK <= ct && toK >= cf);
+            }
+          );
+          const picked = [...entryPicked, ...vehiclePicked];
           for (const p of picked) {
             // Attribute the (one-time) extra-usage cost to the last day of
             // its logged range, so it isn't double-counted across the range.
             if (dateKey(p.toDate) === dayKey) {
               // Only the overage fraction (usage beyond the purchased KM/hour
               // pool) is billable — usage within the pool is already paid
-              // for in the original contract.
-              const billableKmCost = Math.round((p.extraKmCost || 0) * balance.kmRatio * 100) / 100;
-              const billableHourCost = Math.round((p.extraHourCost || 0) * balance.hourRatio * 100) / 100;
+              // for in the original contract. Usage logged outside the
+              // purchased pool's applicable date window never draws against
+              // the pool at all, so it's billed at full (100% overage) cost.
+              const pInPurchasedWindow =
+                balance.purchasedWindowFrom !== undefined
+                  ? dateKey(p.fromDate) <= balance.purchasedWindowTo &&
+                    dateKey(p.toDate) >= balance.purchasedWindowFrom
+                  : true;
+              const billableKmCost = pInPurchasedWindow
+                ? Math.round((p.extraKmCost || 0) * balance.kmRatio * 100) / 100
+                : Math.round((p.extraKmCost || 0) * 100) / 100;
+              const billableHourCost = pInPurchasedWindow
+                ? Math.round((p.extraHourCost || 0) * balance.hourRatio * 100) / 100
+                : Math.round((p.extraHourCost || 0) * 100) / 100;
               extraKmCost += billableKmCost;
               extraHourCost += billableHourCost;
               extraDetailsToday.push({
@@ -3477,6 +4005,12 @@ exports.getCampaignCalculator = async (req, res) => {
 
         dayTotal += itemDayTotal;
 
+        // Daily Campaign Running Summary rollup for this vehicle-type/day.
+        const issueHoursToday = Math.round(activeEntries.reduce((s, e) => s + (e.issueHours || 0), 0) * 100) / 100;
+        const unavailableHoursToday = Math.round(activeEntries.reduce((s, e) => s + (e.unavailableHours || 0), 0) * 100) / 100;
+        const downtimeHoursToday = Math.round((issueHoursToday + unavailableHoursToday) * 100) / 100;
+        const compensationHoursGrantedToday = Math.round(activeEntries.reduce((s, e) => s + (e.compensationHours || 0), 0) * 100) / 100;
+
         vehicles.push({
           vehicleIndex,
           vehicleType: item.vehicleType,
@@ -3495,6 +4029,11 @@ exports.getCampaignCalculator = async (req, res) => {
           rtoAppliedToday,
           promoterAmountToday,
           compensationToday: Math.round(compensationToday * 100) / 100,
+          issueHoursToday,
+          unavailableHoursToday,
+          downtimeHoursToday,
+          compensationHoursGrantedToday,
+          isCompensationExtensionDay,
           itemDayTotal,
         });
       });
@@ -3525,6 +4064,13 @@ exports.getCampaignCalculator = async (req, res) => {
     const actualPromoter = allVehicles.reduce((s, v) => s + (v.promoterAmountToday || 0), 0);
     const totalCompensation = Math.round(cumulativeCompensation * 100) / 100;
     const campaignExtensionAmount = 0; // extension approval workflow not yet implemented
+    const totalIssueHours = Math.round(allVehicles.reduce((s, v) => s + (v.issueHoursToday || 0), 0) * 100) / 100;
+    const totalUnavailableHours = Math.round(allVehicles.reduce((s, v) => s + (v.unavailableHoursToday || 0), 0) * 100) / 100;
+    const totalDowntimeHours = Math.round((totalIssueHours + totalUnavailableHours) * 100) / 100;
+    const totalCompensationHoursGranted = Math.round(allVehicles.reduce((s, v) => s + (v.compensationHoursGrantedToday || 0), 0) * 100) / 100;
+    const totalCompensationDaysGranted = Object.values(extraDaysByVehicle).reduce((s, d) => s + (d || 0), 0);
+    const totalCompletedCampaignDays = bookingItemsMeta.reduce((s, b) => s + (b.completedCampaignDays || 0), 0);
+    const totalAbsentDays = bookingItemsMeta.reduce((s, b) => s + (b.absentDaysCount || 0), 0);
 
     const finalAmountBeforeGst = Math.round(grandTotal * 100) / 100;
     const gstPercent = GST_PERCENT;
@@ -3555,6 +4101,13 @@ exports.getCampaignCalculator = async (req, res) => {
       actualPromoter: Math.round(actualPromoter * 100) / 100,
       totalCompensation,
       campaignExtensionAmount,
+      totalIssueHours,
+      totalUnavailableHours,
+      totalDowntimeHours,
+      totalCompensationHoursGranted,
+      totalCompensationDaysGranted,
+      totalCompletedCampaignDays,
+      totalAbsentDays,
       finalAmountBeforeGst,
       gstPercent,
       gstAmount,
@@ -3568,6 +4121,7 @@ exports.getCampaignCalculator = async (req, res) => {
       campaignEnd,
       bookingItemsMeta,
       extraKmBalances: Object.values(extraKmBalanceByVehicle),
+      campaignCompensationArray,
       days,
       grandTotal,
       orderTaxableAmount,
