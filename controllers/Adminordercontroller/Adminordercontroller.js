@@ -1137,7 +1137,8 @@ exports.getOrdersByPipeline = async (req, res) => {
   "companyName clientName designation email address gstNumber customerCategory " +
   "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy " +
   "onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray " +
-  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray orderEditHistory"   
+  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray orderEditHistory " +
+  "opsHandlerAssignmentHistory originalHandlerName"
 );
 
     const filteredOrders = orders.filter(
@@ -4550,6 +4551,95 @@ exports.getDayByDayHistory = async (req, res) => {
       driverStatusHistory,
       vehicleStatusTimeline,
       unavailableHistory,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+// Reassign the operation-handling handler — used for leave handovers
+// (temporary) or permanent reassignment. Mirrors Salesordercontroller's
+// reassignHandler, but against the ops-pipeline handlerName field.
+exports.reassignOpsHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newHandler, isTemporary, leaveStartDate, leaveEndDate, reason } = req.body;
+
+    if (!newHandler?.trim())
+      return errorResponse(res, "New handler name is required", null, 400);
+    if (!reason?.trim())
+      return errorResponse(res, "Reason is required", null, 400);
+    if (isTemporary && (!leaveStartDate || !leaveEndDate))
+      return errorResponse(
+        res,
+        "Leave start and end dates are required for a temporary handover",
+        null,
+        400
+      );
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const previousHandler = order.handlerName || "";
+    if (!order.originalHandlerName) {
+      order.originalHandlerName = previousHandler;
+    }
+
+    order.opsHandlerAssignmentHistory.push({
+      previousHandler,
+      newHandler: newHandler.trim(),
+      isTemporary: !!isTemporary,
+      leaveStartDate: isTemporary ? leaveStartDate : null,
+      leaveEndDate: isTemporary ? leaveEndDate : null,
+      reason: reason.trim(),
+      status: "active",
+      assignedBy: req.user?.username || "Admin",
+      assignedAt: new Date(),
+    });
+
+    order.handlerName = newHandler.trim();
+    await order.save();
+
+    return successResponse(res, "Handler reassigned successfully", {
+      handlerName: order.handlerName,
+      opsHandlerAssignmentHistory: order.opsHandlerAssignmentHistory,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+// Ends a temporary ops handover — either returns the order to the previous
+// handler, or (manager decision) makes the current handover permanent.
+exports.resolveOpsHandlerHandover = async (req, res) => {
+  try {
+    const { id, assignmentId } = req.params;
+    const { makePermanent } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const assignment = order.opsHandlerAssignmentHistory.id(assignmentId);
+    if (!assignment)
+      return errorResponse(res, "Handover record not found", null, 404);
+    if (assignment.status !== "active")
+      return errorResponse(res, "This handover has already been resolved", null, 400);
+
+    if (makePermanent) {
+      assignment.status = "madePermanent";
+    } else {
+      assignment.status = "reverted";
+      assignment.revertedAt = new Date();
+      order.handlerName = assignment.previousHandler;
+    }
+
+    await order.save();
+
+    return successResponse(res, "Handover resolved", {
+      handlerName: order.handlerName,
+      opsHandlerAssignmentHistory: order.opsHandlerAssignmentHistory,
     });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);

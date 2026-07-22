@@ -93,4 +93,17 @@ router.post("/pipeline/:id/save-project-code", ctrl.saveProjectCode);
 router.patch("/pipeline/:id/enquiry-name", protect, ctrl.saveEnquiryName);
 router.get("/pipeline/:id/date-conflicts", ctrl.getDateConflicts);
 
+router.patch("/pipeline/:id/reassign-handler", protect, ctrl.reassignHandler);
+router.patch(
+  "/pipeline/:id/handover/:assignmentId/resolve",
+  protect,
+  ctrl.resolveHandlerHandover
+);
+router.patch(
+  "/pipeline/:id/po-document",
+  protect,
+  salesUpload,
+  ctrl.updatePODocument
+);
+
 module.exports = router;

@@ -240,6 +240,41 @@ const poCommentSchema = new mongoose.Schema(
   { _id: true }
 );
 
+// Post-lock PO document corrections (admin-only) — one entry per replacement,
+// kept separate from poCommentsArray so the original closedWon PO upload stays untouched.
+const poDocumentEditSchema = new mongoose.Schema(
+  {
+    document: { type: String, required: true },
+    previousDocument: { type: String, default: "" },
+    reason: { type: String, required: true },
+    editedBy: { type: String, default: "" },
+    editedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+// Handler leave/handover — tracks temporary and permanent reassignments of
+// the sales/order handler, so "who handled this order and when" is auditable.
+const handlerAssignmentSchema = new mongoose.Schema(
+  {
+    previousHandler: { type: String, default: "" },
+    newHandler: { type: String, required: true },
+    isTemporary: { type: Boolean, default: false },
+    leaveStartDate: { type: Date, default: null },
+    leaveEndDate: { type: Date, default: null },
+    reason: { type: String, default: "" },
+    status: {
+      type: String,
+      enum: ["active", "reverted", "madePermanent"],
+      default: "active",
+    },
+    assignedBy: { type: String, default: "" },
+    assignedAt: { type: Date, default: Date.now },
+    revertedAt: { type: Date, default: null },
+  },
+  { _id: true }
+);
+
 const projectCodeCommentSchema = new mongoose.Schema(
   {
     document: { type: String, default: "" },
@@ -610,6 +645,8 @@ const orderSchema = new mongoose.Schema(
     },
 
     handlerName: String,
+    opsHandlerAssignmentHistory: { type: [handlerAssignmentSchema], default: [] },
+    originalHandlerName: { type: String, default: "" },
     todoUploadedBy: { type: String, default: "" },
     reasonDescription: String,
 
@@ -687,6 +724,9 @@ orderEditHistory: { type: [orderEditHistorySchema], default: [] },
     projectCodeArray: { type: [projectCodeSchema], default: [] },
     projectMailLogs: { type: [projectMailLogSchema], default: [] },
     poCommentsArray: { type: [poCommentSchema], default: [] },
+    poDocumentEditHistory: { type: [poDocumentEditSchema], default: [] },
+    handlerAssignmentHistory: { type: [handlerAssignmentSchema], default: [] },
+    originalSalesHandlerName: { type: String, default: "" },
     projectCodeCommentsArray: { type: [projectCodeCommentSchema], default: [] },
     closedLostCommentsArray: { type: [closedLostCommentSchema], default: [] },
     orderClosedWonArray: { type: [orderClosedWonSchema], default: [] },

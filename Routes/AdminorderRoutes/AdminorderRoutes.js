@@ -83,6 +83,12 @@ const pipelineUpload = multer({
 router.get("/pipeline", protect, ctrl.getOrdersByPipeline);
 router.patch("/pipeline/:orderId", protect, pipelineUpload, ctrl.updateOrderPipeline);
 router.put("/orders/:id", protect, adminOrderUpload, ctrl.updateAdminOrder);
+router.patch("/pipeline/:id/reassign-handler", protect, ctrl.reassignOpsHandler);
+router.patch(
+  "/pipeline/:id/handover/:assignmentId/resolve",
+  protect,
+  ctrl.resolveOpsHandlerHandover
+);
 router.post("/pipeline/:id/onroad-release/:entryId", protect, ctrl.releaseOnRoadVehicle);
 
 router.post(
