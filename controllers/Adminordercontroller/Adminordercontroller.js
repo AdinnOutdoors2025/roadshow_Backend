@@ -213,6 +213,21 @@ exports.createAdminOrder = async (req, res) => {
       if (v.needPromoter && v.promoterType === "Other" && !v.otherPromoterType)
         return errorResponse(res, `Vehicle ${i + 1}: otherPromoterType required`, null, 400);
 
+      const availability = await checkVehicleAvailability({
+        vehicleType: pkg.vehicleType,
+        quantity: v.quantity,
+        fromDate: v.fromDate,
+        toDate: v.toDate,
+      });
+      if (!availability.available) {
+        return errorResponse(
+          res,
+          `Vehicle ${i + 1}: Not enough vehicles available for the selected dates (${availability.availableCount} available, your required Quanitity ${availability.requiredQuantity} )`,
+          null,
+          409
+        );
+      }
+
       const fp = calcPricingBackend(pkg, v);
 
       const additionalFields = (v.additionalCharges || []).map((c) => ({
