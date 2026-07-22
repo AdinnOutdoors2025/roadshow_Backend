@@ -372,223 +372,7 @@ exports.createAdminOrder = async (req, res) => {
   }
 };
 
-// exports.updateAdminOrder = async (req, res) => {
-//   try {
-//     const { id } = req.params;
 
-//     const order = await Order.findById(id);
-//     if (!order) return errorResponse(res, "Order not found", null, 404);
-
-   
-//     const LOCKED_STAGES = ["closedWon", "projectCodeCreation", "closedLost"];
-//     if (LOCKED_STAGES.includes(order.salesPipelineStatus)) {
-//       return errorResponse(
-//         res,
-//         `Order cannot be edited in "${order.salesPipelineStatus}" stage`,
-//         null,
-//         400
-//       );
-//     }
-
-//     const {
-//       customerName, customerPhone, customerAddress, customerEmail,
-//       customerCategory, companyName, clientName, designation, gstNumber,
-//     } = req.body;
-
-//     const category = customerCategory || "individual";
-
-//     // ── Same validation as create ──
-//     if (category === "individual") {
-//       if (!customerName?.trim()) return errorResponse(res, "Customer name is required", null, 400);
-//       if (!customerPhone) return errorResponse(res, "Phone number is required", null, 400);
-//       if (!/^[6-9]\d{9}$/.test(customerPhone.toString().trim()))
-//         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
-//       if (!customerEmail?.trim()) return errorResponse(res, "Email is required", null, 400);
-//     } else {
-//       if (!companyName?.trim()) return errorResponse(res, "Company name is required", null, 400);
-//       if (!clientName?.trim()) return errorResponse(res, "Client name is required", null, 400);
-//       if (!designation?.trim()) return errorResponse(res, "Designation is required", null, 400);
-//       if (!customerPhone) return errorResponse(res, "Phone number is required", null, 400);
-//       if (!/^[6-9]\d{9}$/.test(customerPhone.toString().trim()))
-//         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
-//       if (!customerEmail?.trim()) return errorResponse(res, "Email is required", null, 400);
-//       if (!gstNumber?.trim()) return errorResponse(res, "GST number is required", null, 400);
-//     }
-
-//     // ── Parse vehicles ──
-//     const vehicles = [];
-//     let idx = 0;
-//     while (req.body[`vehicle_${idx}`] !== undefined) {
-//       try { vehicles.push(JSON.parse(req.body[`vehicle_${idx}`])); }
-//       catch { return errorResponse(res, `vehicle_${idx} is not valid JSON`, null, 400); }
-//       idx++;
-//     }
-
-//     if (!vehicles || vehicles.length === 0)
-//       return errorResponse(res, "At least one vehicle is required", null, 400);
-
-//     const bookingItems = [];
-
-//     for (let i = 0; i < vehicles.length; i++) {
-//       const v = vehicles[i];
-//       const missing = [];
-//       if (!v.packageId) missing.push("packageId");
-//       if (!v.campaignType) missing.push("campaignType");
-//       if (!v.campaignName?.trim()) missing.push("campaignName");
-//       if (v.campaignType === "Other" && !v.otherCampaignType) missing.push("otherCampaignType");
-//       if (!v.fromDate) missing.push("fromDate");
-//       if (!v.toDate) missing.push("toDate");
-//       if (!v.state) missing.push("state");
-//       if (!v.city) missing.push("city");
-//       if (!v.fromLocation) missing.push("fromLocation");
-//       if (!v.toLocation) missing.push("toLocation");
-//       if (!v.quantity || Number(v.quantity) < 1) missing.push("quantity");
-//       if (missing.length > 0)
-//         return errorResponse(res, `Vehicle ${i + 1}: Missing fields — ${missing.join(", ")}`, null, 400);
-
-//       if (new Date(v.fromDate) >= new Date(v.toDate))
-//         return errorResponse(res, `Vehicle ${i + 1}: fromDate must be before toDate`, null, 400);
-
-//       const pkg = await Package.findById(v.packageId);
-//       if (!pkg) return errorResponse(res, `Vehicle ${i + 1}: Package not found`, null, 404);
-
-//       const fp = calcPricingBackend(pkg, v);
-
-//       const additionalFields = (v.additionalCharges || []).map((c) => ({
-//         label: (c.label || "").trim() || "Custom charge",
-//         mode: c.mode === "-" ? "-" : "+",
-//         amount: Math.max(0, Number(c.amount) || 0),
-//       }));
-
-//       // ── Campaign type handling (same as create) ──
-//       let campaignTypeRef = null;
-//       let campaignTypeName = v.campaignType;
-//       if (v.campaignType && v.campaignType !== "Other") {
-//         const ct = await CampaignType.findById(v.campaignType).catch(() => null);
-//         if (ct) { campaignTypeRef = ct._id; campaignTypeName = ct.name; }
-//       } else if (v.campaignType === "Other" && v.otherCampaignType?.trim()) {
-//         let ct = await CampaignType.findOne({
-//           name: { $regex: `^${v.otherCampaignType.trim()}$`, $options: "i" },
-//         });
-//         if (!ct) ct = await CampaignType.create({ name: v.otherCampaignType.trim() });
-//         campaignTypeRef = ct._id;
-//         campaignTypeName = ct.name;
-//       }
-
-//       // ── Media: existing URLs keep + new files append ──
-//       const uploadedFiles = req.files || [];
-
-//       let existingImages = [];
-//       let existingVideos = [];
-//       try { existingImages = JSON.parse(req.body[`existingImages_${i}`] || "[]"); } catch {}
-//       try { existingVideos = JSON.parse(req.body[`existingVideos_${i}`] || "[]"); } catch {}
-
-//       const newImages = uploadedFiles
-//         .filter((f) => f.fieldname === `campaignImages_${i}`)
-//         .map((f) => getFileUrl(f));
-//       const newVideos = uploadedFiles
-//         .filter((f) => f.fieldname === `campaignVideos_${i}`)
-//         .map((f) => getFileUrl(f));
-
-//       bookingItems.push({
-//         packageId: pkg._id,
-//         vehicleType: pkg.vehicleType,
-//         vehicleModel: pkg.vehicleModel,
-//         bookingFor: v.bookingFor,
-//         gstNumber: v.bookingFor === "Agency" ? (v.gstNumber || "").trim() : "",
-//         campaignType: campaignTypeName,
-//         campaignName: (v.campaignName || "").trim(),
-//         campaignTypeRef,
-//         otherCampaignType: v.campaignType === "Other" ? (v.otherCampaignType || "") : "",
-//         promoterGender: v.needPromoter ? (v.promoterGender || "") : "",
-//         promoterLanguage: v.needPromoter ? (v.promoterLanguage || []) : [],
-//         promoterQuantity: v.needPromoter ? (Number(v.promoterQuantity) || 0) : 0,
-//         fromDate: new Date(v.fromDate),
-//         toDate: new Date(v.toDate),
-//         state: v.state,
-//         city: v.city,
-//         fromLocation: v.fromLocation,
-//         toLocation: v.toLocation,
-//         quantity: Number(v.quantity),
-//         extraKm: Number(v.extraKm) || 0,
-//         extraDays: Number(v.extraDays) || 0,
-//         extraHours: Number(v.extraHours) || 0,
-//         needPromoter: !!v.needPromoter,
-//         promoterType: v.needPromoter ? v.promoterType : "",
-//         otherPromoterType: v.needPromoter && v.promoterType === "Other" ? v.otherPromoterType : "",
-//         campaignImages: [...existingImages, ...newImages],
-//         campaignVideos: [...existingVideos, ...newVideos],
-//         totalDays: fp.totalDays,
-//         perDayRentalCost: fp.perDayRentalCost,
-//         driverCharges: fp.driverCharges,
-//         promoterChargePerDay: fp.promoterChargePerDay,
-//         rtoCharges: fp.rtoCharges,
-//         additionalHourCharges: fp.additionalHourCharges,
-//         dailyKmcharges: fp.dailyKmcharges,
-//         dailyKmLimit: fp.dailyKmLimit,
-//         rentalCost: fp.rentalCost,
-//         driverCost: fp.driverCost,
-//         promoterCost: fp.promoterCost,
-//         rtoCost: fp.rtoCost,
-//         extraKmCost: fp.extraKmCost,
-//         extraHourCost: fp.extraHourCost,
-//         additionalNet: fp.additionalNet,
-//         subtotal: fp.subtotal,
-//         totalAmount: fp.totalAmount,
-//         additionalFields,
-//       });
-//     }
-
-//     // ── Totals re-calc ──
-//     const taxableAmount = bookingItems.reduce((s, item) => s + item.totalAmount, 0);
-//     const grandGst = Math.floor(taxableAmount * 0.18);
-//     const grandTotal = taxableAmount + grandGst;
-
-//     // ── Customer fields update ──
-//     order.name = category === "individual" ? (customerName || "").trim() : (clientName || "").trim();
-//     order.phone = customerPhone.toString().trim();
-//     order.address = customerAddress || "";
-//     order.email = customerEmail || "";
-//     order.customerType = category === "individual" ? 0 : 1;
-//     order.customerCategory = category;
-//     order.companyName = category === "organization" ? (companyName || "").trim() : "";
-//     order.clientName = category === "organization" ? (clientName || "").trim() : "";
-//     order.designation = category === "organization" ? (designation || "").trim() : "";
-//     order.gstNumber = category === "organization" ? (gstNumber || "").trim() : "";
-
-//     if (req.body.gstVerifyDetails) {
-//       try { order.gstVerifyDetails = JSON.parse(req.body.gstVerifyDetails); } catch {}
-//     }
-
-//     order.bookingItems = bookingItems;
-//     order.grandTotal = grandTotal;
-//     order.grandGst = grandGst;
-
-//     // ── Negotiation nadanthirundha final amount recalc ──
-//     if ((order.salesNegotiationArray || []).length > 0) {
-//       const totalNegotiated = order.salesNegotiationArray.reduce(
-//         (sum, n) => sum + (n.amount || 0), 0
-//       );
-//       order.salesNegotiationFinalAmount = Math.max(grandTotal - totalNegotiated, 0);
-//     }
-
-//     // ── Audit log ──
-//     const editedBy = req.user?.username || "Admin";
-//     order.salesPipelineLogs.push({
-//       fromStage: order.salesPipelineStatus,
-//       toStage: order.salesPipelineStatus,
-//       movedBy: editedBy,
-//       handlerName: order.salesHandlerName || "",
-//       movedAt: new Date(),
-//       notes: `Order details edited by ${editedBy}`,
-//     });
-
-//     await order.save();
-//     return successResponse(res, "Order updated successfully", { orderId: order.orderId, order });
-//   } catch (error) {
-//     return errorResponse(res, error.message);
-//   }
-// };
 
 
 
@@ -3450,8 +3234,24 @@ function daysBetweenInclusive(fromDate, toDate) {
 // used by LogHoursModal. When an entry/day DOES have a real dailyHoursLog
 // entry, that log's own startTime/endTime is used as the window instead
 // (see resolveWorkWindow below) — this constant is only the fallback.
-const DEFAULT_WORK_START_HOUR = Number(process.env.DEFAULT_WORK_START_HOUR);
-const DEFAULT_WORK_END_HOUR = Number(process.env.DEFAULT_WORK_END_HOUR);
+// Env vars are entered as "HH:mm" wall-clock strings (e.g. "18:30"), not
+// plain decimal hours — parse them into a decimal hour (18.5) instead of
+// `Number(...)`, which silently produced NaN for any "HH:mm" value.
+function parseTimeToDecimalHour(str, fallback) {
+  const m = String(str || "").trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) {
+    const n = Number(str);
+    return isNaN(n) ? fallback : n;
+  }
+  return Number(m[1]) + Number(m[2]) / 60;
+}
+
+const DEFAULT_WORK_START_HOUR = parseTimeToDecimalHour(process.env.DEFAULT_WORK_START_HOUR, 16);
+// If the logout time is numerically <= the login time, the shift crosses
+// midnight (e.g. 18:30 -> 02:30), so roll it into the next day (26.5).
+let _rawWorkEndHour = parseTimeToDecimalHour(process.env.DEFAULT_WORK_END_HOUR, 24);
+if (_rawWorkEndHour <= DEFAULT_WORK_START_HOUR) _rawWorkEndHour += 24;
+const DEFAULT_WORK_END_HOUR = _rawWorkEndHour;
 
 // The default work window's hours (e.g. 16:00-24:00) are meant to represent
 // wall-clock IST hours ("4:00 PM - Midnight IST"), matching the frontend's
@@ -3467,14 +3267,17 @@ const DEFAULT_WORK_END_HOUR = Number(process.env.DEFAULT_WORK_END_HOUR);
 // usable everywhere on the frontend (see fmtClock/fmtDatetime in
 // CampaignCalculatorTab.tsx).
 const IST_OFFSET = "+05:30";
-function istWallClock(dayKeyStr, hour) {
-  // hour may be 24 (midnight rollover into next day), handled via addDaysUTC
-  // on the *date* portion while the wall-clock hour itself stays 00.
-  if (hour >= 24) {
-    const nextDay = addDaysUTC(dayKeyStr, Math.floor(hour / 24));
-    return new Date(`${nextDay}T${String(hour % 24).padStart(2, "0")}:00:00${IST_OFFSET}`);
-  }
-  return new Date(`${dayKeyStr}T${String(hour).padStart(2, "0")}:00:00${IST_OFFSET}`);
+function istWallClock(dayKeyStr, hourDecimal) {
+  // hourDecimal may be fractional (18.5 -> 18:30) and/or >= 24 (rollover into
+  // a following day, e.g. 26.5 -> next day 02:30), handled by converting to
+  // total minutes and letting addDaysUTC carry the day portion.
+  const totalMinutes = Math.round(hourDecimal * 60);
+  const dayOffset = Math.floor(totalMinutes / (24 * 60));
+  const minutesInDay = totalMinutes - dayOffset * 24 * 60;
+  const hh = String(Math.floor(minutesInDay / 60)).padStart(2, "0");
+  const mm = String(minutesInDay % 60).padStart(2, "0");
+  const targetDay = dayOffset > 0 ? addDaysUTC(dayKeyStr, dayOffset) : dayKeyStr;
+  return new Date(`${targetDay}T${hh}:${mm}:00${IST_OFFSET}`);
 }
 
 // Resolves the actual working window [start,end] for one entry/day: prefers
