@@ -2267,6 +2267,23 @@ exports.approveFocEntry = async (req, res) => {
       changedAt: new Date(),
     });
 
+    // A "compensation-days" FOC (Campaign Calculator's Extra Campaign Days
+    // request) only grants the actual extra days once approved here — the
+    // pending request itself never touched campaignCompensationArray.
+    if (entry.focPurpose === "compensation-days" && entry.compensationDaysValue > 0) {
+      order.campaignCompensationArray.push({
+        vehicleIndex: entry.compensationVehicleIndex,
+        entryId: entry.compensationEntryId || null,
+        compensationType: "days",
+        compensationValue: entry.compensationDaysValue,
+        fromDate: entry.fromDate,
+        toDate: entry.toDate,
+        reason: entry.reason || "",
+        addedBy: approvedBy,
+        addedAt: new Date(),
+      });
+    }
+
     await order.save();
     return successResponse(res, "FOC extension approved successfully", { order });
   } catch (error) {
@@ -2932,6 +2949,50 @@ exports.addDailyHoursLog = async (req, res) => {
       order.dailyHoursLogArray.push(payload);
     }
 
+    // Absent + "Extend Campaign +1 Day" — route through the same FOC (Free of
+    // Cost extension) flow the manual Client Closure tab already uses, so the
+    // approval rule is consistent everywhere: super admin can create-and-
+    // approve instantly, any other staff can only submit a pending request
+    // that a super admin must approve before the extension takes effect.
+    if (absentDayFlag && resolvedAbsentDayResolution === "extend") {
+      const alreadyPendingOrApproved = (order.campaignClosureArray || []).some(
+        (c) =>
+          c.type === "foc" &&
+          String(c.bookingItemId) === String(bookingItem._id || vIdx) &&
+          c.status !== "rejected" &&
+          new Date(c.fromDate).toISOString().slice(0, 10) === campaignTo
+      );
+      if (!alreadyPendingOrApproved) {
+        const isSuperAdmin = Number(req.user.isAdmin) === 1;
+        const extendedTo = new Date(`${campaignTo}T00:00:00.000Z`);
+        extendedTo.setUTCDate(extendedTo.getUTCDate() + 1);
+        const now = new Date();
+        const reason = `Vehicle Absent on ${day} — Campaign extended by 1 day`;
+        order.campaignClosureArray.push({
+          bookingItemId: bookingItem._id || null,
+          type: "foc",
+          reason,
+          document: "",
+          fromDate: new Date(`${campaignTo}T00:00:00.000Z`),
+          toDate: extendedTo,
+          createdBy: loggedBy,
+          createdAt: now,
+          status: isSuperAdmin ? "approved" : "pending",
+          approvedBy: isSuperAdmin ? loggedBy : undefined,
+          approvedAt: isSuperAdmin ? now : undefined,
+          isAdminCreated: isSuperAdmin,
+          focChatMessages: [],
+          focPurpose: "absent-day",
+          focHistory: isSuperAdmin
+            ? [
+                { action: "created", changedFields: {}, changedBy: loggedBy, changedAt: now },
+                { action: "approved", changedFields: {}, changedBy: loggedBy, changedAt: now },
+              ]
+            : [{ action: "created", changedFields: {}, changedBy: loggedBy, changedAt: now }],
+        });
+      }
+    }
+
     await order.save();
 
     return successResponse(res, "Daily hours logged successfully", { order }, 201);
@@ -3039,6 +3100,71 @@ exports.addCampaignCompensation = async (req, res) => {
       Number(req.user.isAdmin) === 0
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
+
+    // "Extra Campaign Days" (compensationType === "days") extends the
+    // vehicle-type slot's effective campaign window, so it goes through the
+    // same FOC (Free of Cost extension) approval rule as Mark Absent → Extend
+    // +1 Day: super admin grants it instantly, any other staff can only
+    // submit a pending request a super admin must approve (approveFocEntry /
+    // createAndApproveFocEntry apply the actual compensation grant on
+    // approval — see there). "hours" compensation stays instant for everyone,
+    // since it doesn't change the contracted campaign dates.
+    if (compensationType === "days") {
+      const isSuperAdmin = Number(req.user.isAdmin) === 1;
+      const now = new Date();
+
+      if (isSuperAdmin) {
+        order.campaignCompensationArray.push({
+          vehicleIndex: vIdx,
+          entryId: entry ? entry._id : null,
+          vehicleRegistrationNumber: entry?.vehicleRegistrationNumber || "",
+          compensationType,
+          compensationValue: value,
+          fromDate: newFrom,
+          toDate: newTo,
+          reason: reason || "",
+          addedBy,
+          addedAt: now,
+        });
+      }
+
+      order.campaignClosureArray.push({
+        bookingItemId: bookingItem._id || null,
+        type: "foc",
+        reason: reason || `Compensation: ${value} extra campaign day(s) requested`,
+        document: "",
+        fromDate: newFrom,
+        toDate: newTo,
+        createdBy: addedBy,
+        createdAt: now,
+        status: isSuperAdmin ? "approved" : "pending",
+        approvedBy: isSuperAdmin ? addedBy : undefined,
+        approvedAt: isSuperAdmin ? now : undefined,
+        isAdminCreated: isSuperAdmin,
+        focChatMessages: [],
+        focPurpose: "compensation-days",
+        compensationVehicleIndex: vIdx,
+        compensationEntryId: entry ? entry._id : null,
+        compensationDaysValue: value,
+        focHistory: isSuperAdmin
+          ? [
+              { action: "created", changedFields: {}, changedBy: addedBy, changedAt: now },
+              { action: "approved", changedFields: {}, changedBy: addedBy, changedAt: now },
+            ]
+          : [{ action: "created", changedFields: {}, changedBy: addedBy, changedAt: now }],
+      });
+
+      await order.save();
+
+      return successResponse(
+        res,
+        isSuperAdmin
+          ? "Campaign days extension approved and applied"
+          : "Campaign days extension requested — waiting for admin approval",
+        { order },
+        201
+      );
+    }
 
     order.campaignCompensationArray.push({
       vehicleIndex: vIdx,

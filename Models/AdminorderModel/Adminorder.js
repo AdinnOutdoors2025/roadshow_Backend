@@ -488,6 +488,18 @@ const campaignClosureSchema = new mongoose.Schema({
 
   isAdminCreated: { type: Boolean, default: false },
   focChatMessages: { type: [focChatMessageSchema], default: [] },
+
+  // What this FOC extension request is actually FOR, so approval can trigger
+  // the right side-effect: "absent-day" = a Mark Absent → Extend +1 Day
+  // request (no further action needed on approve, the daily-hours-log entry
+  // already carries absentDayResolution: "extend"); "compensation-days" = a
+  // Campaign Calculator "Extra Campaign Days" compensation request, where the
+  // actual campaignCompensationArray grant is deferred until this is approved
+  // (see approveFocEntry/createAndApproveFocEntry).
+  focPurpose: { type: String, enum: ["absent-day", "compensation-days", null], default: null },
+  compensationVehicleIndex: { type: Number, default: null },
+  compensationEntryId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  compensationDaysValue: { type: Number, default: null },
 }, { _id: true });
 
 
