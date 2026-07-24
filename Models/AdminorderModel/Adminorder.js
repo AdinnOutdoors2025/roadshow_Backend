@@ -496,10 +496,11 @@ const campaignClosureSchema = new mongoose.Schema({
   // Campaign Calculator "Extra Campaign Days" compensation request, where the
   // actual campaignCompensationArray grant is deferred until this is approved
   // (see approveFocEntry/createAndApproveFocEntry).
-  focPurpose: { type: String, enum: ["absent-day", "compensation-days", null], default: null },
+  focPurpose: { type: String, enum: ["absent-day", "compensation-days", "compensation-hours", null], default: null },
   compensationVehicleIndex: { type: Number, default: null },
   compensationEntryId: { type: mongoose.Schema.Types.ObjectId, default: null },
   compensationDaysValue: { type: Number, default: null },
+  compensationHoursValue: { type: Number, default: null },
 }, { _id: true });
 
 

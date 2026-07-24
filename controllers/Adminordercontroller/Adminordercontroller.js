@@ -2267,15 +2267,28 @@ exports.approveFocEntry = async (req, res) => {
       changedAt: new Date(),
     });
 
-    // A "compensation-days" FOC (Campaign Calculator's Extra Campaign Days
-    // request) only grants the actual extra days once approved here — the
-    // pending request itself never touched campaignCompensationArray.
+    // A "compensation-days"/"compensation-hours" FOC (Campaign Calculator's
+    // Extra Campaign Days / Extra Working Hours request) only grants the
+    // actual compensation once approved here — the pending request itself
+    // never touched campaignCompensationArray.
     if (entry.focPurpose === "compensation-days" && entry.compensationDaysValue > 0) {
       order.campaignCompensationArray.push({
         vehicleIndex: entry.compensationVehicleIndex,
         entryId: entry.compensationEntryId || null,
         compensationType: "days",
         compensationValue: entry.compensationDaysValue,
+        fromDate: entry.fromDate,
+        toDate: entry.toDate,
+        reason: entry.reason || "",
+        addedBy: approvedBy,
+        addedAt: new Date(),
+      });
+    } else if (entry.focPurpose === "compensation-hours" && entry.compensationHoursValue > 0) {
+      order.campaignCompensationArray.push({
+        vehicleIndex: entry.compensationVehicleIndex,
+        entryId: entry.compensationEntryId || null,
+        compensationType: "hours",
+        compensationValue: entry.compensationHoursValue,
         fromDate: entry.fromDate,
         toDate: entry.toDate,
         reason: entry.reason || "",
@@ -3101,17 +3114,17 @@ exports.addCampaignCompensation = async (req, res) => {
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
-    // "Extra Campaign Days" (compensationType === "days") extends the
-    // vehicle-type slot's effective campaign window, so it goes through the
-    // same FOC (Free of Cost extension) approval rule as Mark Absent → Extend
-    // +1 Day: super admin grants it instantly, any other staff can only
-    // submit a pending request a super admin must approve (approveFocEntry /
-    // createAndApproveFocEntry apply the actual compensation grant on
-    // approval — see there). "hours" compensation stays instant for everyone,
-    // since it doesn't change the contracted campaign dates.
-    if (compensationType === "days") {
+    // Both "Extra Campaign Days" (compensationType === "days") and "Extra
+    // Working Hours" (compensationType === "hours") compensation requests go
+    // through the same FOC (Free of Cost extension) approval rule as Mark
+    // Absent → Extend +1 Day: super admin grants it instantly, any other
+    // staff can only submit a pending request a super admin must approve
+    // (approveFocEntry / createAndApproveFocEntry apply the actual
+    // compensation grant on approval — see there).
+    if (compensationType === "days" || compensationType === "hours") {
       const isSuperAdmin = Number(req.user.isAdmin) === 1;
       const now = new Date();
+      const focPurpose = compensationType === "days" ? "compensation-days" : "compensation-hours";
 
       if (isSuperAdmin) {
         order.campaignCompensationArray.push({
@@ -3131,7 +3144,11 @@ exports.addCampaignCompensation = async (req, res) => {
       order.campaignClosureArray.push({
         bookingItemId: bookingItem._id || null,
         type: "foc",
-        reason: reason || `Compensation: ${value} extra campaign day(s) requested`,
+        reason:
+          reason ||
+          (compensationType === "days"
+            ? `Compensation: ${value} extra campaign day(s) requested`
+            : `Compensation: ${value} extra working hour(s) requested`),
         document: "",
         fromDate: newFrom,
         toDate: newTo,
@@ -3142,10 +3159,11 @@ exports.addCampaignCompensation = async (req, res) => {
         approvedAt: isSuperAdmin ? now : undefined,
         isAdminCreated: isSuperAdmin,
         focChatMessages: [],
-        focPurpose: "compensation-days",
+        focPurpose,
         compensationVehicleIndex: vIdx,
         compensationEntryId: entry ? entry._id : null,
-        compensationDaysValue: value,
+        compensationDaysValue: compensationType === "days" ? value : null,
+        compensationHoursValue: compensationType === "hours" ? value : null,
         focHistory: isSuperAdmin
           ? [
               { action: "created", changedFields: {}, changedBy: addedBy, changedAt: now },
@@ -3156,11 +3174,12 @@ exports.addCampaignCompensation = async (req, res) => {
 
       await order.save();
 
+      const label = compensationType === "days" ? "Campaign days extension" : "Extra hours compensation";
       return successResponse(
         res,
         isSuperAdmin
-          ? "Campaign days extension approved and applied"
-          : "Campaign days extension requested — waiting for admin approval",
+          ? `${label} approved and applied`
+          : `${label} requested — waiting for admin approval`,
         { order },
         201
       );
@@ -4024,8 +4043,16 @@ exports.getCampaignCalculator = async (req, res) => {
         dayTotal += itemDayTotal;
 
         // Daily Campaign Running Summary rollup for this vehicle-type/day.
-        const issueHoursToday = Math.round(activeEntries.reduce((s, e) => s + (e.issueHours || 0), 0) * 100) / 100;
-        const unavailableHoursToday = Math.round(activeEntries.reduce((s, e) => s + (e.unavailableHours || 0), 0) * 100) / 100;
+        // Include releasedToday (an old vehicle replaced partway through the
+        // day) alongside activeEntries — the old vehicle's issue/unavailable
+        // time before its replacement is real campaign downtime too, same as
+        // combinedRunningHoursToday already does for running hours below.
+        const issueHoursToday = Math.round(
+          [...activeEntries, ...releasedToday].reduce((s, e) => s + (e.issueHours || 0), 0) * 100
+        ) / 100;
+        const unavailableHoursToday = Math.round(
+          [...activeEntries, ...releasedToday].reduce((s, e) => s + (e.unavailableHours || 0), 0) * 100
+        ) / 100;
         const downtimeHoursToday = Math.round((issueHoursToday + unavailableHoursToday) * 100) / 100;
         const compensationHoursGrantedToday = Math.round(activeEntries.reduce((s, e) => s + (e.compensationHours || 0), 0) * 100) / 100;
 
@@ -4053,9 +4080,23 @@ exports.getCampaignCalculator = async (req, res) => {
           if (c.entryId) return relevantEntryIds.includes(String(c.entryId));
           return true; // campaign-level grant (no entryId) applies to every entry of this slot
         });
+
+        // Pending FOC compensation requests (hours or days) that haven't
+        // been approved yet, but whose date range covers this day — shown
+        // as a third "pending approval" state distinct from
+        // "not requested"/"approved".
+        const matchingPendingFoc = (order.campaignClosureArray || []).filter((c) => {
+          if (c.type !== "foc" || c.status !== "pending") return false;
+          if (c.focPurpose !== "compensation-hours" && c.focPurpose !== "compensation-days") return false;
+          if (c.compensationVehicleIndex !== vehicleIndex) return false;
+          if (dateKey(c.fromDate) > dayKey || dateKey(c.toDate) < dayKey) return false;
+          return true;
+        });
+
         let compensationStatus = {
           hasLoss: downtimeHoursToday > 0,
           lossHours: downtimeHoursToday,
+          state: "none",
           applied: false,
           scope: "none",
           dateFrom: null,
@@ -4071,11 +4112,28 @@ exports.getCampaignCalculator = async (req, res) => {
           compensationStatus = {
             hasLoss: downtimeHoursToday > 0,
             lossHours: downtimeHoursToday,
+            state: "approved",
             applied: true,
             scope: grantFrom === grantTo ? "this-date" : "split",
             dateFrom: grantFrom,
             dateTo: grantTo,
             valuePerDay: grant.compensationValue || 0,
+          };
+        } else if (matchingPendingFoc.length) {
+          const pending = matchingPendingFoc
+            .slice()
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+          const pendingFrom = dateKey(pending.fromDate);
+          const pendingTo = dateKey(pending.toDate);
+          compensationStatus = {
+            hasLoss: downtimeHoursToday > 0,
+            lossHours: downtimeHoursToday,
+            state: "pending",
+            applied: false,
+            scope: pendingFrom === pendingTo ? "this-date" : "split",
+            dateFrom: pendingFrom,
+            dateTo: pendingTo,
+            valuePerDay: pending.compensationHoursValue || pending.compensationDaysValue || 0,
           };
         }
 
