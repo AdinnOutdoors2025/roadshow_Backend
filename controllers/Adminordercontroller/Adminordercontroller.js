@@ -4029,6 +4029,56 @@ exports.getCampaignCalculator = async (req, res) => {
         const downtimeHoursToday = Math.round((issueHoursToday + unavailableHoursToday) * 100) / 100;
         const compensationHoursGrantedToday = Math.round(activeEntries.reduce((s, e) => s + (e.compensationHours || 0), 0) * 100) / 100;
 
+        // Combined Running Today: old (released/replaced) + new (active)
+        // entries' running hours added together — e.g. an old vehicle that
+        // ran 2h before being replaced, plus its replacement running 4h
+        // after, both count toward this slot's running total for the day.
+        const combinedRunningHoursToday =
+          Math.round(
+            ([...activeEntries, ...releasedToday].reduce((s, e) => s + (e.runningHours || 0), 0)) * 100
+          ) / 100;
+
+        // Compensation Status: does today's downtime loss actually have a
+        // matching compensation grant (campaignCompensationArray, "hours"
+        // type) covering this date? "this-date" = a grant scoped to exactly
+        // this single day; "split" = part of a multi-day range; "none" = the
+        // loss hasn't been compensated yet (actionable on the UI side).
+        const relevantEntryIds = [...activeEntries, ...releasedToday]
+          .map((e) => (e.entryId ? String(e.entryId) : null))
+          .filter(Boolean);
+        const matchingCompGrants = campaignCompensationArray.filter((c) => {
+          if (c.compensationType !== "hours") return false;
+          if (c.vehicleIndex !== vehicleIndex) return false;
+          if (dateKey(c.fromDate) > dayKey || dateKey(c.toDate) < dayKey) return false;
+          if (c.entryId) return relevantEntryIds.includes(String(c.entryId));
+          return true; // campaign-level grant (no entryId) applies to every entry of this slot
+        });
+        let compensationStatus = {
+          hasLoss: downtimeHoursToday > 0,
+          lossHours: downtimeHoursToday,
+          applied: false,
+          scope: "none",
+          dateFrom: null,
+          dateTo: null,
+          valuePerDay: 0,
+        };
+        if (matchingCompGrants.length) {
+          const grant = matchingCompGrants
+            .slice()
+            .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))[0];
+          const grantFrom = dateKey(grant.fromDate);
+          const grantTo = dateKey(grant.toDate);
+          compensationStatus = {
+            hasLoss: downtimeHoursToday > 0,
+            lossHours: downtimeHoursToday,
+            applied: true,
+            scope: grantFrom === grantTo ? "this-date" : "split",
+            dateFrom: grantFrom,
+            dateTo: grantTo,
+            valuePerDay: grant.compensationValue || 0,
+          };
+        }
+
         vehicles.push({
           vehicleIndex,
           vehicleType: item.vehicleType,
@@ -4051,6 +4101,8 @@ exports.getCampaignCalculator = async (req, res) => {
           unavailableHoursToday,
           downtimeHoursToday,
           compensationHoursGrantedToday,
+          combinedRunningHoursToday,
+          compensationStatus,
           isCompensationExtensionDay,
           itemDayTotal,
         });
