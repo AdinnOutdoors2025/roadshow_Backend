@@ -83,6 +83,13 @@ const pipelineUpload = multer({
 router.get("/pipeline", protect, ctrl.getOrdersByPipeline);
 router.patch("/pipeline/:orderId", protect, pipelineUpload, ctrl.updateOrderPipeline);
 router.put("/orders/:id", protect, adminOrderUpload, ctrl.updateAdminOrder);
+router.patch("/pipeline/:id/reassign-handler", protect, ctrl.reassignOpsHandler);
+router.patch(
+  "/pipeline/:id/handover/:assignmentId/resolve",
+  protect,
+  ctrl.resolveOpsHandlerHandover
+);
+router.post("/pipeline/:id/onroad-release/:entryId", protect, ctrl.releaseOnRoadVehicle);
 
 router.post(
   "/pipeline/:id/documents",
@@ -95,6 +102,7 @@ router.patch("/pipeline/:id/onroad-driver/:entryId", protect, ctrl.updateOnRoadD
 router.post("/pipeline/:id/onroad-issue", protect, pipelineUpload, ctrl.addOnRoadIssue);
 router.patch("/pipeline/:id/onroad-issue/:issueId/resolve", protect, pipelineUpload, ctrl.resolveOnRoadIssue);
 router.post("/pipeline/:id/onroad-unavailable", protect, pipelineUpload, ctrl.markVehicleUnavailable);
+router.post("/pipeline/:id/onroad-replace/:entryId", protect, pipelineUpload, ctrl.replaceOnRoadVehicle);
 router.patch("/pipeline/:id/onroad-unavailable/:historyId/available", protect, pipelineUpload, ctrl.markVehicleAvailable);
 
 router.patch("/pipeline/:id/todo-uploader", protect, ctrl.saveTodoUploadedBy);
@@ -133,13 +141,19 @@ router.patch(
   ctrl.approveFocEntry
 );
 router.post(
-  "/pipeline/:id/foc/create-and-approve",
+  "/pipeline/:id/foc/create-and-approve", 
   protect,
   pipelineUpload,
   ctrl.createAndApproveFocEntry
 );
 
 router.post("/pipeline/:id/extra-km", protect, ctrl.addExtraKmDetails);
+router.post("/pipeline/:id/daily-hours", protect, ctrl.addDailyHoursLog);
+router.post("/pipeline/:id/compensation", protect, ctrl.addCampaignCompensation);
+router.post("/pipeline/:id/purchased-pool-window", protect, ctrl.setPurchasedPoolWindow);
+router.get("/pipeline/:id/campaign-calculator", protect, ctrl.getCampaignCalculator);
+router.patch("/pipeline/:id/invoice", protect, ctrl.saveInvoice);
+router.get("/pipeline/:id/day-by-day-history", protect, ctrl.getDayByDayHistory);
 
 router.get("/orders", protect, ctrl.getAllOrders);  
 router.get("/orders/:orderId", ctrl.getOrderById);

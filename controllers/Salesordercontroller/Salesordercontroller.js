@@ -883,3 +883,152 @@ exports.saveEnquiryName = async (req, res) => {
     return errorResponse(res, error.message, null, 500);
   }
 };
+
+
+// Reassign the sales/order handler — used for leave handovers (temporary)
+// or permanent reassignment. Every change is logged in handlerAssignmentHistory.
+exports.reassignHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newHandler, isTemporary, leaveStartDate, leaveEndDate, reason } = req.body;
+
+    if (!newHandler?.trim())
+      return errorResponse(res, "New handler name is required", null, 400);
+    if (!reason?.trim())
+      return errorResponse(res, "Reason is required", null, 400);
+    if (isTemporary && (!leaveStartDate || !leaveEndDate))
+      return errorResponse(
+        res,
+        "Leave start and end dates are required for a temporary handover",
+        null,
+        400
+      );
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const previousHandler = order.salesHandlerName || "";
+    if (!order.originalSalesHandlerName) {
+      order.originalSalesHandlerName = previousHandler;
+    }
+
+    order.handlerAssignmentHistory.push({
+      previousHandler,
+      newHandler: newHandler.trim(),
+      isTemporary: !!isTemporary,
+      leaveStartDate: isTemporary ? leaveStartDate : null,
+      leaveEndDate: isTemporary ? leaveEndDate : null,
+      reason: reason.trim(),
+      status: "active",
+      assignedBy: req.user?.username || "Admin",
+      assignedAt: new Date(),
+    });
+
+    order.salesHandlerName = newHandler.trim();
+    await order.save();
+
+    return successResponse(res, "Handler reassigned successfully", {
+      salesHandlerName: order.salesHandlerName,
+      handlerAssignmentHistory: order.handlerAssignmentHistory,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+
+exports.resolveHandlerHandover = async (req, res) => {
+  try {
+    const { id, assignmentId } = req.params;
+    const { makePermanent } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const assignment = order.handlerAssignmentHistory.id(assignmentId);
+    if (!assignment)
+      return errorResponse(res, "Handover record not found", null, 404);
+    if (assignment.status !== "active")
+      return errorResponse(res, "This handover has already been resolved", null, 400);
+
+    if (makePermanent) {
+      assignment.status = "madePermanent";
+    } else {
+      assignment.status = "reverted";
+      assignment.revertedAt = new Date();
+      order.salesHandlerName = assignment.previousHandler;
+    }
+
+    await order.save();
+
+    return successResponse(res, "Handover resolved", {
+      salesHandlerName: order.salesHandlerName,
+      handlerAssignmentHistory: order.handlerAssignmentHistory,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.updatePODocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    if (
+      order.salesPipelineStatus === "projectCodeCreation" ||
+      (order.projectCodeArray || []).length > 0
+    ) {
+      return errorResponse(
+        res,
+        "PO document can no longer be edited once Project Code has been created",
+        null,
+        400
+      );
+    }
+
+    const { reason } = req.body;
+    if (!reason?.trim())
+      return errorResponse(res, "Reason for correction is required", null, 400);
+
+    const poFile = (req.files || []).find((f) => f.fieldname === "poDocument");
+    if (!poFile)
+      return errorResponse(res, "PO document file is required", null, 400);
+
+    const err = validateFile(poFile, "PO");
+    if (err) return errorResponse(res, err, null, 400);
+
+    if (order.closedWonArray.length === 0)
+      return errorResponse(res, "No PO document exists yet to correct", null, 400);
+
+    const latest = order.closedWonArray[order.closedWonArray.length - 1];
+    const previousDocument = latest.salesPoDocument;
+
+    const newDocPath = getFilePath(poFile);
+    const editedBy = req.user?.username || order.salesHandlerName || "Admin";
+    const editedAt = new Date();
+
+    order.poDocumentEditHistory.push({
+      document: newDocPath,
+      previousDocument,
+      reason: reason.trim(),
+      editedBy,
+      editedAt,
+    });
+
+    latest.salesPoDocument = newDocPath;
+
+    await order.save();
+
+    return successResponse(res, "PO document updated successfully", {
+      closedWonArray: order.closedWonArray,
+      poDocumentEditHistory: order.poDocumentEditHistory,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};

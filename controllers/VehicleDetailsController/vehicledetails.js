@@ -1606,6 +1606,8 @@ const { checkVehicleAvailability } = require("../../Utils/vehicleAvailability");
 const mongoose = require("mongoose");
 const path = require("path");
 const fs = require("fs");
+const Order = require("../../Models/AdminorderModel/Adminorder");
+const RELEASE_TRIGGER_STATUSES = ["Unavailable", "Maintenance", "Damaged"];
 
 // Generate unique vehicle ID (ddmmyyyy001 format)
 const generateVehicleId = async () => {
@@ -2524,7 +2526,7 @@ const updateVehicle = async (req, res) => {
         const currentStatus =
           regVehicle.statusAvailability?.currentStatus || regVehicle.currentStatus || "Available";
 
-        const statusAvailability = {
+       const statusAvailability = {
           currentStatus,
           availableFrom:
             currentStatus === "Unavailable"
@@ -2542,6 +2544,14 @@ const updateVehicle = async (req, res) => {
             currentStatus === "Booked"
               ? regVehicle.statusAvailability?.toDate || regVehicle.toDate || null
               : null,
+          orderId:
+            currentStatus === "Booked"
+              ? regVehicle.statusAvailability?.orderId || regVehicle.orderId || ""
+              : "",
+          orderDisplayId:
+            currentStatus === "Booked"
+              ? regVehicle.statusAvailability?.orderDisplayId || regVehicle.orderDisplayId || ""
+              : "",
         };
 
         const maintenance = {
@@ -2717,13 +2727,15 @@ const updateVehicle = async (req, res) => {
 
 //     const updateData = req.body;
 
+
+
 const updateRegistrationVehicle = async (req, res) => {
   try {
     const { id, registrationNumber } = req.params;
 
-    // Support both spaced and unspaced input
-    const cleanReg = cleanRegistrationNumber(registrationNumber);       // "TN58BK7674"
-    const formattedReg = formatRegistrationNumber(cleanReg);            // "TN 58 BK 7674"
+   
+    const cleanReg = cleanRegistrationNumber(registrationNumber);
+    const formattedReg = formatRegistrationNumber(cleanReg);
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, message: "Invalid Vehicle ID" });
@@ -2734,7 +2746,6 @@ const updateRegistrationVehicle = async (req, res) => {
       return res.status(404).json({ success: false, message: "Vehicle not found" });
     }
 
-    // ✅ Match against BOTH formats since DB may store either
     const regIndex = vehicle.registrationVehicles.findIndex(
       (rv) =>
         rv.registrationNumber === formattedReg ||
@@ -2744,6 +2755,11 @@ const updateRegistrationVehicle = async (req, res) => {
     if (regIndex === -1) {
       return res.status(404).json({ success: false, message: "Registration vehicle not found" });
     }
+
+  
+    const oldStatus = vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus;
+    const oldOrderId = vehicle.registrationVehicles[regIndex].statusAvailability.orderId;
+    const oldRegNoForRelease = vehicle.registrationVehicles[regIndex].registrationNumber;
 
     const updateData = req.body;
 
@@ -2756,7 +2772,6 @@ const updateRegistrationVehicle = async (req, res) => {
     if (updateData.gpsEnabled !== undefined) vehicle.registrationVehicles[regIndex].gpsEnabled = updateData.gpsEnabled;
     if (updateData.activeStatus !== undefined) vehicle.registrationVehicles[regIndex].activeStatus = updateData.activeStatus;
 
-
     const STATUS_PRIORITY = {
       "Waiting for Status": 0,
       "Available": 1,
@@ -2766,49 +2781,44 @@ const updateRegistrationVehicle = async (req, res) => {
       "Damaged": 5,
     };
 
-    //   if (updateData.currentStatus) {
-    //     // vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus = updateData.currentStatus;
-    //    vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus = updateData.currentStatus;
-    // vehicle.registrationVehicles[regIndex].statusAvailability.statusPriority =
-    //   STATUS_PRIORITY[updateData.currentStatus] ?? 0;
-    //     if (updateData.currentStatus === "Unavailable") {
-    //       vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = updateData.availableFrom || null;
-    //       vehicle.registrationVehicles[regIndex].statusAvailability.remarks = updateData.remarks || "";
-    //     } else {
-    //       vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = null;
-    //       vehicle.registrationVehicles[regIndex].statusAvailability.remarks = "";
-    //     }
-    //   }
 
-
-    // AFTER — save remarks for ALL statuses, only clear availableFrom when not Unavailable
     if (updateData.currentStatus) {
       vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus = updateData.currentStatus;
       vehicle.registrationVehicles[regIndex].statusAvailability.statusPriority =
         STATUS_PRIORITY[updateData.currentStatus] ?? 0;
 
-      // Save remarks for any status (Damaged, Maintenance, Booked, etc.)
       if (updateData.remarks !== undefined) {
         vehicle.registrationVehicles[regIndex].statusAvailability.remarks = updateData.remarks || "";
       }
 
-      // availableFrom only relevant for Unavailable
+      
       if (updateData.currentStatus === "Unavailable") {
         vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = updateData.availableFrom || null;
       } else {
         vehicle.registrationVehicles[regIndex].statusAvailability.availableFrom = null;
-        // Do NOT clear remarks here — already set above
+       
       }
 
       if (updateData.currentStatus === "Booked") {
         vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = updateData.fromDate || null;
         vehicle.registrationVehicles[regIndex].statusAvailability.toDate = updateData.toDate || null;
+        vehicle.registrationVehicles[regIndex].statusAvailability.orderId = updateData.orderId || "";
+        vehicle.registrationVehicles[regIndex].statusAvailability.orderDisplayId = updateData.orderDisplayId || "";
+      } else if (
+        oldStatus === "Booked" &&
+        oldOrderId &&
+        RELEASE_TRIGGER_STATUSES.includes(updateData.currentStatus)
+      ) {
+        // Unavailable / Maintenance / Damaged from an active booking is a
+        // status change, not a release — keep the booking identity intact
+        // so Operation Handling can still resolve this vehicle to its order.
       } else {
         vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = null;
         vehicle.registrationVehicles[regIndex].statusAvailability.toDate = null;
+        vehicle.registrationVehicles[regIndex].statusAvailability.orderId = "";
+        vehicle.registrationVehicles[regIndex].statusAvailability.orderDisplayId = "";
       }
     }
-
 
     if (updateData.currentStatus === undefined) {
       if (updateData.fromDate !== undefined)
@@ -2836,6 +2846,58 @@ const updateRegistrationVehicle = async (req, res) => {
       vehicle.registrationVehicles[regIndex].driverDetails.driverCharges = updateData.driverCharges || 0;
 
     await vehicle.save();
+
+    if (
+      oldStatus === "Booked" &&
+      oldOrderId &&
+      RELEASE_TRIGGER_STATUSES.includes(updateData.currentStatus)
+    ) {
+      try {
+        const linkedOrder = await Order.findById(oldOrderId);
+        if (linkedOrder) {
+          const cleanOld = cleanRegistrationNumber(oldRegNoForRelease);
+          const entry = linkedOrder.onRoadExecutionArray.find(
+            (e) =>
+              e.entryStatus !== "removed" &&
+              cleanRegistrationNumber(e.vehicleRegistrationNumber) === cleanOld
+          );
+
+          if (entry && !entry.unavailableStatus && entry.entryStatus !== "removed") {
+            const reportedBy = req.user?.username || "System (Inventory)";
+            const reasonText =
+              `Vehicle marked "${updateData.currentStatus}" from Vehicle Inventory` +
+              (updateData.remarks ? ` — ${updateData.remarks}` : "");
+            const inventoryStatus = updateData.currentStatus === "Maintenance" ? "Under Maintenance" : updateData.currentStatus;
+
+            // Status change from Inventory moves the vehicle to the
+            // Unavailable stage on its existing order — it must not be
+            // released, since the booking (dates/orderId) is still active.
+            entry.unavailableStatus = true;
+            entry.unavailableReason = reasonText;
+            entry.inventoryStatus = inventoryStatus;
+
+            linkedOrder.onRoadUnavailableHistory.push({
+              vehicleIndex: entry.vehicleIndex,
+              entryId: entry._id,
+              vehicleRegNo: entry.vehicleRegistrationNumber,
+              driverName: entry.driverName,
+              driverPhone: entry.driverPhone,
+              reason: reasonText,
+              inventoryStatus,
+              status: "unavailable",
+              eventType: "unavailable",
+              reportedBy,
+              reportedAt: new Date(),
+            });
+
+            await linkedOrder.save();
+          }
+        }
+      } catch (linkErr) {
+        console.error("Auto-unavailable failed (updateRegistrationVehicle):", linkErr.message);
+
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -3490,7 +3552,6 @@ const updateRegistrationVehicleByRegNo = async (req, res) => {
     const cleanReg = cleanRegistrationNumber(registrationNumber);
     const formattedReg = formatRegistrationNumber(cleanReg);
 
-  
     const vehicle = await Vehicle.findOne({
       "registrationVehicles.registrationNumber": { $in: [cleanReg, formattedReg] },
     });
@@ -3506,6 +3567,10 @@ const updateRegistrationVehicleByRegNo = async (req, res) => {
     if (regIndex === -1) {
       return res.status(404).json({ success: false, message: "Registration vehicle not found" });
     }
+
+    const oldStatus = vehicle.registrationVehicles[regIndex].statusAvailability.currentStatus;
+    const oldOrderId = vehicle.registrationVehicles[regIndex].statusAvailability.orderId;
+    const oldRegNoForRelease = vehicle.registrationVehicles[regIndex].registrationNumber;
 
     const updateData = req.body;
 
@@ -3545,12 +3610,23 @@ const updateRegistrationVehicleByRegNo = async (req, res) => {
       if (updateData.currentStatus === "Booked") {
         vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = updateData.fromDate || null;
         vehicle.registrationVehicles[regIndex].statusAvailability.toDate = updateData.toDate || null;
+        vehicle.registrationVehicles[regIndex].statusAvailability.orderId = updateData.orderId || "";
+        vehicle.registrationVehicles[regIndex].statusAvailability.orderDisplayId = updateData.orderDisplayId || "";
+      } else if (
+        oldStatus === "Booked" &&
+        oldOrderId &&
+        RELEASE_TRIGGER_STATUSES.includes(updateData.currentStatus)
+      ) {
+        // Unavailable / Maintenance / Damaged from an active booking is a
+        // status change, not a release — keep the booking identity intact
+        // so Operation Handling can still resolve this vehicle to its order.
       } else {
         vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = null;
         vehicle.registrationVehicles[regIndex].statusAvailability.toDate = null;
+        vehicle.registrationVehicles[regIndex].statusAvailability.orderId = "";
+        vehicle.registrationVehicles[regIndex].statusAvailability.orderDisplayId = "";
       }
     }
-
     if (updateData.currentStatus === undefined) {
       if (updateData.fromDate !== undefined)
         vehicle.registrationVehicles[regIndex].statusAvailability.fromDate = updateData.fromDate || null;
@@ -3578,6 +3654,59 @@ const updateRegistrationVehicleByRegNo = async (req, res) => {
 
     await vehicle.save();
 
+   
+    if (
+      oldStatus === "Booked" &&
+      oldOrderId &&
+      RELEASE_TRIGGER_STATUSES.includes(updateData.currentStatus)
+    ) {
+      try {
+        const linkedOrder = await Order.findById(oldOrderId);
+        if (linkedOrder) {
+          const cleanOld = cleanRegistrationNumber(oldRegNoForRelease);
+          const entry = linkedOrder.onRoadExecutionArray.find(
+            (e) =>
+              e.entryStatus !== "removed" &&
+              cleanRegistrationNumber(e.vehicleRegistrationNumber) === cleanOld
+          );
+
+          if (entry && !entry.unavailableStatus && entry.entryStatus !== "removed") {
+            const reportedBy = req.user?.username || "System (Inventory)";
+            const reasonText =
+              `Vehicle marked "${updateData.currentStatus}" from Vehicle Inventory` +
+              (updateData.remarks ? ` — ${updateData.remarks}` : "");
+            const inventoryStatus = updateData.currentStatus === "Maintenance" ? "Under Maintenance" : updateData.currentStatus;
+
+            // Status change from Inventory moves the vehicle to the
+            // Unavailable stage on its existing order — it must not be
+            // released, since the booking (dates/orderId) is still active.
+            entry.unavailableStatus = true;
+            entry.unavailableReason = reasonText;
+            entry.inventoryStatus = inventoryStatus;
+
+            linkedOrder.onRoadUnavailableHistory.push({
+              vehicleIndex: entry.vehicleIndex,
+              entryId: entry._id,
+              vehicleRegNo: entry.vehicleRegistrationNumber,
+              driverName: entry.driverName,
+              driverPhone: entry.driverPhone,
+              reason: reasonText,
+              inventoryStatus,
+              status: "unavailable",
+              eventType: "unavailable",
+              reportedBy,
+              reportedAt: new Date(),
+            });
+
+            await linkedOrder.save();
+          }
+        }
+      } catch (linkErr) {
+        console.error("Auto-unavailable failed (updateRegistrationVehicleByRegNo):", linkErr.message);
+
+      }
+    }
+
     res.status(200).json({
       success: true,
       message: "Registration vehicle updated successfully",
@@ -3592,6 +3721,8 @@ const updateRegistrationVehicleByRegNo = async (req, res) => {
     });
   }
 };
+
+
 
 
 module.exports = {

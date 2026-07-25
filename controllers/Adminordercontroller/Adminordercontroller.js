@@ -29,7 +29,7 @@ async function generateAdminOrderId() {
 function calcPricingBackend(pkg, v) {
   const from = new Date(v.fromDate);
   const to = new Date(v.toDate);
-  const baseDays = Math.ceil((to - from) / 86400000);
+  const baseDays = Math.ceil((to - from) / 86400000) + 1;
   const totalDays = baseDays + (Number(v.extraDays) || 0);
   const quantity = Number(v.quantity) || 1;
   const extraKm = Number(v.extraKm) || 0;
@@ -145,10 +145,11 @@ function getFileUrl(file) {
 
 
 exports.createAdminOrder = async (req, res) => {
+
   try {
     const {
       customerName, customerPhone, customerAddress, customerEmail,
-      customerCategory, companyName, clientName, designation, gstNumber,
+      customerCategory, companyName, clientName, designation, gstNumber, panNumber,
     } = req.body;
 
     const category = customerCategory || "individual";
@@ -168,6 +169,7 @@ exports.createAdminOrder = async (req, res) => {
         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
       if (!customerEmail?.trim()) return errorResponse(res, "Email is required", null, 400);
       if (!gstNumber?.trim()) return errorResponse(res, "GST number is required", null, 400);
+      if (!panNumber?.trim()) return errorResponse(res, "PAN number is required", null, 400);
     }
 
     const vehicles = [];
@@ -211,6 +213,21 @@ exports.createAdminOrder = async (req, res) => {
         return errorResponse(res, `Vehicle ${i + 1}: promoterType required`, null, 400);
       if (v.needPromoter && v.promoterType === "Other" && !v.otherPromoterType)
         return errorResponse(res, `Vehicle ${i + 1}: otherPromoterType required`, null, 400);
+
+      const availability = await checkVehicleAvailability({
+        vehicleType: pkg.vehicleType,
+        quantity: v.quantity,
+        fromDate: v.fromDate,
+        toDate: v.toDate,
+      });
+      if (!availability.available) {
+        return errorResponse(
+          res,
+          `Vehicle ${i + 1}: Not enough vehicles available for the selected dates (${availability.availableCount} available, your required Quanitity ${availability.requiredQuantity} )`,
+          null,
+          409
+        );
+      }
 
       const fp = calcPricingBackend(pkg, v);
 
@@ -333,6 +350,7 @@ exports.createAdminOrder = async (req, res) => {
       clientName: category === "organization" ? (clientName || "").trim() : "",
       designation: category === "organization" ? (designation || "").trim() : "",
       gstNumber: category === "organization" ? (gstNumber || "").trim() : "",
+      panNumber: category === "organization" ? (panNumber || "").trim() : "",
       isAdminCreated: true,
       bookingItems,
       grandTotal,
@@ -356,6 +374,45 @@ exports.createAdminOrder = async (req, res) => {
   }
 };
 
+
+
+
+
+// exports.getAllOrders = async (req, res) => {
+//   try {
+//     const { pipelineStatus, orderStatus, search, page = 1, limit = 50 } = req.query;
+//     const filter = {};
+//     if (pipelineStatus && pipelineStatus !== "all") filter.pipelineStatus = pipelineStatus;
+//     if (orderStatus && orderStatus !== "all") filter.orderStatus = orderStatus;
+//     if (search && search.trim().length >= 2) {
+//       const q = search.trim();
+//       filter.$or = [
+//         { orderId: { $regex: q, $options: "i" } },
+//         { name: { $regex: q, $options: "i" } },
+//         { phone: { $regex: q, $options: "i" } },
+//       ];
+//     }
+//     const skip = (Number(page) - 1) * Number(limit);
+//     const total = await Order.countDocuments(filter);
+//     const orders = await Order.find(filter)
+//       .sort({ createdAt: -1 })
+//       .skip(skip)
+//       .limit(Number(limit))
+//       .select(
+//         "orderId name phone address email customerType " +
+//         "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
+//         "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
+//         "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
+//         "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues  "
+//       );
+//     return successResponse(res, "Orders fetched successfully", {
+//       total, page: Number(page), totalPages: Math.ceil(total / Number(limit)), orders,
+//     });
+//   } catch (error) {
+//     return errorResponse(res, error.message);
+//   }
+// };
+
 exports.updateAdminOrder = async (req, res) => {
   try {
     const { id } = req.params;
@@ -363,7 +420,6 @@ exports.updateAdminOrder = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-   
     const LOCKED_STAGES = ["closedWon", "projectCodeCreation", "closedLost"];
     if (LOCKED_STAGES.includes(order.salesPipelineStatus)) {
       return errorResponse(
@@ -376,7 +432,7 @@ exports.updateAdminOrder = async (req, res) => {
 
     const {
       customerName, customerPhone, customerAddress, customerEmail,
-      customerCategory, companyName, clientName, designation, gstNumber,
+      customerCategory, companyName, clientName, designation, gstNumber, panNumber,
     } = req.body;
 
     const category = customerCategory || "individual";
@@ -397,7 +453,23 @@ exports.updateAdminOrder = async (req, res) => {
         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
       if (!customerEmail?.trim()) return errorResponse(res, "Email is required", null, 400);
       if (!gstNumber?.trim()) return errorResponse(res, "GST number is required", null, 400);
+      if (!panNumber?.trim()) return errorResponse(res, "PAN number is required", null, 400);
     }
+
+    // ── snapshot BEFORE any mutation (for Edit History diff) ──────────────
+    const oldCustomerSnapshot = {
+      name: order.name,
+      phone: order.phone,
+      address: order.address,
+      email: order.email,
+      companyName: order.companyName,
+      clientName: order.clientName,
+      designation: order.designation,
+      gstNumber: order.gstNumber,
+      panNumber: order.panNumber,
+    };
+    const oldBookingItemsSnapshot = JSON.parse(JSON.stringify(order.bookingItems || []));
+    // ────────────────────────────────────────────────────────────────────
 
     // ── Parse vehicles ──
     const vehicles = [];
@@ -539,6 +611,7 @@ exports.updateAdminOrder = async (req, res) => {
     order.clientName = category === "organization" ? (clientName || "").trim() : "";
     order.designation = category === "organization" ? (designation || "").trim() : "";
     order.gstNumber = category === "organization" ? (gstNumber || "").trim() : "";
+    order.panNumber = category === "organization" ? (panNumber || "").trim() : "";
 
     if (req.body.gstVerifyDetails) {
       try { order.gstVerifyDetails = JSON.parse(req.body.gstVerifyDetails); } catch {}
@@ -557,7 +630,7 @@ exports.updateAdminOrder = async (req, res) => {
     }
 
     // ── Audit log ──
-    const editedBy = req.user?.username || "Admin";
+    const editedBy = order.salesHandlerName || req.user?.username || "Admin";
     order.salesPipelineLogs.push({
       fromStage: order.salesPipelineStatus,
       toStage: order.salesPipelineStatus,
@@ -567,49 +640,150 @@ exports.updateAdminOrder = async (req, res) => {
       notes: `Order details edited by ${editedBy}`,
     });
 
+    // ── Build field-level Edit History (customer diff) ─────────────────────
+    const FIELD_LABELS = {
+      name: "Customer Name",
+      phone: "Phone",
+      address: "Address",
+      email: "Email",
+      companyName: "Company Name",
+      clientName: "Client Name",
+      designation: "Designation",
+      gstNumber: "GST Number",
+      panNumber: "PAN Number",
+    };
+
+    const customerChanges = [];
+    Object.keys(FIELD_LABELS).forEach((key) => {
+      const oldVal = oldCustomerSnapshot[key] || "";
+      const newVal = order[key] || "";
+      if (String(oldVal) !== String(newVal)) {
+        customerChanges.push({
+          field: FIELD_LABELS[key],
+          oldValue: oldVal,
+          newValue: newVal,
+        });
+      }
+    });
+
+    // ── Vehicle-level diff (modified / added / removed with FULL details) ──
+    const VEHICLE_FIELD_LABELS = {
+       vehicleType: "Vehicle Type",
+      bookingFor: "Booking For",
+      campaignName: "Campaign Name",
+      campaignType: "Campaign Type",
+      otherCampaignType: "Other Campaign Type",
+      fromDate: "From Date",
+      toDate: "To Date",
+      state: "State",
+      city: "City",
+      fromLocation: "From Location",
+      toLocation: "To Location",
+      quantity: "Quantity",
+      extraKm: "Extra KM",
+      extraDays: "Extra Days",
+      extraHours: "Extra Hours",
+      needPromoter: "Need Promoter",
+      promoterType: "Promoter Type",
+      promoterGender: "Promoter Gender",
+      promoterQuantity: "Promoter Quantity",
+      gstNumber: "GST Number",
+      totalAmount: "Total Amount",
+    };
+
+    const formatVal = (key, val) => {
+      if (val === undefined || val === null) return "";
+      if (key.toLowerCase().includes("date")) {
+        return val ? new Date(val).toISOString().slice(0, 10) : "";
+      }
+      if (typeof val === "boolean") return val;
+      return val;
+    };
+
+   const buildVehicleLabel = (v) =>
+  `${v.campaignName || "Campaign"}${v.city ? " · " + v.city : ""}`;
+
+    const vehicleChanges = [];
+    const maxLen = Math.max(oldBookingItemsSnapshot.length, bookingItems.length);
+
+    for (let i = 0; i < maxLen; i++) {
+      const oldV = oldBookingItemsSnapshot[i];
+      const newV = bookingItems[i];
+
+      // ── Vehicle REMOVED: dump full old details ──
+      if (oldV && !newV) {
+        const changes = Object.keys(VEHICLE_FIELD_LABELS)
+          .map((key) => ({
+            field: VEHICLE_FIELD_LABELS[key],
+            oldValue: formatVal(key, oldV[key]),
+            newValue: null,
+          }))
+          .filter((c) => c.oldValue !== "" && c.oldValue !== undefined);
+
+        vehicleChanges.push({
+          vehicleIndex: i,
+          action: "removed",
+          vehicleLabel: buildVehicleLabel(oldV),
+          changes,
+        });
+        continue;
+      }
+
+      // ── Vehicle ADDED: dump full new details ──
+      if (!oldV && newV) {
+        const changes = Object.keys(VEHICLE_FIELD_LABELS)
+          .map((key) => ({
+            field: VEHICLE_FIELD_LABELS[key],
+            oldValue: null,
+            newValue: formatVal(key, newV[key]),
+          }))
+          .filter((c) => c.newValue !== "" && c.newValue !== undefined);
+
+        vehicleChanges.push({
+          vehicleIndex: i,
+          action: "added",
+          vehicleLabel: buildVehicleLabel(newV),
+          changes,
+        });
+        continue;
+      }
+
+      // ── Vehicle MODIFIED: only changed fields ──
+      const changes = [];
+      Object.keys(VEHICLE_FIELD_LABELS).forEach((key) => {
+        const ov = formatVal(key, oldV[key]);
+        const nv = formatVal(key, newV[key]);
+        if (String(ov ?? "") !== String(nv ?? "")) {
+          changes.push({ field: VEHICLE_FIELD_LABELS[key], oldValue: ov, newValue: nv });
+        }
+      });
+
+      if (changes.length > 0) {
+        vehicleChanges.push({
+          vehicleIndex: i,
+          action: "modified",
+          vehicleLabel: buildVehicleLabel(newV),
+          changes,
+        });
+      }
+    }
+
+    if (customerChanges.length > 0 || vehicleChanges.length > 0) {
+      order.orderEditHistory.push({
+        editedBy,
+        editedAt: new Date(),
+        customerChanges,
+        vehicleChanges,
+      });
+    }
+    // ───────────────────────────────────────────────────────────────────
+
     await order.save();
     return successResponse(res, "Order updated successfully", { orderId: order.orderId, order });
   } catch (error) {
     return errorResponse(res, error.message);
   }
 };
-
-
-
-// exports.getAllOrders = async (req, res) => {
-//   try {
-//     const { pipelineStatus, orderStatus, search, page = 1, limit = 50 } = req.query;
-//     const filter = {};
-//     if (pipelineStatus && pipelineStatus !== "all") filter.pipelineStatus = pipelineStatus;
-//     if (orderStatus && orderStatus !== "all") filter.orderStatus = orderStatus;
-//     if (search && search.trim().length >= 2) {
-//       const q = search.trim();
-//       filter.$or = [
-//         { orderId: { $regex: q, $options: "i" } },
-//         { name: { $regex: q, $options: "i" } },
-//         { phone: { $regex: q, $options: "i" } },
-//       ];
-//     }
-//     const skip = (Number(page) - 1) * Number(limit);
-//     const total = await Order.countDocuments(filter);
-//     const orders = await Order.find(filter)
-//       .sort({ createdAt: -1 })
-//       .skip(skip)
-//       .limit(Number(limit))
-//       .select(
-//         "orderId name phone address email customerType " +
-//         "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
-//         "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
-//         "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
-//         "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues  "
-//       );
-//     return successResponse(res, "Orders fetched successfully", {
-//       total, page: Number(page), totalPages: Math.ceil(total / Number(limit)), orders,
-//     });
-//   } catch (error) {
-//     return errorResponse(res, error.message);
-//   }
-// };
 
 
 exports.getAllOrders = async (req, res) => {
@@ -702,10 +876,10 @@ exports.getAllOrders = async (req, res) => {
   "orderId name phone address email customerType " +
   "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
   "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
-  "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
+  "createdAt updatedAt customerCategory companyName clientName designation gstNumber panNumber " +
   "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray " +
   "projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray " +
-  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray" 
+  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray orderEditHistory" 
 );
 
     return successResponse(res, "Orders fetched successfully", {
@@ -765,10 +939,11 @@ exports.getOrdersByPipeline = async (req, res) => {
   "orderId name phone customerType pipelineStatus orderStatus " +
   "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
   "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
-  "companyName clientName designation email address gstNumber customerCategory " +
+  "companyName clientName designation email address gstNumber panNumber customerCategory invoiceData " +
   "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy " +
   "onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray " +
-  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray"   
+  "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray orderEditHistory " +
+  "opsHandlerAssignmentHistory originalHandlerName"
 );
 
     const filteredOrders = orders.filter(
@@ -1036,12 +1211,19 @@ exports.submitOnRoadDetails = async (req, res) => {
 
     const vIdx = Number(vehicleIndex);
     const bookingItem = order.bookingItems[vIdx];
-    const requiredQty = bookingItem?.quantity || 1;
-
 
     const savedForThisVehicle = order.onRoadExecutionArray.filter(
-      e => e.vehicleIndex === vIdx
+      e => e.vehicleIndex === vIdx && e.entryStatus !== "removed"
     );
+
+    // Adding a vehicle beyond the originally booked quantity bumps the
+    // booking's quantity to match, so drivers/quantity ratios (and
+    // downstream billing in Campaign Calculator) stay consistent.
+    if (bookingItem && savedForThisVehicle.length > (bookingItem.quantity || 1)) {
+      bookingItem.quantity = savedForThisVehicle.length;
+    }
+
+    const requiredQty = bookingItem?.quantity || 1;
 
     if (savedForThisVehicle.length >= requiredQty) {
       order.onRoadExecutionArray.forEach(e => {
@@ -1174,7 +1356,10 @@ exports.submitOnRoadDetails = async (req, res) => {
 exports.updateOnRoadDriver = async (req, res) => {
   try {
     const { id, entryId } = req.params;
-    const { driverName, driverPhone, vehicleRegistrationNumber } = req.body;
+    const { driverName, driverPhone, vehicleRegistrationNumber, reason } = req.body;
+
+    if (!reason?.trim())
+      return errorResponse(res, "Reason for this update is required", null, 400);
 
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
@@ -1210,6 +1395,7 @@ exports.updateOnRoadDriver = async (req, res) => {
       changedBy,
       changedAt: new Date(),
       changedFields,
+      reason: reason.trim(),
     });
 
     await order.save();
@@ -1478,18 +1664,33 @@ exports.editOnRoadDetails = async (req, res) => {
 exports.markVehicleUnavailable = async (req, res) => {
   try {
     const { id } = req.params;
-    const { vehicleIndex, vehicleRegistrationNumber, reason } = req.body;
+    const { vehicleIndex, vehicleRegistrationNumber, entryId, reason, inventoryStatus } = req.body;
 
     if (!reason?.trim())
       return errorResponse(res, "Reason is required", null, 400);
 
+    const ALLOWED_INVENTORY_STATUSES = ["Unavailable", "Damaged", "Under Maintenance"];
+    const resolvedInventoryStatus = ALLOWED_INVENTORY_STATUSES.includes(inventoryStatus)
+      ? inventoryStatus
+      : "Unavailable";
+
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-    const entry = order.onRoadExecutionArray.find(
-      (e) => e.vehicleRegistrationNumber === vehicleRegistrationNumber?.trim()?.toUpperCase()
-    );
+    const regNoUpper = vehicleRegistrationNumber?.trim()?.toUpperCase();
+    const entry = entryId
+      ? order.onRoadExecutionArray.id(entryId)
+      : order.onRoadExecutionArray.find(
+          (e) =>
+            e.vehicleRegistrationNumber === regNoUpper &&
+            e.entryStatus !== "removed" &&
+            !e.unavailableStatus
+        );
     if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
+    if (entry.entryStatus === "removed")
+      return errorResponse(res, "This vehicle entry has already been released", null, 400);
+    if (entry.unavailableStatus)
+      return errorResponse(res, "This vehicle is already marked unavailable", null, 400);
 
     const reportedBy =
       Number(req.user.isAdmin) === 0
@@ -1507,14 +1708,19 @@ exports.markVehicleUnavailable = async (req, res) => {
 
     entry.unavailableStatus = true;
     entry.unavailableReason = reason.trim();
+    entry.inventoryStatus = resolvedInventoryStatus;
 
     order.onRoadUnavailableHistory.push({
       vehicleIndex: entry.vehicleIndex,
+      entryId: entry._id,
       vehicleRegNo: entry.vehicleRegistrationNumber,
       driverName: entry.driverName,
+      driverPhone: entry.driverPhone,
       reason: reason.trim(),
+      inventoryStatus: resolvedInventoryStatus,
       photo: photoUrl,
       status: "unavailable",
+      eventType: "unavailable",
       reportedBy,
       reportedAt: new Date(),
       resolvedBy: "",
@@ -1522,7 +1728,188 @@ exports.markVehicleUnavailable = async (req, res) => {
     });
 
     await order.save();
+
+    try {
+      await VehicleMaster.updateOne(
+        { "registrationVehicles.registrationNumber": entry.vehicleRegistrationNumber },
+        {
+          $set: {
+            "registrationVehicles.$.statusAvailability.currentStatus": resolvedInventoryStatus,
+            "registrationVehicles.$.statusAvailability.remarks": `Marked ${resolvedInventoryStatus} on Order ${order.orderId} — ${reason.trim()}`,
+          },
+        }
+      );
+    } catch (err) {
+      console.error(`Failed to flag vehicle ${entry.vehicleRegistrationNumber} as ${resolvedInventoryStatus}:`, err.message);
+    }
+
     return successResponse(res, "Vehicle marked as unavailable", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.replaceOnRoadVehicle = async (req, res) => {
+  try {
+    const { id, entryId } = req.params;
+    const { newVehicleRegistrationNumber, reason, driverName, driverPhone } = req.body;
+
+    if (!newVehicleRegistrationNumber?.trim())
+      return errorResponse(res, "Replacement vehicle registration number is required", null, 400);
+    if (!reason?.trim())
+      return errorResponse(res, "Reason/comments are required", null, 400);
+    if (!driverName?.trim())
+      return errorResponse(res, "Driver name is required", null, 400);
+    if (!/^\d{10}$/.test(driverPhone || ""))
+      return errorResponse(res, "Enter a valid 10-digit driver phone number", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const oldEntry = order.onRoadExecutionArray.id(entryId);
+    if (!oldEntry) return errorResponse(res, "Vehicle entry not found", null, 404);
+    if (oldEntry.entryStatus === "removed") {
+      return errorResponse(res, "This vehicle has already been released", null, 400);
+    }
+  
+    const newReg = newVehicleRegistrationNumber.trim().toUpperCase().replace(/\s+/g, "");
+    const oldReg = (oldEntry.vehicleRegistrationNumber || "").trim().toUpperCase().replace(/\s+/g, "");
+
+    if (newReg === oldReg) {
+      return errorResponse(res, "Replacement vehicle must be different from the current vehicle", null, 400);
+    }
+
+    const alreadyActive = order.onRoadExecutionArray.some(
+      (e) => e.entryStatus !== "removed" && !e.unavailableStatus && e.vehicleRegistrationNumber === newReg
+    );
+    if (alreadyActive) {
+      return errorResponse(res, "That vehicle is already assigned on this order", null, 400);
+    }
+
+    const performedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const now = new Date();
+    const replacedAt = new Date(now.getTime() + 1000);
+    const reasonTrim = reason.trim();
+    const wasAlreadyUnavailable = !!oldEntry.unavailableStatus;
+
+   
+    oldEntry.unavailableStatus = true;
+    oldEntry.unavailableReason = reasonTrim;
+
+   
+    order.onRoadExecutionArray.push({
+      vehicleIndex: oldEntry.vehicleIndex,
+      driverName: driverName.trim(),
+      driverPhone: driverPhone.trim(),
+      vehicleRegistrationNumber: newReg,
+      onRoadStatus: oldEntry.onRoadStatus,
+      uploadedBy: performedBy,
+      uploadedAt: now,
+      entryStatus: "active",
+    });
+    const newEntry = order.onRoadExecutionArray[order.onRoadExecutionArray.length - 1];
+
+   
+    order.onRoadDriverHistory.push({
+      vehicleIndex: oldEntry.vehicleIndex,
+      entryId: oldEntry._id,
+      action: "removed",
+      driverName: oldEntry.driverName,
+      driverPhone: oldEntry.driverPhone,
+      vehicleRegistrationNumber: oldEntry.vehicleRegistrationNumber,
+      changedBy: performedBy,
+      changedAt: now,
+      changedFields: { reason: reasonTrim, replacedBy: newReg },
+    });
+    order.onRoadDriverHistory.push({
+      vehicleIndex: oldEntry.vehicleIndex,
+      entryId: newEntry._id,
+      action: "created",
+      driverName: newEntry.driverName,
+      driverPhone: newEntry.driverPhone,
+      vehicleRegistrationNumber: newEntry.vehicleRegistrationNumber,
+      changedBy: performedBy,
+      changedAt: now,
+      changedFields: { reason: reasonTrim, replacementFor: oldEntry.vehicleRegistrationNumber },
+    });
+
+    if (!wasAlreadyUnavailable) {
+      order.onRoadUnavailableHistory.push({
+        vehicleIndex: oldEntry.vehicleIndex,
+        entryId: oldEntry._id,
+        vehicleRegNo: oldEntry.vehicleRegistrationNumber,
+        driverName: oldEntry.driverName,
+        driverPhone: oldEntry.driverPhone,
+        reason: reasonTrim,
+        status: "unavailable",
+        eventType: "unavailable",
+        reportedBy: performedBy,
+        reportedAt: now,
+      });
+    }
+
+
+    order.onRoadUnavailableHistory.push({
+      vehicleIndex: oldEntry.vehicleIndex,
+      entryId: oldEntry._id,
+      vehicleRegNo: oldEntry.vehicleRegistrationNumber,
+      driverName: oldEntry.driverName,
+      driverPhone: oldEntry.driverPhone,
+      reason: reasonTrim,
+      status: "unavailable",
+      eventType: "replaced",
+      replacementEntryId: newEntry._id,
+      replacementVehicleRegNo: newReg,
+      replacementDriverName: newEntry.driverName,
+      replacementDriverPhone: newEntry.driverPhone,
+      replacedAt: replacedAt,
+      reportedBy: performedBy,
+      reportedAt: replacedAt,
+    });
+
+    await order.save();
+
+   
+    try {
+      await VehicleMaster.updateOne(
+        { "registrationVehicles.registrationNumber": oldReg },
+        {
+          $set: {
+            "registrationVehicles.$.statusAvailability.currentStatus": "Unavailable",
+            "registrationVehicles.$.statusAvailability.remarks": `Replaced on Order ${order.orderId} — ${reasonTrim}`,
+          },
+        }
+      );
+    } catch (err) {
+      console.error(`Failed to flag old vehicle ${oldReg} unavailable:`, err.message);
+    }
+
+    try {
+      const bookingItem = order.bookingItems?.[oldEntry.vehicleIndex];
+      const normalizeDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+      await VehicleMaster.updateOne(
+        { "registrationVehicles.registrationNumber": newReg },
+        {
+          $set: {
+            "registrationVehicles.$.statusAvailability.currentStatus": "Booked",
+            "registrationVehicles.$.statusAvailability.fromDate": normalizeDate(bookingItem?.fromDate),
+            "registrationVehicles.$.statusAvailability.toDate": normalizeDate(bookingItem?.toDate),
+            "registrationVehicles.$.statusAvailability.remarks": `Replacement vehicle for Order ${order.orderId} - ${order.name || "Customer"}`,
+            "registrationVehicles.$.statusAvailability.orderId": order._id.toString(),
+            "registrationVehicles.$.statusAvailability.orderDisplayId": order.orderId || "",
+          },
+        }
+      );
+    } catch (err) {
+      console.error(`Failed to book replacement vehicle ${newReg}:`, err.message);
+    }
+
+    return successResponse(res, "Vehicle replaced successfully", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
@@ -1559,15 +1946,32 @@ exports.markVehicleAvailable = async (req, res) => {
     history.resolveDescription = (resolveDescription || "").trim();
     history.resolvePhoto = photoUrl;
 
-    const entry = order.onRoadExecutionArray.find(
-      (e) => e.vehicleRegistrationNumber === history.vehicleRegNo
-    );
+    const entry = history.entryId
+      ? order.onRoadExecutionArray.id(history.entryId)
+      : order.onRoadExecutionArray.find(
+          (e) => e.vehicleRegistrationNumber === history.vehicleRegNo
+        );
     if (entry) {
       entry.unavailableStatus = false;
       entry.unavailableReason = "";
     }
 
     await order.save();
+
+    try {
+      await VehicleMaster.updateOne(
+        { "registrationVehicles.registrationNumber": history.vehicleRegNo },
+        {
+          $set: {
+            "registrationVehicles.$.statusAvailability.currentStatus": "Booked",
+            "registrationVehicles.$.statusAvailability.remarks": `Resumed on Order ${order.orderId} — ${(resolveDescription || "").trim()}`,
+          },
+        }
+      );
+    } catch (err) {
+      console.error(`Failed to restore vehicle ${history.vehicleRegNo} status:`, err.message);
+    }
+
     return successResponse(res, "Vehicle marked as available", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
@@ -1821,10 +2225,9 @@ exports.approveFocEntry = async (req, res) => {
       }
     }
 
-    // approver's own email straight from JWT — no DB lookup needed
     const approverEmail = req.user?.email || "";
 
-    // original requester is a DIFFERENT user, so this still needs a DB lookup
+   
     const createdByUsername =
       (entry.focHistory || []).find((h) => h.action === "created")?.changedBy ||
       entry.createdBy;
@@ -1852,6 +2255,33 @@ exports.approveFocEntry = async (req, res) => {
       changedAt: new Date(),
     });
 
+
+    if (entry.focPurpose === "compensation-days" && entry.compensationDaysValue > 0) {
+      order.campaignCompensationArray.push({
+        vehicleIndex: entry.compensationVehicleIndex,
+        entryId: entry.compensationEntryId || null,
+        compensationType: "days",
+        compensationValue: entry.compensationDaysValue,
+        fromDate: entry.fromDate,
+        toDate: entry.toDate,
+        reason: entry.reason || "",
+        addedBy: approvedBy,
+        addedAt: new Date(),
+      });
+    } else if (entry.focPurpose === "compensation-hours" && entry.compensationHoursValue > 0) {
+      order.campaignCompensationArray.push({
+        vehicleIndex: entry.compensationVehicleIndex,
+        entryId: entry.compensationEntryId || null,
+        compensationType: "hours",
+        compensationValue: entry.compensationHoursValue,
+        fromDate: entry.fromDate,
+        toDate: entry.toDate,
+        reason: entry.reason || "",
+        addedBy: approvedBy,
+        addedAt: new Date(),
+      });
+    }
+
     await order.save();
     return successResponse(res, "FOC extension approved successfully", { order });
   } catch (error) {
@@ -1864,7 +2294,6 @@ exports.createAndApproveFocEntry = async (req, res) => {
     const { id } = req.params;
     const { reason, fromDate, toDate, bookingItemId } = req.body;
 
-    // Only super admin can use this shortcut
     if (Number(req.user.isAdmin) !== 1) {
       return errorResponse(res, "Only super admin can create and approve FOC extension", null, 403);
     }
@@ -1984,6 +2413,7 @@ exports.submitOrderClosedWon = async (req, res) => {
       uploadedAt: new Date(),
     });
 
+    const RELEASE_VEHICLE_FROM_STAGES = ["projectExecution", "onRoad", "clientClosure"];
     const oldStage = order.pipelineStatus;
     order.pipelineStatus = "closedWon";
     order.pipelineLogs.push({
@@ -1995,19 +2425,21 @@ exports.submitOrderClosedWon = async (req, res) => {
 
     await order.save();
 
+    if (RELEASE_VEHICLE_FROM_STAGES.includes(oldStage)) {
+      const regNumbers = (order.onRoadExecutionArray || [])
+        .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
+        .map((e) => e.vehicleRegistrationNumber)
+        .filter(Boolean);
 
-    const regNumbers = (order.onRoadExecutionArray || [])
-      .map((e) => e.vehicleRegistrationNumber)
-      .filter(Boolean);
-
-    for (const regNo of regNumbers) {
-      try {
-        await VehicleMaster.updateOne(
-          { "registrationVehicles.registrationNumber": regNo },
-          { $set: { "registrationVehicles.$.statusAvailability.currentStatus": "Available" } }
-        );
-      } catch (err) {
-        console.error(`Failed to release vehicle ${regNo}:`, err.message);
+      for (const regNo of regNumbers) {
+        try {
+          await VehicleMaster.updateOne(
+            { "registrationVehicles.registrationNumber": regNo },
+            { $set: { "registrationVehicles.$.statusAvailability.currentStatus": "Available" } }
+          );
+        } catch (err) {
+          console.error(`Failed to release vehicle ${regNo}:`, err.message);
+        }
       }
     }
 
@@ -2068,6 +2500,7 @@ exports.submitOrderClosedLost = async (req, res) => {
 
     if (RELEASE_VEHICLE_FROM_STAGES.includes(oldStage)) {
       const regNumbers = (order.onRoadExecutionArray || [])
+        .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
         .map((e) => e.vehicleRegistrationNumber)
         .filter(Boolean);
 
@@ -2213,11 +2646,12 @@ exports.getVehicleLocationsProxy = async (req, res) => {
 exports.addExtraKmDetails = async (req, res) => {
   try {
     const { id } = req.params;
-    const { vehicleIndex, entryId, extraKm, extraHours, fromDate, toDate, extraKmId } = req.body;
+    const { vehicleIndex, entryId, extraKm, extraHours, fromDate, toDate, extraKmId, distributionMethod } = req.body;
 
     const vIdx = Number(vehicleIndex);
     const km = Number(extraKm) || 0;
     const hrs = Number(extraHours) || 0;
+    const distMethod = distributionMethod === "split" ? "split" : "daily";
 
    
     if (km <= 0 && hrs <= 0) {
@@ -2316,9 +2750,10 @@ exports.addExtraKmDetails = async (req, res) => {
       totalCost,
       addedBy,
       addedAt: new Date(),
+      distributionMethod: distMethod,
     };
 
-    
+
     order.extraKmDetailsArray.push(extraKmPayload);
 
  
@@ -2341,6 +2776,7 @@ exports.addExtraKmDetails = async (req, res) => {
           existingEntry.totalCost = totalCost;
           existingEntry.addedBy = addedBy;
           existingEntry.addedAt = new Date();
+          existingEntry.distributionMethod = distMethod;
           existingEntry.driverName = driverEntry?.driverName || "";
           existingEntry.driverPhone = driverEntry?.driverPhone || "";
           existingEntry.vehicleRegistrationNumber = driverEntry?.vehicleRegistrationNumber || "";
@@ -2370,6 +2806,7 @@ exports.addExtraKmDetails = async (req, res) => {
           latestEntry.totalCost = totalCost;
           latestEntry.addedBy = addedBy;
           latestEntry.addedAt = new Date();
+          latestEntry.distributionMethod = distMethod;
           latestEntry.driverName = driverEntry?.driverName || "";
           latestEntry.driverPhone = driverEntry?.driverPhone || "";
           latestEntry.vehicleRegistrationNumber = driverEntry?.vehicleRegistrationNumber || "";
@@ -2393,3 +2830,1765 @@ exports.addExtraKmDetails = async (req, res) => {
     return errorResponse(res, error.message, null, 500);
   }
 };
+
+const CAMPAIGN_HOURS_PER_DAY = Number(process.env.CAMPAIGN_HOURS_PER_DAY) || 8;
+const GST_PERCENT = Number(process.env.GST_PERCENT) || 18;
+
+exports.addDailyHoursLog = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vehicleIndex, entryId, day, startTime, endTime, remarks, logId, isAbsentDay, billingMode, absentDayResolution } = req.body;
+
+    const vIdx = Number(vehicleIndex);
+    const absentDayFlag = !!isAbsentDay;
+    if (!day) return errorResponse(res, "Day is required", null, 400);
+
+  
+    let resolvedAbsentDayResolution = null;
+    if (absentDayFlag) {
+      if (absentDayResolution !== "extend" && absentDayResolution !== "close") {
+        return errorResponse(
+          res,
+          "absentDayResolution ('extend' or 'close') is required when isAbsentDay is true",
+          null,
+          400
+        );
+      }
+      resolvedAbsentDayResolution = absentDayResolution;
+    }
+
+   
+    const allowedBillingModes = ["full", "partial", "absent"];
+    let resolvedBillingMode = allowedBillingModes.includes(billingMode) ? billingMode : "full";
+    if (absentDayFlag) {
+     
+      resolvedBillingMode = "absent";
+    }
+
+
+    let start, end, runningHours, absentHours;
+    if (absentDayFlag) {
+      start = new Date(`${day}T00:00:00.000Z`);
+      end = new Date(`${day}T00:00:01.000Z`);
+      runningHours = 0;
+      absentHours = CAMPAIGN_HOURS_PER_DAY;
+    } else {
+      if (!startTime) return errorResponse(res, "Start time is required", null, 400);
+      if (!endTime) return errorResponse(res, "End time is required", null, 400);
+
+      start = new Date(startTime);
+      end = new Date(endTime);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return errorResponse(res, "Invalid time format", null, 400);
+      }
+      if (end <= start) {
+        return errorResponse(res, "End time must be after start time", null, 400);
+      }
+      runningHours = Math.round(((end - start) / (1000 * 60 * 60)) * 100) / 100;
+      absentHours = Math.max(Math.round((CAMPAIGN_HOURS_PER_DAY - runningHours) * 100) / 100, 0);
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const bookingItem = order.bookingItems[vIdx];
+    if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
+
+    const campaignFrom = new Date(bookingItem.fromDate).toISOString().slice(0, 10);
+    const campaignTo = new Date(bookingItem.toDate).toISOString().slice(0, 10);
+    if (day < campaignFrom || day > campaignTo) {
+      return errorResponse(res, "Day must be within campaign range", null, 400);
+    }
+
+    let entry = null;
+    if (entryId) {
+      entry = order.onRoadExecutionArray.id(entryId);
+      if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
+    }
+
+    const loggedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+    const payload = {
+      vehicleIndex: vIdx,
+      entryId: entry ? entry._id : null,
+      driverName: entry?.driverName || "",
+      driverPhone: entry?.driverPhone || "",
+      vehicleRegistrationNumber: entry?.vehicleRegistrationNumber || "",
+      day,
+      startTime: start,
+      endTime: end,
+      campaignHours: CAMPAIGN_HOURS_PER_DAY,
+      runningHours,
+      absentHours,
+      isAbsentDay: absentDayFlag,
+      absentDayResolution: resolvedAbsentDayResolution,
+      billingMode: resolvedBillingMode,
+      remarks: remarks || "",
+      loggedBy,
+      loggedAt: new Date(),
+    };
+
+    const existing = logId
+      ? order.dailyHoursLogArray.id(logId)
+      : order.dailyHoursLogArray.find(
+          (l) => l.entryId && entry && l.entryId.toString() === entry._id.toString() && l.day === day
+        );
+
+    if (existing) {
+      Object.assign(existing, payload);
+    } else {
+      order.dailyHoursLogArray.push(payload);
+    }
+
+
+    if (absentDayFlag && resolvedAbsentDayResolution === "extend") {
+      const alreadyPendingOrApproved = (order.campaignClosureArray || []).some(
+        (c) =>
+          c.type === "foc" &&
+          String(c.bookingItemId) === String(bookingItem._id || vIdx) &&
+          c.status !== "rejected" &&
+          new Date(c.fromDate).toISOString().slice(0, 10) === campaignTo
+      );
+      if (!alreadyPendingOrApproved) {
+        const isSuperAdmin = Number(req.user.isAdmin) === 1;
+        const extendedTo = new Date(`${campaignTo}T00:00:00.000Z`);
+        extendedTo.setUTCDate(extendedTo.getUTCDate() + 1);
+        const now = new Date();
+        const reason = `Vehicle Absent on ${day} — Campaign extended by 1 day`;
+        order.campaignClosureArray.push({
+          bookingItemId: bookingItem._id || null,
+          type: "foc",
+          reason,
+          document: "",
+          fromDate: new Date(`${campaignTo}T00:00:00.000Z`),
+          toDate: extendedTo,
+          createdBy: loggedBy,
+          createdAt: now,
+          status: isSuperAdmin ? "approved" : "pending",
+          approvedBy: isSuperAdmin ? loggedBy : undefined,
+          approvedAt: isSuperAdmin ? now : undefined,
+          isAdminCreated: isSuperAdmin,
+          focChatMessages: [],
+          focPurpose: "absent-day",
+          focHistory: isSuperAdmin
+            ? [
+                { action: "created", changedFields: {}, changedBy: loggedBy, changedAt: now },
+                { action: "approved", changedFields: {}, changedBy: loggedBy, changedAt: now },
+              ]
+            : [{ action: "created", changedFields: {}, changedBy: loggedBy, changedAt: now }],
+        });
+      }
+    }
+
+    await order.save();
+
+    return successResponse(res, "Daily hours logged successfully", { order }, 201);
+  } catch (error) {
+    console.error("Error in addDailyHoursLog:", error);
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.setPurchasedPoolWindow = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vehicleIndex, fromDate, toDate } = req.body;
+
+    const vIdx = Number(vehicleIndex);
+    if (Number.isNaN(vIdx)) {
+      return errorResponse(res, "vehicleIndex is required", null, 400);
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const bookingItem = order.bookingItems[vIdx];
+    if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
+
+    let newFrom = null;
+    let newTo = null;
+    if (fromDate || toDate) {
+      if (!fromDate || !toDate) {
+        return errorResponse(res, "Both From date and To date are required (or leave both empty to reset)", null, 400);
+      }
+      newFrom = new Date(fromDate);
+      newTo = new Date(toDate);
+      if (isNaN(newFrom.getTime()) || isNaN(newTo.getTime())) {
+        return errorResponse(res, "Invalid date format", null, 400);
+      }
+      if (newFrom > newTo) {
+        return errorResponse(res, "From date must be before or equal to To date", null, 400);
+      }
+      const itemFrom = new Date(bookingItem.fromDate);
+      const itemTo = new Date(bookingItem.toDate);
+      if (newFrom < itemFrom || newTo > itemTo) {
+        return errorResponse(res, "The pool window must fall within this vehicle's campaign dates", null, 400);
+      }
+    }
+
+    bookingItem.purchasedExtraKmFromDate = newFrom;
+    bookingItem.purchasedExtraKmToDate = newTo;
+
+    await order.save();
+
+    return successResponse(res, "Purchased Extra KM/Hours pool window updated successfully", { order }, 200);
+  } catch (error) {
+    console.error("Error in setPurchasedPoolWindow:", error);
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+exports.addCampaignCompensation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vehicleIndex, entryId, compensationType, compensationValue, fromDate, toDate, reason } = req.body;
+
+    const vIdx = Number(vehicleIndex);
+    const value = Number(compensationValue) || 0;
+    if (!["hours", "days"].includes(compensationType)) {
+      return errorResponse(res, "compensationType must be 'hours' or 'days'", null, 400);
+    }
+    if (value <= 0) return errorResponse(res, "Enter a compensation value greater than 0", null, 400);
+    if (!fromDate) return errorResponse(res, "From date is required", null, 400);
+    if (!toDate) return errorResponse(res, "To date is required", null, 400);
+
+    const newFrom = new Date(fromDate);
+    const newTo = new Date(toDate);
+    if (isNaN(newFrom.getTime()) || isNaN(newTo.getTime())) {
+      return errorResponse(res, "Invalid date format", null, 400);
+    }
+    if (newFrom > newTo) {
+      return errorResponse(res, "From date must be before or equal to To date", null, 400);
+    }
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const bookingItem = order.bookingItems[vIdx];
+    if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
+
+    let entry = null;
+    if (entryId) {
+      entry = order.onRoadExecutionArray.id(entryId);
+      if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
+    }
+
+    const addedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+
+    if (compensationType === "days" || compensationType === "hours") {
+      const isSuperAdmin = Number(req.user.isAdmin) === 1;
+      const now = new Date();
+      const focPurpose = compensationType === "days" ? "compensation-days" : "compensation-hours";
+
+      if (isSuperAdmin) {
+        order.campaignCompensationArray.push({
+          vehicleIndex: vIdx,
+          entryId: entry ? entry._id : null,
+          vehicleRegistrationNumber: entry?.vehicleRegistrationNumber || "",
+          compensationType,
+          compensationValue: value,
+          fromDate: newFrom,
+          toDate: newTo,
+          reason: reason || "",
+          addedBy,
+          addedAt: now,
+        });
+      }
+
+      order.campaignClosureArray.push({
+        bookingItemId: bookingItem._id || null,
+        type: "foc",
+        reason:
+          reason ||
+          (compensationType === "days"
+            ? `Compensation: ${value} extra campaign day(s) requested`
+            : `Compensation: ${value} extra working hour(s) requested`),
+        document: "",
+        fromDate: newFrom,
+        toDate: newTo,
+        createdBy: addedBy,
+        createdAt: now,
+        status: isSuperAdmin ? "approved" : "pending",
+        approvedBy: isSuperAdmin ? addedBy : undefined,
+        approvedAt: isSuperAdmin ? now : undefined,
+        isAdminCreated: isSuperAdmin,
+        focChatMessages: [],
+        focPurpose,
+        compensationVehicleIndex: vIdx,
+        compensationEntryId: entry ? entry._id : null,
+        compensationDaysValue: compensationType === "days" ? value : null,
+        compensationHoursValue: compensationType === "hours" ? value : null,
+        focHistory: isSuperAdmin
+          ? [
+              { action: "created", changedFields: {}, changedBy: addedBy, changedAt: now },
+              { action: "approved", changedFields: {}, changedBy: addedBy, changedAt: now },
+            ]
+          : [{ action: "created", changedFields: {}, changedBy: addedBy, changedAt: now }],
+      });
+
+      await order.save();
+
+      const label = compensationType === "days" ? "Campaign days extension" : "Extra hours compensation";
+      return successResponse(
+        res,
+        isSuperAdmin
+          ? `${label} approved and applied`
+          : `${label} requested — waiting for admin approval`,
+        { order },
+        201
+      );
+    }
+
+    order.campaignCompensationArray.push({
+      vehicleIndex: vIdx,
+      entryId: entry ? entry._id : null,
+      vehicleRegistrationNumber: entry?.vehicleRegistrationNumber || "",
+      compensationType,
+      compensationValue: value,
+      fromDate: newFrom,
+      toDate: newTo,
+      reason: reason || "",
+      addedBy,
+      addedAt: new Date(),
+    });
+
+    await order.save();
+
+    return successResponse(res, "Campaign compensation added successfully", { order }, 201);
+  } catch (error) {
+    console.error("Error in addCampaignCompensation:", error);
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+exports.releaseOnRoadVehicle = async (req, res) => {
+  try {
+    const { id, entryId } = req.params;
+    const { reason } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const entry = order.onRoadExecutionArray.id(entryId);
+    if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
+
+    if (entry.entryStatus === "removed") {
+      return errorResponse(res, "This vehicle is already released", null, 400);
+    }
+
+    const releasedBy =
+      Number(req.user.isAdmin) === 0
+        ? req.user.username
+        : order.handlerName || req.user?.username || "Admin";
+
+   
+    entry.entryStatus = "removed";
+    // entry.onRoadStatus = 0; 
+    entry.removedAt = new Date();
+    entry.removedBy = releasedBy;
+    entry.removalReason = (reason || "").trim();
+
+    // 2. History log — "removed" action
+    order.onRoadDriverHistory.push({
+      vehicleIndex: entry.vehicleIndex,
+      entryId: entry._id,
+      action: "removed",
+      driverName: entry.driverName,
+      driverPhone: entry.driverPhone,
+      vehicleRegistrationNumber: entry.vehicleRegistrationNumber,
+      changedBy: releasedBy,
+      changedAt: new Date(),
+      changedFields: { reason: (reason || "").trim() },
+    });
+
+    await order.save();
+
+    // 3. Release the vehicle back to Vehicle Master pool (so it's bookable again)
+    try {
+      await VehicleMaster.updateOne(
+        { "registrationVehicles.registrationNumber": entry.vehicleRegistrationNumber },
+        {
+          $set: {
+            "registrationVehicles.$.statusAvailability.currentStatus": "Available",
+            "registrationVehicles.$.statusAvailability.orderId": "",
+            "registrationVehicles.$.statusAvailability.orderDisplayId": "",
+            "registrationVehicles.$.statusAvailability.fromDate": null,
+            "registrationVehicles.$.statusAvailability.toDate": null,
+          },
+        }
+      );
+    } catch (err) {
+      console.error(`Failed to release vehicle ${entry.vehicleRegistrationNumber}:`, err.message);
+    }
+
+    return successResponse(res, "Vehicle released from campaign successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+// ── Campaign Calculator ────────────────────────────────────────────────────
+// Pure read-only derivation from existing data (onRoadExecutionArray,
+// onRoadDriverHistory, extraKmDetailsArray) — no new persisted state.
+// Gives a day-by-day, vehicle-wise billing breakdown for a running campaign.
+
+const dateKey = (d) => new Date(d).toISOString().slice(0, 10);
+
+function addDaysUTC(dateKeyStr, days) {
+  const d = new Date(dateKeyStr + "T00:00:00.000Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return dateKey(d);
+}
+
+// Inclusive day count between two YYYY-MM-DD keys, used to resolve the
+// "split" Extra KM/Hours distributionMethod (value ÷ number of days in the
+// record's own fromDate-toDate range).
+function daysBetweenInclusive(fromKeyStr, toKeyStr) {
+  const f = new Date(fromKeyStr + "T00:00:00.000Z");
+  const t = new Date(toKeyStr + "T00:00:00.000Z");
+  return Math.round((t - f) / 86400000) + 1;
+}
+
+// Replays onRoadDriverHistory events for one entry to find its
+// driver/registration state as of a given day, and whether it was
+// active (created & not yet removed) on that day.
+function resolveEntryStateForDay(entry, historyForEntry, dayKey) {
+  const eventsUpToDay = historyForEntry.filter((h) => dateKey(h.changedAt) <= dayKey);
+  if (eventsUpToDay.length === 0) return null; // not created yet as of this day
+
+  let state = null;
+  let removed = false;
+  let createdOnThisDay = false;
+  let releasedOnThisDay = false;
+
+  for (const ev of historyForEntry) {
+    const evKey = dateKey(ev.changedAt);
+    if (evKey > dayKey) break;
+
+    if (ev.action === "created") {
+      state = {
+        driverName: ev.driverName,
+        driverPhone: ev.driverPhone,
+        vehicleRegistrationNumber: ev.vehicleRegistrationNumber,
+      };
+      removed = false;
+      if (evKey === dayKey) createdOnThisDay = true;
+    } else if (ev.action === "updated" && state) {
+      const cf = ev.changedFields || {};
+      if (cf.driverName?.new !== undefined) state.driverName = cf.driverName.new;
+      if (cf.driverPhone?.new !== undefined) state.driverPhone = cf.driverPhone.new;
+      if (cf.vehicleRegistrationNumber?.new !== undefined) {
+        state.vehicleRegistrationNumber = cf.vehicleRegistrationNumber.new;
+      }
+    } else if (ev.action === "removed") {
+      removed = true;
+      if (evKey === dayKey) releasedOnThisDay = true;
+    }
+  }
+
+  if (!state || removed) {
+    return removed
+      ? {
+          removed: true,
+          releasedOnThisDay,
+          entryId: String(entry._id),
+          driverName: state ? state.driverName : entry.driverName,
+          driverPhone: state ? state.driverPhone : entry.driverPhone,
+          vehicleRegistrationNumber: state
+            ? state.vehicleRegistrationNumber
+            : entry.vehicleRegistrationNumber,
+        }
+      : null;
+  }
+
+  return {
+    entryId: String(entry._id),
+    driverName: state.driverName,
+    driverPhone: state.driverPhone,
+    vehicleRegistrationNumber: state.vehicleRegistrationNumber,
+    createdOnThisDay,
+    // "replacement" = this slot's vehicle was created after the campaign's
+    // own start date, i.e. it filled in mid-campaign rather than at kickoff.
+    isReplacement: false, // set by caller once campaignStart is known
+  };
+}
+
+// Extra KM/Hours are resolved per vehicle-type SLOT (vehicleIndex), not per
+// currently-active entryId — a record logged against a replaced-out vehicle
+// (entryId of Vehicle A) keeps applying to any day within its own
+// fromDate-toDate range even after Vehicle B takes over the slot. Records
+// are never deleted/migrated/duplicated for this; this only changes which
+// records are "in scope" during resolution. Inclusive day-count between two
+// day-key strings (or dates), used to divide a "split"-distribution record's
+// total evenly across its fromDate-toDate range.
+function daysBetweenInclusive(fromDate, toDate) {
+  const f = new Date(`${dateKey(fromDate)}T00:00:00.000Z`);
+  const t = new Date(`${dateKey(toDate)}T00:00:00.000Z`);
+  return Math.max(Math.round((t - f) / (1000 * 60 * 60 * 24)) + 1, 1);
+}
+
+// Default campaign working window when no actual hours were logged for an
+// entry/day: 4:00 PM – Midnight (8 hours), matching the frontend's
+// NEXT_PUBLIC_DEFAULT_LOGIN_TIME/NEXT_PUBLIC_DEFAULT_LOGOUT_TIME defaults
+// used by LogHoursModal. When an entry/day DOES have a real dailyHoursLog
+// entry, that log's own startTime/endTime is used as the window instead
+// (see resolveWorkWindow below) — this constant is only the fallback.
+// Env vars are entered as "HH:mm" wall-clock strings (e.g. "18:30"), not
+// plain decimal hours — parse them into a decimal hour (18.5) instead of
+// `Number(...)`, which silently produced NaN for any "HH:mm" value.
+function parseTimeToDecimalHour(str, fallback) {
+  const m = String(str || "").trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) {
+    const n = Number(str);
+    return isNaN(n) ? fallback : n;
+  }
+  return Number(m[1]) + Number(m[2]) / 60;
+}
+
+const DEFAULT_WORK_START_HOUR = parseTimeToDecimalHour(process.env.DEFAULT_WORK_START_HOUR, 16);
+// If the logout time is numerically <= the login time, the shift crosses
+// midnight (e.g. 18:30 -> 02:30), so roll it into the next day (26.5).
+let _rawWorkEndHour = parseTimeToDecimalHour(process.env.DEFAULT_WORK_END_HOUR, 24);
+if (_rawWorkEndHour <= DEFAULT_WORK_START_HOUR) _rawWorkEndHour += 24;
+const DEFAULT_WORK_END_HOUR = _rawWorkEndHour;
+
+// The default work window's hours (e.g. 16:00-24:00) are meant to represent
+// wall-clock IST hours ("4:00 PM - Midnight IST"), matching the frontend's
+// NEXT_PUBLIC_DEFAULT_LOGIN_TIME/LOGOUT_TIME which are entered/displayed as
+// IST times by staff. They must therefore be anchored as literal IST instants
+// (UTC+5:30), NOT as raw UTC hours — anchoring them as UTC hours previously
+// made a "4:00 PM-Midnight" window actually fall at 9:30 PM-5:30 AM IST once
+// rendered in the browser's local timezone, which is what every OTHER
+// timestamp in this response (real event timestamps) is rendered in. Building
+// every timeline boundary — synthetic default-window ones AND real
+// event-derived ones — as genuine instants that equal the intended IST
+// wall-clock time keeps a single, consistent local-time rendering convention
+// usable everywhere on the frontend (see fmtClock/fmtDatetime in
+// CampaignCalculatorTab.tsx).
+const IST_OFFSET = "+05:30";
+function istWallClock(dayKeyStr, hourDecimal) {
+  // hourDecimal may be fractional (18.5 -> 18:30) and/or >= 24 (rollover into
+  // a following day, e.g. 26.5 -> next day 02:30), handled by converting to
+  // total minutes and letting addDaysUTC carry the day portion.
+  const totalMinutes = Math.round(hourDecimal * 60);
+  const dayOffset = Math.floor(totalMinutes / (24 * 60));
+  const minutesInDay = totalMinutes - dayOffset * 24 * 60;
+  const hh = String(Math.floor(minutesInDay / 60)).padStart(2, "0");
+  const mm = String(minutesInDay % 60).padStart(2, "0");
+  const targetDay = dayOffset > 0 ? addDaysUTC(dayKeyStr, dayOffset) : dayKeyStr;
+  return new Date(`${targetDay}T${hh}:${mm}:00${IST_OFFSET}`);
+}
+
+// Resolves the actual working window [start,end] for one entry/day: prefers
+// the real logged startTime/endTime from dailyHoursLogArray for that
+// entry/day (when it's a real timed log, not a full-day-absence placeholder
+// entry); otherwise falls back to the default 4PM-Midnight IST window built
+// on top of dayKeyStr (see istWallClock above).
+function resolveWorkWindow(dayKeyStr, hoursLog) {
+  if (hoursLog && hoursLog.startTime && hoursLog.endTime && !hoursLog.isAbsentDay) {
+    const start = new Date(hoursLog.startTime);
+    const end = new Date(hoursLog.endTime);
+    if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end > start) {
+      return { start, end };
+    }
+  }
+  const start = istWallClock(dayKeyStr, DEFAULT_WORK_START_HOUR);
+  const end = istWallClock(dayKeyStr, DEFAULT_WORK_END_HOUR); // 24 correctly rolls into next-day 00:00 IST
+  return { start, end };
+}
+
+// Builds the classified running-time event sequence for one entry/day: a
+// sorted walk across window-start, every issue's reportedAt/resolvedAt, and
+// every (non-replacement) unavailable-history reportedAt/resolvedAt, all
+// clipped into [windowStart, entryEndCap]. Gaps are running by default;
+// they become "issue" while an issue is open, and "unavailable" while a
+// standalone unavailable-status record is open. If this entry was replaced
+// this day (a "replaced" record with a `replacedAt`), that timestamp caps
+// the entry's own day (the new entryId picks up the rest via its own
+// creation-clip) and — since the vehicle demonstrably never resumed running
+// after its first down event that day — every gap from that first down
+// event onward through the cap is treated as "unavailable" too, so an
+// informational "marked unavailable" status change sitting inside that span
+// doesn't get misread as a return to running.
+function buildEntryDayTimeline(windowStart, windowEnd, issuesForEntry, unavailForEntry, entryCreatedClip) {
+  const clip = (d) => {
+    if (!d) return null;
+    const t = new Date(d);
+    if (isNaN(t.getTime())) return null;
+    if (t < windowStart) return new Date(windowStart);
+    if (t > windowEnd) return new Date(windowEnd);
+    return t;
+  };
+
+  const replacedRecord = (unavailForEntry || [])
+    .filter((h) => h.eventType === "replaced" && h.replacedAt)
+    .sort((a, b) => new Date(a.replacedAt) - new Date(b.replacedAt))[0];
+  const entryEndCap = replacedRecord ? clip(replacedRecord.replacedAt) || windowEnd : windowEnd;
+
+  let effectiveStart = windowStart;
+  if (entryCreatedClip) {
+    const cc = clip(entryCreatedClip);
+    if (cc && cc > effectiveStart) effectiveStart = cc;
+  }
+
+  if (entryEndCap <= effectiveStart) {
+    return { timeline: [], runningHours: 0, issueHours: 0, unavailableHours: 0 };
+  }
+
+  const issueIntervals = [];
+  for (const iss of issuesForEntry || []) {
+    const s = clip(iss.reportedAt);
+    if (!s || s >= entryEndCap) continue;
+    let e = clip(iss.resolvedAt) || entryEndCap;
+    if (e > entryEndCap) e = entryEndCap;
+    if (e > s) issueIntervals.push([s, e]);
+  }
+
+  const unavailIntervals = [];
+  for (const h of unavailForEntry || []) {
+    if (h.eventType === "replaced") continue; // boundary marker only (entryEndCap), not its own segment
+    const s = clip(h.reportedAt);
+    if (!s || s >= entryEndCap) continue;
+    let e = clip(h.resolvedAt) || entryEndCap;
+    if (e > entryEndCap) e = entryEndCap;
+    if (e > s) unavailIntervals.push([s, e]);
+  }
+
+  const allDownStarts = [...issueIntervals, ...unavailIntervals].map(([s]) => s);
+  const downFloor =
+    replacedRecord && allDownStarts.length
+      ? allDownStarts.reduce((m, s) => (s < m ? s : m))
+      : null;
+
+  const points = new Set([effectiveStart.getTime(), entryEndCap.getTime()]);
+  issueIntervals.forEach(([s, e]) => { points.add(s.getTime()); points.add(e.getTime()); });
+  unavailIntervals.forEach(([s, e]) => { points.add(s.getTime()); points.add(e.getTime()); });
+  if (downFloor) points.add(downFloor.getTime());
+
+  const sorted = Array.from(points)
+    .filter((ms) => ms >= effectiveStart.getTime() && ms <= entryEndCap.getTime())
+    .sort((a, b) => a - b)
+    .map((ms) => new Date(ms));
+
+  const timeline = [];
+  let runningHours = 0;
+  let issueHours = 0;
+  let unavailableHours = 0;
+
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const segStart = sorted[i];
+    const segEnd = sorted[i + 1];
+    if (segEnd <= segStart) continue;
+    const hours = Math.round(((segEnd - segStart) / (1000 * 60 * 60)) * 100) / 100;
+    if (hours <= 0) continue;
+    const mid = new Date((segStart.getTime() + segEnd.getTime()) / 2);
+
+    let type = "running";
+    if (issueIntervals.some(([s, e]) => mid >= s && mid < e)) {
+      type = "issue";
+    } else if (unavailIntervals.some(([s, e]) => mid >= s && mid < e)) {
+      type = "unavailable";
+    } else if (downFloor && mid >= downFloor && mid < entryEndCap) {
+      type = "unavailable";
+    }
+
+    timeline.push({ type, start: segStart, end: segEnd, hours });
+    if (type === "running") runningHours += hours;
+    else if (type === "issue") issueHours += hours;
+    else unavailableHours += hours;
+  }
+
+  return {
+    timeline,
+    runningHours: Math.round(runningHours * 100) / 100,
+    issueHours: Math.round(issueHours * 100) / 100,
+    unavailableHours: Math.round(unavailableHours * 100) / 100,
+  };
+}
+
+exports.saveInvoice = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const {
+      invoiceDate, dueDate, poNumber, projectName, placeOfSupply,
+      billToName, billToAddress, billToGstin, billToPan,
+      lineItems, cgstPercent, sgstPercent, rounding,
+    } = req.body;
+
+    const invoiceNumber = order.invoiceData?.invoiceNumber || `ASI-${order.orderId}`;
+
+    order.invoiceData = {
+      invoiceNumber,
+      invoiceDate: invoiceDate || new Date(),
+      dueDate: dueDate || null,
+      poNumber: poNumber || "",
+      projectName: projectName || "",
+      placeOfSupply: placeOfSupply || "",
+      billToName: billToName || "",
+      billToAddress: billToAddress || "",
+      billToGstin: billToGstin || "",
+      billToPan: billToPan || "",
+      lineItems: Array.isArray(lineItems) ? lineItems : [],
+      cgstPercent: Number(cgstPercent) || 0,
+      sgstPercent: Number(sgstPercent) || 0,
+      rounding: Number(rounding) || 0,
+      generatedBy: req.user?.username || req.user?.name || "",
+      generatedAt: new Date(),
+    };
+
+    await order.save();
+
+    return successResponse(res, "Invoice saved successfully", order.invoiceData);
+  } catch (error) {
+    return errorResponse(res, "Server Error", error.message, 500);
+  }
+};
+
+exports.getCampaignCalculator = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await Order.findById(id).lean();
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const bookingItems = order.bookingItems || [];
+    if (bookingItems.length === 0) {
+      return errorResponse(res, "This order has no vehicles to calculate", null, 400);
+    }
+
+    const onRoadExecutionArray = order.onRoadExecutionArray || [];
+    const onRoadDriverHistory = order.onRoadDriverHistory || [];
+    const onRoadIssues = order.onRoadIssues || [];
+    const onRoadUnavailableHistory = order.onRoadUnavailableHistory || [];
+    const extraKmDetailsArray = order.extraKmDetailsArray || [];
+    const dailyHoursLogArray = order.dailyHoursLogArray || [];
+    const campaignCompensationArray = order.campaignCompensationArray || [];
+
+  
+    const hoursLogByEntryDay = {};
+    for (const l of dailyHoursLogArray) {
+      if (!l.entryId) continue;
+      hoursLogByEntryDay[`${String(l.entryId)}|${l.day}`] = l;
+    }
+
+
+    const extraDaysByVehicle = {};
+    bookingItems.forEach((_, vehicleIndex) => {
+      extraDaysByVehicle[vehicleIndex] = campaignCompensationArray
+        .filter((c) => c.compensationType === "days" && c.vehicleIndex === vehicleIndex)
+        .reduce((s, c) => s + (c.compensationValue || 0), 0);
+    });
+
+
+    const absentExtendDaysByVehicle = {};
+    bookingItems.forEach((_, vehicleIndex) => {
+      absentExtendDaysByVehicle[vehicleIndex] = dailyHoursLogArray.filter(
+        (l) => l.vehicleIndex === vehicleIndex && l.isAbsentDay && l.absentDayResolution === "extend"
+      ).length;
+    });
+
+    const effectiveToDateByVehicle = {};
+    bookingItems.forEach((b, idx) => {
+      const baseTo = dateKey(b.toDate);
+      const extra = (extraDaysByVehicle[idx] || 0) + (absentExtendDaysByVehicle[idx] || 0);
+      effectiveToDateByVehicle[idx] = extra > 0 ? addDaysUTC(baseTo, extra) : baseTo;
+    });
+
+    const campaignStart = bookingItems
+      .map((b) => dateKey(b.fromDate))
+      .sort()[0];
+    const campaignEnd = bookingItems
+      .map((b, idx) => effectiveToDateByVehicle[idx])
+      .sort()
+      .slice(-1)[0];
+
+    if (!campaignStart || !campaignEnd) {
+      return errorResponse(res, "Campaign dates are missing on this order", null, 400);
+    }
+
+    const issuesByEntry = {};
+    for (const iss of onRoadIssues) {
+      const key = iss.entryId ? String(iss.entryId) : `vi-${iss.vehicleIndex}`;
+      (issuesByEntry[key] = issuesByEntry[key] || []).push(iss);
+    }
+    const unavailByEntry = {};
+    for (const h of onRoadUnavailableHistory) {
+      const key = h.entryId ? String(h.entryId) : `vi-${h.vehicleIndex}`;
+      (unavailByEntry[key] = unavailByEntry[key] || []).push(h);
+    }
+
+
+    const hourCompByEntry = {};
+    const hourCompByVehicle = {};
+    for (const c of campaignCompensationArray) {
+      if (c.compensationType !== "hours") continue;
+      if (c.entryId) {
+        (hourCompByEntry[String(c.entryId)] = hourCompByEntry[String(c.entryId)] || []).push(c);
+      } else {
+        (hourCompByVehicle[c.vehicleIndex] = hourCompByVehicle[c.vehicleIndex] || []).push(c);
+      }
+    }
+    function compensationHoursFor(entryId, vehicleIndex, dayKeyStr) {
+      const inRange = (c) => dateKey(c.fromDate) <= dayKeyStr && dateKey(c.toDate) >= dayKeyStr;
+      const entryGrants = (hourCompByEntry[entryId] || []).filter(inRange);
+      if (entryGrants.length) {
+        return Math.round(entryGrants.reduce((s, c) => s + c.compensationValue, 0) * 100) / 100;
+      }
+      const vehicleGrants = (hourCompByVehicle[vehicleIndex] || []).filter(inRange);
+      return Math.round(vehicleGrants.reduce((s, c) => s + c.compensationValue, 0) * 100) / 100;
+    }
+
+ 
+    const historyByEntry = {};
+    for (const h of onRoadDriverHistory) {
+      const key = h.entryId ? String(h.entryId) : `vi-${h.vehicleIndex}`;
+      (historyByEntry[key] = historyByEntry[key] || []).push(h);
+    }
+    Object.values(historyByEntry).forEach((arr) =>
+      arr.sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt))
+    );
+
+    const bookingItemsMeta = bookingItems.map((b, idx) => {
+ 
+      const absentDaySet = new Set(
+        dailyHoursLogArray
+          .filter((l) => l.vehicleIndex === idx && l.isAbsentDay)
+          .map((l) => l.day)
+      );
+      const extraDaysGranted = extraDaysByVehicle[idx] || 0;
+      const totalScheduledDays = (b.totalDays || 0) + extraDaysGranted;
+      const absentDaysCount = absentDaySet.size;
+      const completedCampaignDays = Math.max(totalScheduledDays - absentDaysCount, 0);
+
+      return {
+        vehicleIndex: idx,
+        vehicleType: b.vehicleType,
+        vehicleModel: b.vehicleModel,
+        quantity: b.quantity || 0,
+        fromDate: b.fromDate,
+        toDate: b.toDate,
+        totalDays: b.totalDays || 0,
+        extraDaysGranted,
+        absentExtendDaysGranted: absentExtendDaysByVehicle[idx] || 0,
+        effectiveToDate: effectiveToDateByVehicle[idx],
+        totalScheduledDays,
+        absentDaysCount,
+        completedCampaignDays,
+        perDayRentalCost: b.perDayRentalCost || 0,
+        driverCharges: b.driverCharges || 0,
+        rtoCost: b.rtoCost || 0,
+        needPromoter: !!b.needPromoter,
+        promoterCost: b.promoterCost || 0,
+        estimatedRentalCost: (b.rentalCost || 0) + (b.driverCost || 0),
+        estimatedExtraKmCost: b.extraKmCost || 0,
+        estimatedExtraHourCost: b.extraHourCost || 0,
+        estimatedTotalAmount: b.totalAmount || 0,
+      };
+    });
+
+ 
+    const extraKmBalanceByVehicle = {};
+    bookingItems.forEach((item, vehicleIndex) => {
+      const purchasedWindowFrom = item.purchasedExtraKmFromDate
+        ? dateKey(item.purchasedExtraKmFromDate)
+        : dateKey(item.fromDate);
+      const purchasedWindowTo = item.purchasedExtraKmToDate
+        ? dateKey(item.purchasedExtraKmToDate)
+        : dateKey(item.toDate);
+      const slotItemFrom = dateKey(item.fromDate);
+      const slotItemToExtended = effectiveToDateByVehicle[vehicleIndex] || dateKey(item.toDate);
+      const slotRecords = extraKmDetailsArray.filter((e) => e.vehicleIndex === vehicleIndex);
+
+      let usedKm = 0, usedHours = 0, usedKmCost = 0, usedHourCost = 0;
+
+      let balCursor = slotItemFrom;
+      while (balCursor <= slotItemToExtended) {
+        const dayRecords = slotRecords.filter(
+          (e) => dateKey(e.fromDate) <= balCursor && dateKey(e.toDate) >= balCursor
+        );
+        if (dayRecords.length) {
+          const winner = dayRecords
+            .slice()
+            .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))[0];
+          const rangeDays = daysBetweenInclusive(dateKey(winner.fromDate), dateKey(winner.toDate));
+          const method = winner.distributionMethod === "split" ? "split" : "daily";
+          const dayKm = method === "split" ? (winner.extraKm || 0) / rangeDays : (winner.extraKm || 0);
+          const dayHours = method === "split" ? (winner.extraHours || 0) / rangeDays : (winner.extraHours || 0);
+          const dayKmCost = dayKm * (winner.perKmChargeRate || 0);
+          const dayHourCost = dayHours * (winner.additionalHourChargeRate || 0);
+
+          usedKm += dayKm;
+          usedHours += dayHours;
+          usedKmCost += dayKmCost;
+          usedHourCost += dayHourCost;
+        }
+        balCursor = addDaysUTC(balCursor, 1);
+      }
+
+      const purchasedKm = item.extraKm || 0;
+      const purchasedHours = item.extraHours || 0;
+
+      extraKmBalanceByVehicle[vehicleIndex] = {
+        vehicleIndex,
+        purchasedKm,
+        purchasedHours,
+        purchasedWindowFrom,
+        purchasedWindowTo,
+        isPurchasedWindowCustom: !!(item.purchasedExtraKmFromDate || item.purchasedExtraKmToDate),
+        usedKm: Math.round(usedKm * 10000) / 10000,
+        usedHours: Math.round(usedHours * 10000) / 10000,
+       
+        overageKm: Math.round(usedKm * 10000) / 10000,
+        overageHours: Math.round(usedHours * 10000) / 10000,
+        overageKmCost: Math.round(usedKmCost * 100) / 100,
+        overageHourCost: Math.round(usedHourCost * 100) / 100,
+      };
+    });
+
+    function computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay) {
+      const createdEvent = hist.find((h) => h.action === "created");
+      resolved.isReplacement = !!(createdEvent && dateKey(createdEvent.changedAt) > itemFrom);
+
+      const hoursLog = hoursLogByEntryDay[`${resolved.entryId}|${dayKey}`];
+      if (hoursLog) {
+        resolved.runningHours = hoursLog.runningHours;
+        resolved.absentHours = hoursLog.absentHours;
+        resolved.campaignHours = hoursLog.campaignHours;
+        resolved.isAbsentDay = !!hoursLog.isAbsentDay;
+        resolved.billingMode = hoursLog.billingMode || "full";
+        resolved.absentDayResolution = hoursLog.absentDayResolution || null;
+      } else {
+        resolved.billingMode = "full";
+        resolved.absentDayResolution = null;
+      }
+
+      const issuesForEntry = issuesByEntry[resolved.entryId] || [];
+      const unavailForEntry = unavailByEntry[resolved.entryId] || [];
+
+      let { start: dayWindowStart, end: dayWindowEnd } = resolveWorkWindow(dayKey, hoursLog);
+      const now = new Date();
+      if (dayKey === dateKey(now) && dayWindowEnd > now) {
+        dayWindowEnd = now;
+      }
+      const entryCreatedClip =
+        createdEvent && dateKey(createdEvent.changedAt) === dayKey
+          ? new Date(createdEvent.changedAt)
+          : null;
+
+      const entryTimeline = buildEntryDayTimeline(
+        dayWindowStart,
+        dayWindowEnd,
+        issuesForEntry,
+        unavailForEntry,
+        entryCreatedClip
+      );
+
+      const issueHours = entryTimeline.issueHours;
+      const unavailableHours = entryTimeline.unavailableHours;
+      const downtimeHours = Math.round((issueHours + unavailableHours) * 100) / 100;
+      resolved.totalCampaignHours = resolved.campaignHours || CAMPAIGN_HOURS_PER_DAY;
+      resolved.issueHours = issueHours;
+      resolved.unavailableHours = unavailableHours;
+      resolved.downtimeHours = downtimeHours;
+      resolved.timeline = entryTimeline.timeline;
+
+      if (!hoursLog) {
+        resolved.runningHours = entryTimeline.runningHours;
+      }
+
+      resolved.compensationHours = compensationHoursFor(resolved.entryId, vehicleIndex, dayKey);
+      resolved.isCompensationExtensionDay = isCompensationExtensionDay;
+
+      const replacedRecord = unavailForEntry
+        .filter((h) => h.eventType === "replaced" && h.replacedAt && dateKey(h.replacedAt) === dayKey)
+        .sort((a, b) => new Date(b.replacedAt) - new Date(a.replacedAt))[0];
+      if (replacedRecord) {
+        resolved.wasReplacedToday = true;
+        resolved.replacedByRegistrationNumber = replacedRecord.replacementVehicleRegNo || null;
+        resolved.replacedAt = replacedRecord.replacedAt;
+      }
+
+      return resolved;
+    }
+
+    const days = [];
+    let cumulativeTotal = 0;
+    let cumulativeCompensation = 0;
+    let cursor = campaignStart;
+
+    while (cursor <= campaignEnd) {
+      const dayKey = cursor;
+      const vehicles = [];
+      let dayTotal = 0;
+
+      bookingItems.forEach((item, vehicleIndex) => {
+        const itemFrom = dateKey(item.fromDate);
+        const itemTo = dateKey(item.toDate);
+      
+        const extraDaysGranted = extraDaysByVehicle[vehicleIndex] || 0;
+        const extendDaysGranted = absentExtendDaysByVehicle[vehicleIndex] || 0;
+        const itemToExtended = effectiveToDateByVehicle[vehicleIndex] || itemTo;
+        if (dayKey < itemFrom || dayKey > itemToExtended) return; // this vehicle-type's window doesn't include today
+        const isCompensationExtensionDay = dayKey > itemTo;
+        const compExtendedTo = extraDaysGranted > 0 ? addDaysUTC(itemTo, extraDaysGranted) : itemTo;
+        const isAbsentExtensionDay = extendDaysGranted > 0 && dayKey > compExtendedTo && dayKey <= itemToExtended;
+
+        const entriesForSlot = onRoadExecutionArray.filter(
+          (e) => e.vehicleIndex === vehicleIndex
+        );
+
+        const activeEntries = [];
+        const releasedToday = [];
+
+        for (const entry of entriesForSlot) {
+          const histKey = entry._id ? String(entry._id) : `vi-${vehicleIndex}`;
+          const hist = historyByEntry[histKey] || [];
+          const resolved = resolveEntryStateForDay(entry, hist, dayKey);
+          if (!resolved) continue;
+          if (resolved.removed) {
+            if (resolved.releasedOnThisDay) {
+             
+              computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay);
+              releasedToday.push(resolved);
+            }
+            continue;
+          }
+          
+          computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay);
+
+          activeEntries.push(resolved);
+        }
+
+        const activeCount = activeEntries.length;
+        const baseDailyRate = (item.perDayRentalCost || 0) + (item.driverCharges || 0);
+        const dailyVehicleAmount = activeCount * baseDailyRate;
+
+        let compensationToday = 0;
+        for (const entry of activeEntries) {
+          if (!entry.absentHours || !entry.campaignHours) continue;
+          const deduction =
+            Math.round(((baseDailyRate * entry.absentHours) / entry.campaignHours) * 100) / 100;
+          entry.compensationDeduction = deduction;
+          compensationToday += deduction;
+        }
+
+   
+        const extraKmPoolFeeToday = dayKey === itemFrom ? item.extraKmCost || 0 : 0;
+        const extraHourPoolFeeToday = dayKey === itemFrom ? item.extraHourCost || 0 : 0;
+
+        let extraKmCost = extraKmPoolFeeToday;
+        let extraHourCost = extraHourPoolFeeToday;
+        const extraDetailsToday = [];
+
+        const slotRecordsForDay = extraKmDetailsArray.filter(
+          (e) => e.vehicleIndex === vehicleIndex && dateKey(e.fromDate) <= dayKey && dateKey(e.toDate) >= dayKey
+        );
+        if (slotRecordsForDay.length) {
+        
+          const winner = slotRecordsForDay
+            .slice()
+            .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))[0];
+
+          const rangeDays = daysBetweenInclusive(dateKey(winner.fromDate), dateKey(winner.toDate));
+          const method = winner.distributionMethod === "split" ? "split" : "daily";
+          const resolvedKm = method === "split" ? (winner.extraKm || 0) / rangeDays : (winner.extraKm || 0);
+          const resolvedHours = method === "split" ? (winner.extraHours || 0) / rangeDays : (winner.extraHours || 0);
+
+          const resolvedKmCostRaw = resolvedKm * (winner.perKmChargeRate || 0);
+          const resolvedHourCostRaw = resolvedHours * (winner.additionalHourChargeRate || 0);
+
+          
+          const billableKmCost = Math.round(resolvedKmCostRaw * 100) / 100;
+          const billableHourCost = Math.round(resolvedHourCostRaw * 100) / 100;
+
+          extraKmCost += billableKmCost;
+          extraHourCost += billableHourCost;
+
+          extraDetailsToday.push({
+            registrationNumber: winner.vehicleRegistrationNumber,
+            entryId: winner.entryId ? String(winner.entryId) : null,
+            distributionMethod: method,
+            recordExtraKm: winner.extraKm || 0,
+            recordExtraHours: winner.extraHours || 0,
+            resolvedExtraKmToday: Math.round(resolvedKm * 10000) / 10000,
+            resolvedExtraHoursToday: Math.round(resolvedHours * 10000) / 10000,
+            extraKm: winner.extraKm,
+            extraHours: winner.extraHours,
+            extraKmCost: billableKmCost,
+            extraHourCost: billableHourCost,
+           
+            withinPurchasedBalance: false,
+            loggedFor: `${dateKey(winner.fromDate)} to ${dateKey(winner.toDate)}`,
+            addedBy: winner.addedBy,
+            addedAt: winner.addedAt,
+          });
+        }
+
+        let rtoAppliedToday = dayKey === itemFrom ? item.rtoCost || 0 : 0;
+
+        let promoterAmountToday =
+          item.needPromoter && item.totalDays
+            ? Math.round(((item.promoterCost || 0) / item.totalDays) * 100) / 100
+            : 0;
+
+
+        if (activeEntries.length) {
+          const billingFactors = activeEntries.map((entry) => {
+            if (entry.isAbsentDay || entry.billingMode === "absent") return 0;
+            if (entry.billingMode === "partial") {
+              const expectedHours = entry.totalCampaignHours || CAMPAIGN_HOURS_PER_DAY;
+              return expectedHours > 0 ? Math.min((entry.runningHours || 0) / expectedHours, 1) : 0;
+            }
+            return 1;
+          });
+          const avgBillingFactor =
+            billingFactors.reduce((s, f) => s + f, 0) / billingFactors.length;
+          rtoAppliedToday = Math.round(rtoAppliedToday * avgBillingFactor * 100) / 100;
+          promoterAmountToday = Math.round(promoterAmountToday * avgBillingFactor * 100) / 100;
+        }
+
+        const itemDayTotal =
+          dailyVehicleAmount +
+          extraKmCost +
+          extraHourCost +
+          rtoAppliedToday +
+          promoterAmountToday -
+          compensationToday;
+
+        dayTotal += itemDayTotal;
+
+     
+        const issueHoursToday = Math.round(
+          [...activeEntries, ...releasedToday].reduce((s, e) => s + (e.issueHours || 0), 0) * 100
+        ) / 100;
+        const unavailableHoursToday = Math.round(
+          [...activeEntries, ...releasedToday].reduce((s, e) => s + (e.unavailableHours || 0), 0) * 100
+        ) / 100;
+        const downtimeHoursToday = Math.round((issueHoursToday + unavailableHoursToday) * 100) / 100;
+        const compensationHoursGrantedToday = Math.round(activeEntries.reduce((s, e) => s + (e.compensationHours || 0), 0) * 100) / 100;
+
+
+        const combinedRunningHoursToday =
+          Math.round(
+            ([...activeEntries, ...releasedToday].reduce((s, e) => s + (e.runningHours || 0), 0)) * 100
+          ) / 100;
+
+        const relevantEntryIds = [...activeEntries, ...releasedToday]
+          .map((e) => (e.entryId ? String(e.entryId) : null))
+          .filter(Boolean);
+        const matchingCompGrants = campaignCompensationArray.filter((c) => {
+          if (c.compensationType !== "hours") return false;
+          if (c.vehicleIndex !== vehicleIndex) return false;
+          if (dateKey(c.fromDate) > dayKey || dateKey(c.toDate) < dayKey) return false;
+          if (c.entryId) return relevantEntryIds.includes(String(c.entryId));
+          return true; // campaign-level grant (no entryId) applies to every entry of this slot
+        });
+
+        const matchingPendingFoc = (order.campaignClosureArray || []).filter((c) => {
+          if (c.type !== "foc" || c.status !== "pending") return false;
+          if (c.focPurpose !== "compensation-hours" && c.focPurpose !== "compensation-days") return false;
+          if (c.compensationVehicleIndex !== vehicleIndex) return false;
+          if (dateKey(c.fromDate) > dayKey || dateKey(c.toDate) < dayKey) return false;
+          return true;
+        });
+
+        let compensationStatus = {
+          hasLoss: downtimeHoursToday > 0,
+          lossHours: downtimeHoursToday,
+          state: "none",
+          applied: false,
+          scope: "none",
+          dateFrom: null,
+          dateTo: null,
+          valuePerDay: 0,
+        };
+        if (matchingCompGrants.length) {
+          const grant = matchingCompGrants
+            .slice()
+            .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))[0];
+          const grantFrom = dateKey(grant.fromDate);
+          const grantTo = dateKey(grant.toDate);
+          compensationStatus = {
+            hasLoss: downtimeHoursToday > 0,
+            lossHours: downtimeHoursToday,
+            state: "approved",
+            applied: true,
+            scope: grantFrom === grantTo ? "this-date" : "split",
+            dateFrom: grantFrom,
+            dateTo: grantTo,
+            valuePerDay: grant.compensationValue || 0,
+          };
+        } else if (matchingPendingFoc.length) {
+          const pending = matchingPendingFoc
+            .slice()
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+          const pendingFrom = dateKey(pending.fromDate);
+          const pendingTo = dateKey(pending.toDate);
+          compensationStatus = {
+            hasLoss: downtimeHoursToday > 0,
+            lossHours: downtimeHoursToday,
+            state: "pending",
+            applied: false,
+            scope: pendingFrom === pendingTo ? "this-date" : "split",
+            dateFrom: pendingFrom,
+            dateTo: pendingTo,
+            valuePerDay: pending.compensationHoursValue || pending.compensationDaysValue || 0,
+          };
+        }
+
+        vehicles.push({
+          vehicleIndex,
+          vehicleType: item.vehicleType,
+          vehicleModel: item.vehicleModel,
+          bookedQuantity: item.quantity || 0,
+          activeCount,
+          entries: activeEntries,
+          releasedToday,
+          baseDailyRate,
+          dailyVehicleAmount,
+          extraKmCost,
+          extraHourCost,
+          extraKmPoolFeeToday,
+          extraHourPoolFeeToday,
+          extraDetailsToday,
+          rtoAppliedToday,
+          promoterAmountToday,
+          compensationToday: Math.round(compensationToday * 100) / 100,
+          issueHoursToday,
+          unavailableHoursToday,
+          downtimeHoursToday,
+          compensationHoursGrantedToday,
+          combinedRunningHoursToday,
+          compensationStatus,
+          isCompensationExtensionDay,
+          itemDayTotal,
+        });
+      });
+
+      cumulativeTotal += dayTotal;
+      cumulativeCompensation += vehicles.reduce((s, v) => s + (v.compensationToday || 0), 0);
+
+      days.push({
+        date: dayKey,
+        vehicles,
+        dayTotal: Math.round(dayTotal * 100) / 100,
+        cumulativeTotal: Math.round(cumulativeTotal * 100) / 100,
+      });
+
+      cursor = addDaysUTC(cursor, 1);
+    }
+
+    const grandTotal = days.length ? days[days.length - 1].cumulativeTotal : 0;
+    const orderTaxableAmount =
+      order.taxableAmount ?? bookingItems.reduce((s, b) => s + (b.totalAmount || 0), 0);
+
+    // ── Final Billing summary: actual usage rolled up across every day ──
+    const allVehicles = days.flatMap((d) => d.vehicles);
+    const actualRental = allVehicles.reduce((s, v) => s + (v.dailyVehicleAmount || 0), 0);
+    const actualExtraKm = allVehicles.reduce((s, v) => s + (v.extraKmCost || 0), 0);
+    const actualExtraHours = allVehicles.reduce((s, v) => s + (v.extraHourCost || 0), 0);
+    const actualRto = allVehicles.reduce((s, v) => s + (v.rtoAppliedToday || 0), 0);
+    const actualPromoter = allVehicles.reduce((s, v) => s + (v.promoterAmountToday || 0), 0);
+    const totalCompensation = Math.round(cumulativeCompensation * 100) / 100;
+    const campaignExtensionAmount = 0; // extension approval workflow not yet implemented
+    const totalIssueHours = Math.round(allVehicles.reduce((s, v) => s + (v.issueHoursToday || 0), 0) * 100) / 100;
+    const totalUnavailableHours = Math.round(allVehicles.reduce((s, v) => s + (v.unavailableHoursToday || 0), 0) * 100) / 100;
+    const totalDowntimeHours = Math.round((totalIssueHours + totalUnavailableHours) * 100) / 100;
+    const totalCompensationHoursGranted = Math.round(allVehicles.reduce((s, v) => s + (v.compensationHoursGrantedToday || 0), 0) * 100) / 100;
+    const totalCompensationDaysGranted = Object.values(extraDaysByVehicle).reduce((s, d) => s + (d || 0), 0);
+    const totalCompletedCampaignDays = bookingItemsMeta.reduce((s, b) => s + (b.completedCampaignDays || 0), 0);
+    const totalAbsentDays = bookingItemsMeta.reduce((s, b) => s + (b.absentDaysCount || 0), 0);
+
+    const finalAmountBeforeGst = Math.round(grandTotal * 100) / 100;
+    const gstPercent = GST_PERCENT;
+    const gstAmount = Math.round(((finalAmountBeforeGst * gstPercent) / 100) * 100) / 100;
+    const finalInvoiceAmount = Math.round((finalAmountBeforeGst + gstAmount) * 100) / 100;
+
+    const estimatedRental = bookingItemsMeta.reduce((s, b) => s + (b.estimatedRentalCost || 0), 0);
+    const estimatedRto = bookingItemsMeta.reduce((s, b) => s + (b.rtoCost || 0), 0);
+    const estimatedPromoter = bookingItemsMeta.reduce((s, b) => s + (b.promoterCost || 0), 0);
+    const estimatedExtraKm = bookingItemsMeta.reduce((s, b) => s + (b.estimatedExtraKmCost || 0), 0);
+    const estimatedExtraHours = bookingItemsMeta.reduce((s, b) => s + (b.estimatedExtraHourCost || 0), 0);
+
+    const finalBilling = {
+      estimatedAmount: orderTaxableAmount,
+      estimatedRental: Math.round(estimatedRental * 100) / 100,
+      estimatedRto: Math.round(estimatedRto * 100) / 100,
+      estimatedPromoter: Math.round(estimatedPromoter * 100) / 100,
+      estimatedExtraKm: Math.round(estimatedExtraKm * 100) / 100,
+      estimatedExtraHours: Math.round(estimatedExtraHours * 100) / 100,
+      actualRental: Math.round(actualRental * 100) / 100,
+      actualExtraKm: Math.round(actualExtraKm * 100) / 100,
+      actualExtraHours: Math.round(actualExtraHours * 100) / 100,
+      actualRto: Math.round(actualRto * 100) / 100,
+      actualPromoter: Math.round(actualPromoter * 100) / 100,
+      totalCompensation,
+      campaignExtensionAmount,
+      totalIssueHours,
+      totalUnavailableHours,
+      totalDowntimeHours,
+      totalCompensationHoursGranted,
+      totalCompensationDaysGranted,
+      totalCompletedCampaignDays,
+      totalAbsentDays,
+      finalAmountBeforeGst,
+      gstPercent,
+      gstAmount,
+      finalInvoiceAmount,
+    };
+
+    return successResponse(res, "Campaign calculator generated", {
+      orderId: order._id,
+      orderDisplayId: order.orderId,
+      campaignStart,
+      campaignEnd,
+      bookingItemsMeta,
+      extraKmBalances: Object.values(extraKmBalanceByVehicle),
+      campaignCompensationArray,
+      days,
+      grandTotal,
+      orderTaxableAmount,
+      reconciliationDiff: Math.round((grandTotal - orderTaxableAmount) * 100) / 100,
+      finalBilling,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.getDayByDayHistory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await Order.findById(id).lean();
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const bookingItems = order.bookingItems || [];
+    if (bookingItems.length === 0) {
+      return errorResponse(res, "This order has no vehicles", null, 400);
+    }
+
+    const onRoadExecutionArray = order.onRoadExecutionArray || [];
+    const onRoadDriverHistory = order.onRoadDriverHistory || [];
+    const onRoadIssues = order.onRoadIssues || [];
+    const onRoadUnavailableHistory = order.onRoadUnavailableHistory || [];
+    const extraKmDetailsArray = order.extraKmDetailsArray || [];
+    const dailyHoursLogArray = order.dailyHoursLogArray || [];
+
+    const campaignStart = bookingItems.map((b) => dateKey(b.fromDate)).sort()[0];
+    const campaignEnd = bookingItems.map((b) => dateKey(b.toDate)).sort().slice(-1)[0];
+
+    // ── vehicleTypes[] nav tree (level 1 + 2) ──
+    const vehicleTypes = bookingItems.map((b, vehicleIndex) => {
+      const regSet = new Set();
+      onRoadExecutionArray
+        .filter((e) => e.vehicleIndex === vehicleIndex)
+        .forEach((e) => e.vehicleRegistrationNumber && regSet.add(e.vehicleRegistrationNumber));
+      onRoadDriverHistory
+        .filter((h) => h.vehicleIndex === vehicleIndex)
+        .forEach((h) => h.vehicleRegistrationNumber && regSet.add(h.vehicleRegistrationNumber));
+      onRoadUnavailableHistory
+        .filter((h) => h.vehicleIndex === vehicleIndex)
+        .forEach((h) => {
+          if (h.vehicleRegNo) regSet.add(h.vehicleRegNo);
+          if (h.replacementVehicleRegNo) regSet.add(h.replacementVehicleRegNo);
+        });
+      extraKmDetailsArray
+        .filter((e) => e.vehicleIndex === vehicleIndex)
+        .forEach((e) => e.vehicleRegistrationNumber && regSet.add(e.vehicleRegistrationNumber));
+      onRoadIssues
+        .filter((iss) => iss.vehicleIndex === vehicleIndex)
+        .forEach((iss) => iss.vehicleRegNo && regSet.add(iss.vehicleRegNo));
+
+ 
+      const entriesForType = onRoadExecutionArray.filter((e) => e.vehicleIndex === vehicleIndex);
+      const registrationNumbers = Array.from(regSet).map((reg) => {
+        const matches = entriesForType
+          .filter((e) => e.vehicleRegistrationNumber === reg)
+          .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+        const latest = matches[0];
+
+        let status = "Historical";
+        if (latest) {
+          if (latest.entryStatus === "removed") status = "Released";
+          else if (latest.unavailableStatus) status = "Unavailable";
+          else if (latest.onRoadStatus === 1) status = "On Road";
+          else status = "Assigned";
+        }
+        return { registrationNumber: reg, status };
+      });
+
+      return {
+        vehicleIndex,
+        vehicleType: b.vehicleType,
+        vehicleModel: b.vehicleModel,
+        fromDate: b.fromDate,
+        toDate: b.toDate,
+        registrationNumbers,
+      };
+    });
+
+    // ── 2.1 / 2.4 Driver Change + Driver Status History ──
+    const driverChangeHistory = [];
+    const driverStatusHistory = [];
+    const ACTION_LABEL = { created: "Vehicle Added", updated: "Vehicle Updated", removed: "Vehicle Removed" };
+    const STATUS_LABEL = { created: "assigned", updated: "changed", removed: "removed" };
+
+    for (const h of onRoadDriverHistory) {
+      const day = dateKey(h.changedAt);
+      const base = {
+        day,
+        vehicleIndex: h.vehicleIndex,
+        entryId: h.entryId ? String(h.entryId) : null,
+        vehicleRegistrationNumber: h.vehicleRegistrationNumber,
+        driverName: h.driverName,
+        driverPhone: h.driverPhone,
+        changedBy: h.changedBy,
+        changedAt: h.changedAt,
+        comments: h.changedFields?.reason || "",
+      };
+      driverChangeHistory.push({
+        ...base,
+        eventType: ACTION_LABEL[h.action] || h.action,
+        changedFields: h.changedFields || {},
+      });
+      driverStatusHistory.push({
+        ...base,
+        statusEvent: STATUS_LABEL[h.action] || h.action,
+      });
+    }
+
+  
+    for (const h of onRoadUnavailableHistory.filter((h) => h.eventType === "replaced")) {
+      const day = dateKey(h.replacedAt || h.reportedAt);
+      driverChangeHistory.push({
+        day,
+        vehicleIndex: h.vehicleIndex,
+        entryId: h.entryId ? String(h.entryId) : null,
+        vehicleRegistrationNumber: h.vehicleRegNo,
+        eventType: "Vehicle Replaced (Outgoing)",
+        oldDriverName: h.driverName,
+        oldDriverPhone: h.driverPhone,
+        newVehicleRegistrationNumber: h.replacementVehicleRegNo,
+        newDriverName: h.replacementDriverName,
+        newDriverPhone: h.replacementDriverPhone,
+        changedBy: h.reportedBy,
+        changedAt: h.replacedAt || h.reportedAt,
+        comments: h.reason,
+      });
+      driverChangeHistory.push({
+        day,
+        vehicleIndex: h.vehicleIndex,
+        entryId: h.replacementEntryId ? String(h.replacementEntryId) : null,
+        vehicleRegistrationNumber: h.replacementVehicleRegNo,
+        eventType: "Vehicle Replaced (Incoming)",
+        oldVehicleRegistrationNumber: h.vehicleRegNo,
+        oldDriverName: h.driverName,
+        oldDriverPhone: h.driverPhone,
+        newDriverName: h.replacementDriverName,
+        newDriverPhone: h.replacementDriverPhone,
+        changedBy: h.reportedBy,
+        changedAt: h.replacedAt || h.reportedAt,
+        comments: h.reason,
+      });
+    }
+
+    // ── 2.2 Issue / Escalation History ──
+    const issueHistory = [];
+    for (const iss of onRoadIssues) {
+      issueHistory.push({
+        day: dateKey(iss.reportedAt),
+        vehicleIndex: iss.vehicleIndex,
+        entryId: iss.entryId ? String(iss.entryId) : null,
+        vehicleRegistrationNumber: iss.vehicleRegNo,
+        driverName: iss.driverName,
+        issueDescription: iss.issueDescription,
+        issuePhoto: iss.issuePhoto,
+        status: iss.status,
+        resolveDescription: iss.resolveDescription,
+        resolvePhoto: iss.resolvePhoto,
+        createdBy: iss.reportedBy,
+        createdAt: iss.reportedAt,
+        resolvedBy: iss.resolvedBy,
+        resolvedAt: iss.resolvedAt,
+      });
+      if (iss.status === "resolved" && iss.resolvedAt && dateKey(iss.resolvedAt) !== dateKey(iss.reportedAt)) {
+        issueHistory.push({
+          day: dateKey(iss.resolvedAt),
+          vehicleIndex: iss.vehicleIndex,
+          entryId: iss.entryId ? String(iss.entryId) : null,
+          vehicleRegistrationNumber: iss.vehicleRegNo,
+          driverName: iss.driverName,
+          issueDescription: iss.issueDescription,
+          issuePhoto: iss.issuePhoto,
+          status: "resolved-today",
+          resolveDescription: iss.resolveDescription,
+          resolvePhoto: iss.resolvePhoto,
+          createdBy: iss.reportedBy,
+          createdAt: iss.reportedAt,
+          resolvedBy: iss.resolvedBy,
+          resolvedAt: iss.resolvedAt,
+        });
+      }
+    }
+
+    // ── 2.3 Extra KM History ──
+    const extraKmHistory = extraKmDetailsArray.map((e) => ({
+      day: dateKey(e.addedAt),
+      vehicleIndex: e.vehicleIndex,
+      entryId: e.entryId ? String(e.entryId) : null,
+      vehicleRegistrationNumber: e.vehicleRegistrationNumber,
+      driverName: e.driverName,
+      extraKm: e.extraKm,
+      extraHours: e.extraHours,
+      extraKmCost: e.extraKmCost,
+      extraHourCost: e.extraHourCost,
+      totalCost: e.totalCost,
+      distributionMethod: e.distributionMethod || "daily",
+      loggedFor: `${dateKey(e.fromDate)} to ${dateKey(e.toDate)}`,
+      comments: "",
+      updatedBy: e.addedBy,
+      updatedAt: e.addedAt,
+    }));
+
+    // ── 2.4 Daily Hours History ──
+    const dailyHoursHistory = dailyHoursLogArray.map((l) => ({
+      day: l.day,
+      vehicleIndex: l.vehicleIndex,
+      entryId: l.entryId ? String(l.entryId) : null,
+      vehicleRegistrationNumber: l.vehicleRegistrationNumber,
+      driverName: l.driverName,
+      startTime: l.startTime,
+      endTime: l.endTime,
+      campaignHours: l.campaignHours,
+      runningHours: l.runningHours,
+      absentHours: l.absentHours,
+      isAbsentDay: !!l.isAbsentDay,
+      absentDayResolution: l.absentDayResolution || null,
+      billingMode: l.billingMode || "full",
+      remarks: l.remarks,
+      loggedBy: l.loggedBy,
+      loggedAt: l.loggedAt,
+    }));
+
+    // ── 2.6 Vehicle Unavailable History ──
+    const unavailableHistory = onRoadUnavailableHistory.map((h) => ({
+      day: dateKey(h.reportedAt),
+      vehicleIndex: h.vehicleIndex,
+      entryId: h.entryId ? String(h.entryId) : null,
+      vehicleRegistrationNumber: h.vehicleRegNo,
+      driverName: h.driverName,
+      driverPhone: h.driverPhone,
+      reason: h.reason,
+      photo: h.photo,
+      eventType: h.eventType,
+      status: h.status,
+      replacementVehicleRegistrationNumber: h.replacementVehicleRegNo,
+      replacementDriverName: h.replacementDriverName,
+      replacementDriverPhone: h.replacementDriverPhone,
+      replacedAt: h.replacedAt,
+      reportedBy: h.reportedBy,
+      reportedAt: h.reportedAt,
+      resolvedBy: h.resolvedBy,
+      resolvedAt: h.resolvedAt,
+      resolveDescription: h.resolveDescription,
+      resolvePhoto: h.resolvePhoto,
+    }));
+
+    // ── 2.5 Campaign Vehicle Status Timeline (day-by-day, per entry) ──
+    const historyByEntry = {};
+    for (const h of onRoadDriverHistory) {
+      const key = h.entryId ? String(h.entryId) : `vi-${h.vehicleIndex}`;
+      (historyByEntry[key] = historyByEntry[key] || []).push(h);
+    }
+    Object.values(historyByEntry).forEach((arr) =>
+      arr.sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt))
+    );
+    const unavailableByEntryDay = {}; // `${entryId}|${day}` -> unavailableHistory record
+    for (const h of onRoadUnavailableHistory) {
+      const key = `${h.entryId ? String(h.entryId) : ""}|${dateKey(h.reportedAt)}`;
+      unavailableByEntryDay[key] = h;
+    }
+
+    const vehicleStatusTimeline = [];
+    bookingItems.forEach((item, vehicleIndex) => {
+      const itemFrom = dateKey(item.fromDate);
+      const itemTo = dateKey(item.toDate);
+      const entries = onRoadExecutionArray.filter((e) => e.vehicleIndex === vehicleIndex);
+
+      for (const entry of entries) {
+        const histKey = entry._id ? String(entry._id) : `vi-${vehicleIndex}`;
+        const hist = historyByEntry[histKey] || [];
+        let cursor = itemFrom;
+        while (cursor <= itemTo) {
+          const resolved = resolveEntryStateForDay(entry, hist, cursor);
+          let statusLabel = "Not Active";
+          let performedBy = "";
+          let comments = "";
+
+          if (resolved && !resolved.removed) {
+            if (resolved.createdOnThisDay) {
+              statusLabel = "Vehicle Assigned";
+            } else {
+              const todaysEvent = hist.find(
+                (h) => h.action === "updated" && dateKey(h.changedAt) === cursor
+              );
+              if (todaysEvent) {
+                const cf = todaysEvent.changedFields || {};
+                statusLabel = cf.vehicleRegistrationNumber?.new !== undefined
+                  ? "Vehicle Updated"
+                  : "Driver Updated";
+                performedBy = todaysEvent.changedBy;
+                comments = cf.reason || "";
+              } else {
+                const unavailToday = unavailableByEntryDay[`${String(entry._id)}|${cursor}`];
+                if (unavailToday) {
+                  statusLabel = unavailToday.eventType === "replaced"
+                    ? "Old Vehicle Released & New Vehicle Assigned"
+                    : "Marked Unavailable";
+                  performedBy = unavailToday.reportedBy;
+                  comments = unavailToday.reason;
+                } else {
+                  statusLabel = "No Changes";
+                }
+              }
+            }
+          } else if (resolved && resolved.removed) {
+            if (resolved.releasedOnThisDay) {
+              const linkedReplacement = onRoadUnavailableHistory.find(
+                (h) => h.eventType === "replaced" && String(h.entryId) === String(entry._id) && dateKey(h.replacedAt) === cursor
+              );
+              statusLabel = linkedReplacement ? "Old Vehicle Released & New Vehicle Assigned" : "Vehicle Released";
+              performedBy = linkedReplacement?.reportedBy || "";
+              comments = linkedReplacement?.reason || "";
+            } else {
+              statusLabel = "Not Active";
+            }
+          }
+
+          vehicleStatusTimeline.push({
+            day: cursor,
+            vehicleIndex,
+            entryId: String(entry._id),
+            vehicleRegistrationNumber: entry.vehicleRegistrationNumber,
+            statusLabel,
+            performedBy,
+            comments,
+          });
+
+          cursor = addDaysUTC(cursor, 1);
+        }
+      }
+    });
+
+    return successResponse(res, "Day-by-day history generated", {
+      orderId: order._id,
+      orderDisplayId: order.orderId,
+      campaignStart,
+      campaignEnd,
+      vehicleTypes,
+      driverChangeHistory,
+      issueHistory,
+      extraKmHistory,
+      dailyHoursHistory,
+      driverStatusHistory,
+      vehicleStatusTimeline,
+      unavailableHistory,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+exports.reassignOpsHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newHandler, isTemporary, leaveStartDate, leaveEndDate, reason } = req.body;
+
+    if (!newHandler?.trim())
+      return errorResponse(res, "New handler name is required", null, 400);
+    if (!reason?.trim())
+      return errorResponse(res, "Reason is required", null, 400);
+    if (isTemporary && (!leaveStartDate || !leaveEndDate))
+      return errorResponse(
+        res,
+        "Leave start and end dates are required for a temporary handover",
+        null,
+        400
+      );
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const previousHandler = order.handlerName || "";
+    if (!order.originalHandlerName) {
+      order.originalHandlerName = previousHandler;
+    }
+
+    order.opsHandlerAssignmentHistory.push({
+      previousHandler,
+      newHandler: newHandler.trim(),
+      isTemporary: !!isTemporary,
+      leaveStartDate: isTemporary ? leaveStartDate : null,
+      leaveEndDate: isTemporary ? leaveEndDate : null,
+      reason: reason.trim(),
+      status: "active",
+      assignedBy: req.user?.username || "Admin",
+      assignedAt: new Date(),
+    });
+
+    order.handlerName = newHandler.trim();
+    await order.save();
+
+    return successResponse(res, "Handler reassigned successfully", {
+      handlerName: order.handlerName,
+      opsHandlerAssignmentHistory: order.opsHandlerAssignmentHistory,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+
+exports.resolveOpsHandlerHandover = async (req, res) => {
+  try {
+    const { id, assignmentId } = req.params;
+    const { makePermanent } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const assignment = order.opsHandlerAssignmentHistory.id(assignmentId);
+    if (!assignment)
+      return errorResponse(res, "Handover record not found", null, 404);
+    if (assignment.status !== "active")
+      return errorResponse(res, "This handover has already been resolved", null, 400);
+
+    if (makePermanent) {
+      assignment.status = "madePermanent";
+    } else {
+      assignment.status = "reverted";
+      assignment.revertedAt = new Date();
+      order.handlerName = assignment.previousHandler;
+    }
+
+    await order.save();
+
+    return successResponse(res, "Handover resolved", {
+      handlerName: order.handlerName,
+      opsHandlerAssignmentHistory: order.opsHandlerAssignmentHistory,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+

@@ -21,6 +21,7 @@ const gstVerifyDetailSchema = new mongoose.Schema(
 
     gst_number: { type: String, required: true },
     business_name: { type: String, default: "" },
+    business_pan: { type: String, default: "" },
     verifiedAt: { type: Date, default: Date.now },
   },
   { _id: false }
@@ -57,6 +58,9 @@ const bookingItemSchema = new mongoose.Schema({
   extraHours: { type: Number, default: 0 },
   extraHourCost: { type: Number, default: 0 },
   extraDays: { type: Number, default: 0 },
+
+  purchasedExtraKmFromDate: { type: Date, default: null },
+  purchasedExtraKmToDate: { type: Date, default: null },
   state: String,
   city: String,
   fromLocation: String,
@@ -107,6 +111,42 @@ const extraKmHistorySchema = new mongoose.Schema({
   totalCost: { type: Number, default: 0 },
   addedBy: { type: String, default: "" },
   addedAt: { type: Date, default: Date.now },
+  distributionMethod: { type: String, enum: ["daily", "split"], default: "daily" },
+}, { _id: true });
+
+
+const dailyHoursLogSchema = new mongoose.Schema({
+  vehicleIndex: { type: Number, required: true },
+  entryId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  driverName: { type: String, default: "" },
+  driverPhone: { type: String, default: "" },
+  vehicleRegistrationNumber: { type: String, default: "" },
+  day: { type: String, required: true }, // YYYY-MM-DD
+  startTime: { type: Date, required: true },
+  endTime: { type: Date, required: true },
+  campaignHours: { type: Number, default: 8 },
+  runningHours: { type: Number, default: 0 },
+  absentHours: { type: Number, default: 0 },
+  isAbsentDay: { type: Boolean, default: false },
+  absentDayResolution: { type: String, enum: ["extend", "close", null], default: null },
+  billingMode: { type: String, enum: ["full", "partial", "absent"], default: "full" },
+  remarks: { type: String, default: "" },
+  loggedBy: { type: String, default: "" },
+  loggedAt: { type: Date, default: Date.now },
+}, { _id: true });
+
+
+const campaignCompensationSchema = new mongoose.Schema({
+  vehicleIndex: { type: Number, required: true },
+  entryId: { type: mongoose.Schema.Types.ObjectId, default: null }, // null = applies to every entry of this vehicleIndex
+  vehicleRegistrationNumber: { type: String, default: "" },
+  compensationType: { type: String, enum: ["hours", "days"], required: true },
+  compensationValue: { type: Number, required: true, min: 0 }, // hours granted per day, or extra days granted
+  fromDate: { type: Date, required: true },
+  toDate: { type: Date, required: true },
+  reason: { type: String, default: "" },
+  addedBy: { type: String, default: "" },
+  addedAt: { type: Date, default: Date.now },
 }, { _id: true });
 
 
@@ -130,6 +170,36 @@ const onRoadExtraKmSchema = new mongoose.Schema({
 }, { _id: true });
 
 
+
+const orderFieldChangeSchema = new mongoose.Schema(
+  {
+    field: { type: String, required: true },      // e.g. "Customer Name"
+    oldValue: { type: mongoose.Schema.Types.Mixed, default: null },
+    newValue: { type: mongoose.Schema.Types.Mixed, default: null },
+  },
+  { _id: false }
+);
+
+const vehicleChangeSchema = new mongoose.Schema(
+  {
+    vehicleIndex: { type: Number, required: true },
+    action: { type: String, enum: ["modified", "added", "removed"], default: "modified" },
+    vehicleLabel: { type: String, default: "" },   // ← NEW: e.g. "2 Sided LED Models · Thoubal"
+    changes: { type: [orderFieldChangeSchema], default: [] },
+  },
+  { _id: false }
+);
+
+const orderEditHistorySchema = new mongoose.Schema(
+  {
+    editedBy: { type: String, default: "" },
+    editedAt: { type: Date, default: Date.now },
+    customerChanges: { type: [orderFieldChangeSchema], default: [] },
+    vehicleChanges: { type: [vehicleChangeSchema], default: [] },
+  },
+  { _id: true }
+);
+
 const projectExecutionDocSchema = new mongoose.Schema(
   {
     document: { type: String, default: "" },
@@ -147,6 +217,38 @@ const poCommentSchema = new mongoose.Schema(
     notes: { type: String, default: "" },
     uploadedBy: { type: String, default: "" },
     uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+
+const poDocumentEditSchema = new mongoose.Schema(
+  {
+    document: { type: String, required: true },
+    previousDocument: { type: String, default: "" },
+    reason: { type: String, required: true },
+    editedBy: { type: String, default: "" },
+    editedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+const handlerAssignmentSchema = new mongoose.Schema(
+  {
+    previousHandler: { type: String, default: "" },
+    newHandler: { type: String, required: true },
+    isTemporary: { type: Boolean, default: false },
+    leaveStartDate: { type: Date, default: null },
+    leaveEndDate: { type: Date, default: null },
+    reason: { type: String, default: "" },
+    status: {
+      type: String,
+      enum: ["active", "reverted", "madePermanent"],
+      default: "active",
+    },
+    assignedBy: { type: String, default: "" },
+    assignedAt: { type: Date, default: Date.now },
+    revertedAt: { type: Date, default: null },
   },
   { _id: true }
 );
@@ -229,11 +331,24 @@ const onRoadHistorySchema = new mongoose.Schema({
 
 const onRoadUnavailableHistorySchema = new mongoose.Schema({
   vehicleIndex: { type: Number, required: true },
+  entryId: { type: mongoose.Schema.Types.ObjectId, default: null }, // the old/unavailable on-road entry this record is about
   vehicleRegNo: { type: String, default: "" },
   driverName: { type: String, default: "" },
+  driverPhone: { type: String, default: "" },
   reason: { type: String, default: "" },
+  inventoryStatus: { type: String, enum: ["Unavailable", "Damaged", "Under Maintenance"], default: "Unavailable" },
   photo: { type: String, default: "" },
   status: { type: String, enum: ["unavailable", "available"], default: "unavailable" },
+  // "unavailable" = plain mark-unavailable report; "replaced" = a replacement vehicle was dispatched
+  eventType: { type: String, enum: ["unavailable", "replaced"], default: "unavailable" },
+
+  // ── Replacement linkage (only set when eventType === "replaced") ──
+  replacementEntryId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  replacementVehicleRegNo: { type: String, default: "" },
+  replacementDriverName: { type: String, default: "" },
+  replacementDriverPhone: { type: String, default: "" },
+  replacedAt: { type: Date, default: null },
+
   reportedBy: { type: String, default: "" },
   reportedAt: { type: Date, default: Date.now },
   resolvedBy: { type: String, default: "" },
@@ -241,6 +356,7 @@ const onRoadUnavailableHistorySchema = new mongoose.Schema({
   resolveDescription: { type: String, default: "" },
   resolvePhoto: { type: String, default: "" },
 }, { _id: true });
+
 
 
 const onRoadIssueSchema = new mongoose.Schema({
@@ -273,24 +389,11 @@ const projectMailLogSchema = new mongoose.Schema(
   { _id: true }
 );
 
-// const onRoadDriverHistorySchema = new mongoose.Schema({
-//   vehicleIndex: { type: Number, required: true },
-//   action: { type: String, enum: ["created", "updated"], default: "created" },
-//   driverName: { type: String, default: "" },
-//   driverPhone: { type: String, default: "" },
-//   vehicleRegistrationNumber: { type: String, default: "" },
-//   gatepassPhoto: { type: String, default: "" },
-//   changedBy: { type: String, default: "" },
-//   changedAt: { type: Date, default: Date.now },
-//   changedFields: { type: Object, default: {} },
-// }, { _id: true });
-
-
 
 const onRoadDriverHistorySchema = new mongoose.Schema({
   vehicleIndex: { type: Number, required: true },
-  entryId: { type: mongoose.Schema.Types.ObjectId, default: null },   // ← NEW
-  action: { type: String, enum: ["created", "updated"], default: "created" },
+  entryId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  action: { type: String, enum: ["created", "updated", "removed"], default: "created" }, // ← "removed" added
   driverName: { type: String, default: "" },
   driverPhone: { type: String, default: "" },
   vehicleRegistrationNumber: { type: String, default: "" },
@@ -298,8 +401,8 @@ const onRoadDriverHistorySchema = new mongoose.Schema({
   changedBy: { type: String, default: "" },
   changedAt: { type: Date, default: Date.now },
   changedFields: { type: Object, default: {} },
+  reason: { type: String, default: "" },
 }, { _id: true });
-
 
 const clientFeedbackSchema = new mongoose.Schema({
   bookingItemId: { type: mongoose.Schema.Types.ObjectId, default: null }, // ADD THIS
@@ -350,6 +453,11 @@ const campaignClosureSchema = new mongoose.Schema({
 
   isAdminCreated: { type: Boolean, default: false },
   focChatMessages: { type: [focChatMessageSchema], default: [] },
+  focPurpose: { type: String, enum: ["absent-day", "compensation-days", "compensation-hours", null], default: null },
+  compensationVehicleIndex: { type: Number, default: null },
+  compensationEntryId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  compensationDaysValue: { type: Number, default: null },
+  compensationHoursValue: { type: Number, default: null },
 }, { _id: true });
 
 
@@ -452,6 +560,39 @@ const salesPipelineLogSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const invoiceLineItemSchema = new mongoose.Schema(
+  {
+    description: { type: String, default: "" },
+    hsnSac: { type: String, default: "" },
+    qty: { type: Number, default: 1 },
+    rate: { type: Number, default: 0 },
+    amount: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
+const invoiceDataSchema = new mongoose.Schema(
+  {
+    invoiceNumber: { type: String, default: "" },
+    invoiceDate: { type: Date, default: null },
+    dueDate: { type: Date, default: null },
+    poNumber: { type: String, default: "" },
+    projectName: { type: String, default: "" },
+    placeOfSupply: { type: String, default: "" },
+    billToName: { type: String, default: "" },
+    billToAddress: { type: String, default: "" },
+    billToGstin: { type: String, default: "" },
+    billToPan: { type: String, default: "" },
+    lineItems: { type: [invoiceLineItemSchema], default: [] },
+    cgstPercent: { type: Number, default: 9 },
+    sgstPercent: { type: Number, default: 9 },
+    rounding: { type: Number, default: 0 },
+    generatedBy: { type: String, default: "" },
+    generatedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema(
   {
     orderId: { type: String, unique: true },
@@ -469,6 +610,8 @@ const orderSchema = new mongoose.Schema(
     clientName: String,
     designation: String,
     gstNumber: String,
+    panNumber: { type: String, default: "" },
+    invoiceData: { type: invoiceDataSchema, default: null },
     customerCategory: {
       type: String,
       enum: ["individual", "organization"],
@@ -507,6 +650,8 @@ const orderSchema = new mongoose.Schema(
     },
 
     handlerName: String,
+    opsHandlerAssignmentHistory: { type: [handlerAssignmentSchema], default: [] },
+    originalHandlerName: { type: String, default: "" },
     todoUploadedBy: { type: String, default: "" },
     reasonDescription: String,
 
@@ -540,28 +685,39 @@ const orderSchema = new mongoose.Schema(
 
     driverLocationArray: { type: [driverLocationSchema], default: [] },
 
-    onRoadExecutionArray: [
-      {
-        vehicleIndex: { type: Number, required: true },
-        driverName: { type: String, required: true, default: "" },
-        driverPhone: { type: String, required: true, default: "" },
-        vehicleRegistrationNumber: { type: String, required: true, default: "" },
-        gatepassPhoto: { type: String, default: "" },
-        onRoadStatus: { type: Number, enum: [0, 1], default: 0 },
-        uploadedBy: { type: String, default: "" },
-        uploadedAt: { type: Date, default: Date.now },
-        unavailableStatus: { type: Boolean, default: false },
-        unavailableReason: { type: String, default: "" },
-      }
-    ],
+   onRoadExecutionArray: [
+  {
+    vehicleIndex: { type: Number, required: true },
+    driverName: { type: String, required: true, default: "" },
+    driverPhone: { type: String, required: true, default: "" },
+    vehicleRegistrationNumber: { type: String, required: true, default: "" },
+    gatepassPhoto: { type: String, default: "" },
+    onRoadStatus: { type: Number, enum: [0, 1], default: 0 },
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+    unavailableStatus: { type: Boolean, default: false },
+    unavailableReason: { type: String, default: "" },
+    inventoryStatus: { type: String, enum: ["Unavailable", "Damaged", "Under Maintenance"], default: "Unavailable" },
 
+    // ── NEW: for release/remove feature ──
+    entryStatus: { type: String, enum: ["active", "removed"], default: "active" },
+    removedAt: { type: Date, default: null },
+    removedBy: { type: String, default: "" },
+    removalReason: { type: String, default: "" },
+     removalStatus: { type: String, default: "" },
+  }
+],
 
+orderEditHistory: { type: [orderEditHistorySchema], default: [] },
     onRoadUnavailableHistory: { type: [onRoadUnavailableHistorySchema], default: [] },
+    
     onRoadHistory: { type: [onRoadHistorySchema], default: [] },
     onRoadIssues: { type: [onRoadIssueSchema], default: [] },
     onRoadDriverHistory: { type: [onRoadDriverHistorySchema], default: [] },
     extraKmDetailsArray: { type: [extraKmHistorySchema], default: [] },
     onRoadExtraKm: { type: [onRoadExtraKmSchema], default: [] },
+    dailyHoursLogArray: { type: [dailyHoursLogSchema], default: [] },
+    campaignCompensationArray: { type: [campaignCompensationSchema], default: [] },
     clientFeedbackHistory: { type: [clientFeedbackSchema], default: [] },
     campaignClosureArray: { type: [campaignClosureSchema], default: [] },
 
@@ -573,6 +729,9 @@ const orderSchema = new mongoose.Schema(
     projectCodeArray: { type: [projectCodeSchema], default: [] },
     projectMailLogs: { type: [projectMailLogSchema], default: [] },
     poCommentsArray: { type: [poCommentSchema], default: [] },
+    poDocumentEditHistory: { type: [poDocumentEditSchema], default: [] },
+    handlerAssignmentHistory: { type: [handlerAssignmentSchema], default: [] },
+    originalSalesHandlerName: { type: String, default: "" },
     projectCodeCommentsArray: { type: [projectCodeCommentSchema], default: [] },
     closedLostCommentsArray: { type: [closedLostCommentSchema], default: [] },
     orderClosedWonArray: { type: [orderClosedWonSchema], default: [] },
