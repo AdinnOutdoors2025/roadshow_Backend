@@ -99,6 +99,7 @@ const verifyGstNumber = async (req, res) => {
                 gstDetailId: existing._id,
                 business_name: existing.business_name,
                 business_address: existing.business_address,
+                business_pan: existing.business_pan,
                 gst_number: existing.gst_number,
                 source: 'database',
             });
@@ -167,6 +168,7 @@ const verifyGstNumber = async (req, res) => {
             gstDetailId: newGst._id,
             business_name: newGst.business_name,
             business_address: newGst.business_address,
+            business_pan: newGst.business_pan,
             gst_number: newGst.gst_number,
             source: 'api',
         });

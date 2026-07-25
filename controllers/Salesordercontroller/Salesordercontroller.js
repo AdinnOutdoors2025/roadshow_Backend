@@ -937,8 +937,7 @@ exports.reassignHandler = async (req, res) => {
 };
 
 
-// Ends a temporary handover — either returns the order to the previous
-// handler, or (manager decision) makes the current handover permanent.
+
 exports.resolveHandlerHandover = async (req, res) => {
   try {
     const { id, assignmentId } = req.params;
@@ -973,10 +972,6 @@ exports.resolveHandlerHandover = async (req, res) => {
 };
 
 
-// Correction of the Closed-Won PO document. Open to admin and handler alike —
-// but once the order has moved to Project Code Creation, the correction
-// window closes (checked here again, not just hidden client-side). Every
-// replacement is versioned with who/when/why — the document is never lost.
 exports.updatePODocument = async (req, res) => {
   try {
     const { id } = req.params;

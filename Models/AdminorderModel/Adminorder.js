@@ -21,6 +21,7 @@ const gstVerifyDetailSchema = new mongoose.Schema(
 
     gst_number: { type: String, required: true },
     business_name: { type: String, default: "" },
+    business_pan: { type: String, default: "" },
     verifiedAt: { type: Date, default: Date.now },
   },
   { _id: false }
@@ -57,10 +58,7 @@ const bookingItemSchema = new mongoose.Schema({
   extraHours: { type: Number, default: 0 },
   extraHourCost: { type: Number, default: 0 },
   extraDays: { type: Number, default: 0 },
-  // Optional date-range scoping for the purchased Extra KM/Hours pool
-  // (extraKm/extraHours above). When unset, the pool is treated as
-  // applicable across the vehicle-type slot's full campaign window
-  // (fromDate–toDate). Ops can narrow this via the Campaign Calculator.
+
   purchasedExtraKmFromDate: { type: Date, default: null },
   purchasedExtraKmToDate: { type: Date, default: null },
   state: String,
@@ -113,11 +111,6 @@ const extraKmHistorySchema = new mongoose.Schema({
   totalCost: { type: Number, default: 0 },
   addedBy: { type: String, default: "" },
   addedAt: { type: Date, default: Date.now },
-  // Extra KM/Hours Daily vs Split distribution: "daily" (default) means the
-  // logged extraKm/extraHours value applies in full on EVERY day within
-  // fromDate-toDate (i.e. the value is a per-day rate); "split" means the
-  // logged value is a total for the whole range, divided evenly across the
-  // number of days in that range.
   distributionMethod: { type: String, enum: ["daily", "split"], default: "daily" },
 }, { _id: true });
 
@@ -134,27 +127,15 @@ const dailyHoursLogSchema = new mongoose.Schema({
   campaignHours: { type: Number, default: 8 },
   runningHours: { type: Number, default: 0 },
   absentHours: { type: Number, default: 0 },
-  // Vehicle Absent Calculation: when true, the entire day is excluded from
-  // "completed campaign days" for this entry, regardless of runningHours.
   isAbsentDay: { type: Boolean, default: false },
-  // Mandatory when isAbsentDay is true (enforced in the controller, not
-  // here): "extend" pushes the vehicle-type slot's effective end date out by
-  // one day (cumulative across multiple extend-resolved absent days),
-  // "close" leaves the campaign end date unchanged. Stays null otherwise.
   absentDayResolution: { type: String, enum: ["extend", "close", null], default: null },
-  // Separate "bill partial running day" feature: "full" (default) bills the
-  // day's Rental/Driver/RTO/Promoter charges in full, "partial" scales them
-  // by actual running hours ÷ CAMPAIGN_HOURS_PER_DAY (capped at 1.0), and
-  // "absent" zeroes them out entirely (independent of isAbsentDay).
   billingMode: { type: String, enum: ["full", "partial", "absent"], default: "full" },
   remarks: { type: String, default: "" },
   loggedBy: { type: String, default: "" },
   loggedAt: { type: Date, default: Date.now },
 }, { _id: true });
 
-// Campaign Compensation: extra working hours OR extra campaign days granted
-// for a date range (campaign-level, or scoped to one entry/reg-no), to make
-// up for downtime caused by issues/unavailability.
+
 const campaignCompensationSchema = new mongoose.Schema({
   vehicleIndex: { type: Number, required: true },
   entryId: { type: mongoose.Schema.Types.ObjectId, default: null }, // null = applies to every entry of this vehicleIndex
@@ -240,8 +221,7 @@ const poCommentSchema = new mongoose.Schema(
   { _id: true }
 );
 
-// Post-lock PO document corrections (admin-only) — one entry per replacement,
-// kept separate from poCommentsArray so the original closedWon PO upload stays untouched.
+
 const poDocumentEditSchema = new mongoose.Schema(
   {
     document: { type: String, required: true },
@@ -253,8 +233,6 @@ const poDocumentEditSchema = new mongoose.Schema(
   { _id: true }
 );
 
-// Handler leave/handover — tracks temporary and permanent reassignments of
-// the sales/order handler, so "who handled this order and when" is auditable.
 const handlerAssignmentSchema = new mongoose.Schema(
   {
     previousHandler: { type: String, default: "" },
@@ -411,19 +389,6 @@ const projectMailLogSchema = new mongoose.Schema(
   { _id: true }
 );
 
-// const onRoadDriverHistorySchema = new mongoose.Schema({
-//   vehicleIndex: { type: Number, required: true },
-//   action: { type: String, enum: ["created", "updated"], default: "created" },
-//   driverName: { type: String, default: "" },
-//   driverPhone: { type: String, default: "" },
-//   vehicleRegistrationNumber: { type: String, default: "" },
-//   gatepassPhoto: { type: String, default: "" },
-//   changedBy: { type: String, default: "" },
-//   changedAt: { type: Date, default: Date.now },
-//   changedFields: { type: Object, default: {} },
-// }, { _id: true });
-
-
 
 const onRoadDriverHistorySchema = new mongoose.Schema({
   vehicleIndex: { type: Number, required: true },
@@ -488,14 +453,6 @@ const campaignClosureSchema = new mongoose.Schema({
 
   isAdminCreated: { type: Boolean, default: false },
   focChatMessages: { type: [focChatMessageSchema], default: [] },
-
-  // What this FOC extension request is actually FOR, so approval can trigger
-  // the right side-effect: "absent-day" = a Mark Absent → Extend +1 Day
-  // request (no further action needed on approve, the daily-hours-log entry
-  // already carries absentDayResolution: "extend"); "compensation-days" = a
-  // Campaign Calculator "Extra Campaign Days" compensation request, where the
-  // actual campaignCompensationArray grant is deferred until this is approved
-  // (see approveFocEntry/createAndApproveFocEntry).
   focPurpose: { type: String, enum: ["absent-day", "compensation-days", "compensation-hours", null], default: null },
   compensationVehicleIndex: { type: Number, default: null },
   compensationEntryId: { type: mongoose.Schema.Types.ObjectId, default: null },
@@ -603,6 +560,39 @@ const salesPipelineLogSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const invoiceLineItemSchema = new mongoose.Schema(
+  {
+    description: { type: String, default: "" },
+    hsnSac: { type: String, default: "" },
+    qty: { type: Number, default: 1 },
+    rate: { type: Number, default: 0 },
+    amount: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
+const invoiceDataSchema = new mongoose.Schema(
+  {
+    invoiceNumber: { type: String, default: "" },
+    invoiceDate: { type: Date, default: null },
+    dueDate: { type: Date, default: null },
+    poNumber: { type: String, default: "" },
+    projectName: { type: String, default: "" },
+    placeOfSupply: { type: String, default: "" },
+    billToName: { type: String, default: "" },
+    billToAddress: { type: String, default: "" },
+    billToGstin: { type: String, default: "" },
+    billToPan: { type: String, default: "" },
+    lineItems: { type: [invoiceLineItemSchema], default: [] },
+    cgstPercent: { type: Number, default: 9 },
+    sgstPercent: { type: Number, default: 9 },
+    rounding: { type: Number, default: 0 },
+    generatedBy: { type: String, default: "" },
+    generatedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema(
   {
     orderId: { type: String, unique: true },
@@ -620,6 +610,8 @@ const orderSchema = new mongoose.Schema(
     clientName: String,
     designation: String,
     gstNumber: String,
+    panNumber: { type: String, default: "" },
+    invoiceData: { type: invoiceDataSchema, default: null },
     customerCategory: {
       type: String,
       enum: ["individual", "organization"],

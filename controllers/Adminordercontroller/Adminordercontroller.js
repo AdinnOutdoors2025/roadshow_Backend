@@ -149,7 +149,7 @@ exports.createAdminOrder = async (req, res) => {
   try {
     const {
       customerName, customerPhone, customerAddress, customerEmail,
-      customerCategory, companyName, clientName, designation, gstNumber,
+      customerCategory, companyName, clientName, designation, gstNumber, panNumber,
     } = req.body;
 
     const category = customerCategory || "individual";
@@ -169,6 +169,7 @@ exports.createAdminOrder = async (req, res) => {
         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
       if (!customerEmail?.trim()) return errorResponse(res, "Email is required", null, 400);
       if (!gstNumber?.trim()) return errorResponse(res, "GST number is required", null, 400);
+      if (!panNumber?.trim()) return errorResponse(res, "PAN number is required", null, 400);
     }
 
     const vehicles = [];
@@ -349,6 +350,7 @@ exports.createAdminOrder = async (req, res) => {
       clientName: category === "organization" ? (clientName || "").trim() : "",
       designation: category === "organization" ? (designation || "").trim() : "",
       gstNumber: category === "organization" ? (gstNumber || "").trim() : "",
+      panNumber: category === "organization" ? (panNumber || "").trim() : "",
       isAdminCreated: true,
       bookingItems,
       grandTotal,
@@ -430,7 +432,7 @@ exports.updateAdminOrder = async (req, res) => {
 
     const {
       customerName, customerPhone, customerAddress, customerEmail,
-      customerCategory, companyName, clientName, designation, gstNumber,
+      customerCategory, companyName, clientName, designation, gstNumber, panNumber,
     } = req.body;
 
     const category = customerCategory || "individual";
@@ -451,6 +453,7 @@ exports.updateAdminOrder = async (req, res) => {
         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
       if (!customerEmail?.trim()) return errorResponse(res, "Email is required", null, 400);
       if (!gstNumber?.trim()) return errorResponse(res, "GST number is required", null, 400);
+      if (!panNumber?.trim()) return errorResponse(res, "PAN number is required", null, 400);
     }
 
     // ── snapshot BEFORE any mutation (for Edit History diff) ──────────────
@@ -463,6 +466,7 @@ exports.updateAdminOrder = async (req, res) => {
       clientName: order.clientName,
       designation: order.designation,
       gstNumber: order.gstNumber,
+      panNumber: order.panNumber,
     };
     const oldBookingItemsSnapshot = JSON.parse(JSON.stringify(order.bookingItems || []));
     // ────────────────────────────────────────────────────────────────────
@@ -607,6 +611,7 @@ exports.updateAdminOrder = async (req, res) => {
     order.clientName = category === "organization" ? (clientName || "").trim() : "";
     order.designation = category === "organization" ? (designation || "").trim() : "";
     order.gstNumber = category === "organization" ? (gstNumber || "").trim() : "";
+    order.panNumber = category === "organization" ? (panNumber || "").trim() : "";
 
     if (req.body.gstVerifyDetails) {
       try { order.gstVerifyDetails = JSON.parse(req.body.gstVerifyDetails); } catch {}
@@ -645,6 +650,7 @@ exports.updateAdminOrder = async (req, res) => {
       clientName: "Client Name",
       designation: "Designation",
       gstNumber: "GST Number",
+      panNumber: "PAN Number",
     };
 
     const customerChanges = [];
@@ -870,7 +876,7 @@ exports.getAllOrders = async (req, res) => {
   "orderId name phone address email customerType " +
   "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
   "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
-  "createdAt updatedAt customerCategory companyName clientName designation gstNumber " +
+  "createdAt updatedAt customerCategory companyName clientName designation gstNumber panNumber " +
   "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray " +
   "projectMailLogs todoArray todoUploadedBy onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray " +
   "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray orderEditHistory" 
@@ -933,7 +939,7 @@ exports.getOrdersByPipeline = async (req, res) => {
   "orderId name phone customerType pipelineStatus orderStatus " +
   "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
   "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
-  "companyName clientName designation email address gstNumber customerCategory " +
+  "companyName clientName designation email address gstNumber panNumber customerCategory invoiceData " +
   "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray todoArray todoUploadedBy " +
   "onRoadHistory onRoadIssues onRoadDriverHistory onRoadUnavailableHistory clientFeedbackHistory campaignClosureArray " +
   "clientClosureCommentsArray closedWonCommentsArray closedLostCommentsArray orderClosedLostArray orderClosedWonArray extraKmDetailsArray orderEditHistory " +
@@ -1723,9 +1729,6 @@ exports.markVehicleUnavailable = async (req, res) => {
 
     await order.save();
 
-    // Sync Vehicle Master inventory to the selected status (Unavailable /
-    // Damaged / Under Maintenance) so this reg no. is no longer assignable
-    // — this is the on-road vehicle's status change, not a release.
     try {
       await VehicleMaster.updateOne(
         { "registrationVehicles.registrationNumber": entry.vehicleRegistrationNumber },
@@ -1746,10 +1749,7 @@ exports.markVehicleUnavailable = async (req, res) => {
   }
 };
 
-// ── Replace a broken-down on-road vehicle with another one ─────────────────
-// Releases the old vehicle (flags it unavailable + moves it into the Vehicle
-// Unavailable stage), assigns a fresh registration number to the same slot,
-// and links both sides together for full replacement history.
+
 exports.replaceOnRoadVehicle = async (req, res) => {
   try {
     const { id, entryId } = req.params;
@@ -1772,10 +1772,7 @@ exports.replaceOnRoadVehicle = async (req, res) => {
     if (oldEntry.entryStatus === "removed") {
       return errorResponse(res, "This vehicle has already been released", null, 400);
     }
-    // Replace is valid both from On Road (not yet flagged) and from the
-    // Vehicle Unavailable stage (already flagged unavailableStatus) — that's
-    // the normal path now that Unavailable vehicles get a Replace button.
-
+  
     const newReg = newVehicleRegistrationNumber.trim().toUpperCase().replace(/\s+/g, "");
     const oldReg = (oldEntry.vehicleRegistrationNumber || "").trim().toUpperCase().replace(/\s+/g, "");
 
@@ -1783,10 +1780,6 @@ exports.replaceOnRoadVehicle = async (req, res) => {
       return errorResponse(res, "Replacement vehicle must be different from the current vehicle", null, 400);
     }
 
-    // Entries flagged unavailableStatus are inactive/superseded slots (either
-    // still waiting for a replacement or already replaced) — they don't hold
-    // a live assignment, so a reg no. sitting only in such an entry is free
-    // to be reused elsewhere on the same order.
     const alreadyActive = order.onRoadExecutionArray.some(
       (e) => e.entryStatus !== "removed" && !e.unavailableStatus && e.vehicleRegistrationNumber === newReg
     );
@@ -1804,11 +1797,11 @@ exports.replaceOnRoadVehicle = async (req, res) => {
     const reasonTrim = reason.trim();
     const wasAlreadyUnavailable = !!oldEntry.unavailableStatus;
 
-    // 1. Old entry → mark unavailable (kept visible/active on the roster, just flagged)
+   
     oldEntry.unavailableStatus = true;
     oldEntry.unavailableReason = reasonTrim;
 
-    // 2. New entry → same slot, new (or re-entered) driver, new registration number
+   
     order.onRoadExecutionArray.push({
       vehicleIndex: oldEntry.vehicleIndex,
       driverName: driverName.trim(),
@@ -1821,7 +1814,7 @@ exports.replaceOnRoadVehicle = async (req, res) => {
     });
     const newEntry = order.onRoadExecutionArray[order.onRoadExecutionArray.length - 1];
 
-    // 3. Driver/vehicle history — mirrors the "release + add" pattern used elsewhere
+   
     order.onRoadDriverHistory.push({
       vehicleIndex: oldEntry.vehicleIndex,
       entryId: oldEntry._id,
@@ -1845,10 +1838,6 @@ exports.replaceOnRoadVehicle = async (req, res) => {
       changedFields: { reason: reasonTrim, replacementFor: oldEntry.vehicleRegistrationNumber },
     });
 
-    // 4. If this vehicle wasn't already flagged unavailable (a direct Replace
-    // from On Road, not from the Unavailable stage), log that as its own
-    // history record first, so it shows as a separate timeline entry instead
-    // of being folded into the replacement event below.
     if (!wasAlreadyUnavailable) {
       order.onRoadUnavailableHistory.push({
         vehicleIndex: oldEntry.vehicleIndex,
@@ -1864,7 +1853,7 @@ exports.replaceOnRoadVehicle = async (req, res) => {
       });
     }
 
-    // 5. Separate replacement record holding BOTH old + new vehicle details
+
     order.onRoadUnavailableHistory.push({
       vehicleIndex: oldEntry.vehicleIndex,
       entryId: oldEntry._id,
@@ -1885,7 +1874,7 @@ exports.replaceOnRoadVehicle = async (req, res) => {
 
     await order.save();
 
-    // 5. Sync Vehicle Master inventory: old vehicle → Unavailable, new vehicle → Booked
+   
     try {
       await VehicleMaster.updateOne(
         { "registrationVehicles.registrationNumber": oldReg },
@@ -2236,10 +2225,9 @@ exports.approveFocEntry = async (req, res) => {
       }
     }
 
-    // approver's own email straight from JWT — no DB lookup needed
     const approverEmail = req.user?.email || "";
 
-    // original requester is a DIFFERENT user, so this still needs a DB lookup
+   
     const createdByUsername =
       (entry.focHistory || []).find((h) => h.action === "created")?.changedBy ||
       entry.createdBy;
@@ -2267,10 +2255,7 @@ exports.approveFocEntry = async (req, res) => {
       changedAt: new Date(),
     });
 
-    // A "compensation-days"/"compensation-hours" FOC (Campaign Calculator's
-    // Extra Campaign Days / Extra Working Hours request) only grants the
-    // actual compensation once approved here — the pending request itself
-    // never touched campaignCompensationArray.
+
     if (entry.focPurpose === "compensation-days" && entry.compensationDaysValue > 0) {
       order.campaignCompensationArray.push({
         vehicleIndex: entry.compensationVehicleIndex,
@@ -2309,7 +2294,6 @@ exports.createAndApproveFocEntry = async (req, res) => {
     const { id } = req.params;
     const { reason, fromDate, toDate, bookingItemId } = req.body;
 
-    // Only super admin can use this shortcut
     if (Number(req.user.isAdmin) !== 1) {
       return errorResponse(res, "Only super admin can create and approve FOC extension", null, 403);
     }
@@ -2859,9 +2843,7 @@ exports.addDailyHoursLog = async (req, res) => {
     const absentDayFlag = !!isAbsentDay;
     if (!day) return errorResponse(res, "Day is required", null, 400);
 
-    // Absent Day with mandatory Extend/Close choice: when the day is marked
-    // fully absent, ops must say whether the vehicle-type slot's schedule
-    // extends by a day or the campaign end date stays as contracted.
+  
     let resolvedAbsentDayResolution = null;
     if (absentDayFlag) {
       if (absentDayResolution !== "extend" && absentDayResolution !== "close") {
@@ -2875,16 +2857,15 @@ exports.addDailyHoursLog = async (req, res) => {
       resolvedAbsentDayResolution = absentDayResolution;
     }
 
-    // "Bill partial running day" feature — independent of isAbsentDay.
+   
     const allowedBillingModes = ["full", "partial", "absent"];
     let resolvedBillingMode = allowedBillingModes.includes(billingMode) ? billingMode : "full";
     if (absentDayFlag) {
-      // A fully absent day always bills as absent regardless of what was sent.
+     
       resolvedBillingMode = "absent";
     }
 
-    // Vehicle Absent Calculation: a full-day absence doesn't need real
-    // start/end times — the whole day is logged as 0 running / full absent.
+
     let start, end, runningHours, absentHours;
     if (absentDayFlag) {
       start = new Date(`${day}T00:00:00.000Z`);
@@ -2962,11 +2943,7 @@ exports.addDailyHoursLog = async (req, res) => {
       order.dailyHoursLogArray.push(payload);
     }
 
-    // Absent + "Extend Campaign +1 Day" — route through the same FOC (Free of
-    // Cost extension) flow the manual Client Closure tab already uses, so the
-    // approval rule is consistent everywhere: super admin can create-and-
-    // approve instantly, any other staff can only submit a pending request
-    // that a super admin must approve before the extension takes effect.
+
     if (absentDayFlag && resolvedAbsentDayResolution === "extend") {
       const alreadyPendingOrApproved = (order.campaignClosureArray || []).some(
         (c) =>
@@ -3015,16 +2992,7 @@ exports.addDailyHoursLog = async (req, res) => {
   }
 };
 
-// ── Campaign Compensation ───────────────────────────────────────────────
-// Grants extra working hours (added to a day's running time) or extra
-// campaign days for a date range, to make up for downtime caused by issues
-// or vehicle unavailability. Scope: whole vehicleIndex (entryId omitted) or
-// one specific entry/reg-no (entryId provided).
-// Sets/clears the date-range window within which the Order-Creation-purchased
-// Extra KM/Hours pool (bookingItem.extraKm/extraHours) is treated as
-// "available" against logged usage in the Campaign Calculator. Pass
-// fromDate/toDate to narrow it, or omit both (null) to reset to the vehicle
-// slot's full campaign window (the default behavior).
+
 exports.setPurchasedPoolWindow = async (req, res) => {
   try {
     const { id } = req.params;
@@ -3114,13 +3082,7 @@ exports.addCampaignCompensation = async (req, res) => {
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
-    // Both "Extra Campaign Days" (compensationType === "days") and "Extra
-    // Working Hours" (compensationType === "hours") compensation requests go
-    // through the same FOC (Free of Cost extension) approval rule as Mark
-    // Absent → Extend +1 Day: super admin grants it instantly, any other
-    // staff can only submit a pending request a super admin must approve
-    // (approveFocEntry / createAndApproveFocEntry apply the actual
-    // compensation grant on approval — see there).
+
     if (compensationType === "days" || compensationType === "hours") {
       const isSuperAdmin = Number(req.user.isAdmin) === 1;
       const now = new Date();
@@ -3552,6 +3514,46 @@ function buildEntryDayTimeline(windowStart, windowEnd, issuesForEntry, unavailFo
   };
 }
 
+exports.saveInvoice = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    const {
+      invoiceDate, dueDate, poNumber, projectName, placeOfSupply,
+      billToName, billToAddress, billToGstin, billToPan,
+      lineItems, cgstPercent, sgstPercent, rounding,
+    } = req.body;
+
+    const invoiceNumber = order.invoiceData?.invoiceNumber || `ASI-${order.orderId}`;
+
+    order.invoiceData = {
+      invoiceNumber,
+      invoiceDate: invoiceDate || new Date(),
+      dueDate: dueDate || null,
+      poNumber: poNumber || "",
+      projectName: projectName || "",
+      placeOfSupply: placeOfSupply || "",
+      billToName: billToName || "",
+      billToAddress: billToAddress || "",
+      billToGstin: billToGstin || "",
+      billToPan: billToPan || "",
+      lineItems: Array.isArray(lineItems) ? lineItems : [],
+      cgstPercent: Number(cgstPercent) || 0,
+      sgstPercent: Number(sgstPercent) || 0,
+      rounding: Number(rounding) || 0,
+      generatedBy: req.user?.username || req.user?.name || "",
+      generatedAt: new Date(),
+    };
+
+    await order.save();
+
+    return successResponse(res, "Invoice saved successfully", order.invoiceData);
+  } catch (error) {
+    return errorResponse(res, "Server Error", error.message, 500);
+  }
+};
+
 exports.getCampaignCalculator = async (req, res) => {
   try {
     const { id } = req.params;
@@ -3571,15 +3573,14 @@ exports.getCampaignCalculator = async (req, res) => {
     const dailyHoursLogArray = order.dailyHoursLogArray || [];
     const campaignCompensationArray = order.campaignCompensationArray || [];
 
-    // Pre-group actual-hours logs by entryId + day for O(1) lookup.
+  
     const hoursLogByEntryDay = {};
     for (const l of dailyHoursLogArray) {
       if (!l.entryId) continue;
       hoursLogByEntryDay[`${String(l.entryId)}|${l.day}`] = l;
     }
 
-    // Campaign Compensation ("days" type) — extra campaign days granted per
-    // vehicle-type slot, added to that slot's schedule window.
+
     const extraDaysByVehicle = {};
     bookingItems.forEach((_, vehicleIndex) => {
       extraDaysByVehicle[vehicleIndex] = campaignCompensationArray
@@ -3587,10 +3588,7 @@ exports.getCampaignCalculator = async (req, res) => {
         .reduce((s, c) => s + (c.compensationValue || 0), 0);
     });
 
-    // Absent Day "extend" resolution — cumulative, one calendar day per
-    // extend-resolved absent day, scoped to that vehicle-type slot only.
-    // This is a purely computed extension for calculator purposes; the
-    // stored bookingItem.toDate is never mutated.
+
     const absentExtendDaysByVehicle = {};
     bookingItems.forEach((_, vehicleIndex) => {
       absentExtendDaysByVehicle[vehicleIndex] = dailyHoursLogArray.filter(
@@ -3598,8 +3596,6 @@ exports.getCampaignCalculator = async (req, res) => {
       ).length;
     });
 
-    // effectiveToDate per vehicleIndex = bookingItem.toDate + campaign-
-    // compensation "days" grants + absent-day "extend" days (cumulative).
     const effectiveToDateByVehicle = {};
     bookingItems.forEach((b, idx) => {
       const baseTo = dateKey(b.toDate);
@@ -3619,8 +3615,6 @@ exports.getCampaignCalculator = async (req, res) => {
       return errorResponse(res, "Campaign dates are missing on this order", null, 400);
     }
 
-    // Vehicle Issue Duration + Vehicle Unavailable Duration: pre-group by
-    // entryId so per-day derivation below is O(1) per entry.
     const issuesByEntry = {};
     for (const iss of onRoadIssues) {
       const key = iss.entryId ? String(iss.entryId) : `vi-${iss.vehicleIndex}`;
@@ -3632,9 +3626,7 @@ exports.getCampaignCalculator = async (req, res) => {
       (unavailByEntry[key] = unavailByEntry[key] || []).push(h);
     }
 
-    // Campaign Compensation ("hours" type) — pre-group so entry-specific
-    // grants (entryId set) can take precedence over campaign-level grants
-    // (entryId null) for the same vehicleIndex/day.
+
     const hourCompByEntry = {};
     const hourCompByVehicle = {};
     for (const c of campaignCompensationArray) {
@@ -3655,7 +3647,7 @@ exports.getCampaignCalculator = async (req, res) => {
       return Math.round(vehicleGrants.reduce((s, c) => s + c.compensationValue, 0) * 100) / 100;
     }
 
-    // Pre-group history + extras by entryId for fast lookup per day.
+ 
     const historyByEntry = {};
     for (const h of onRoadDriverHistory) {
       const key = h.entryId ? String(h.entryId) : `vi-${h.vehicleIndex}`;
@@ -3666,9 +3658,7 @@ exports.getCampaignCalculator = async (req, res) => {
     );
 
     const bookingItemsMeta = bookingItems.map((b, idx) => {
-      // Vehicle Absent Calculation: a day marked fully absent for ANY active
-      // entry of this vehicle-type slot doesn't count as a completed
-      // campaign day for that slot.
+ 
       const absentDaySet = new Set(
         dailyHoursLogArray
           .filter((l) => l.vehicleIndex === idx && l.isAbsentDay)
@@ -3689,9 +3679,6 @@ exports.getCampaignCalculator = async (req, res) => {
         totalDays: b.totalDays || 0,
         extraDaysGranted,
         absentExtendDaysGranted: absentExtendDaysByVehicle[idx] || 0,
-        // Computed end date for calculator purposes only (never persisted to
-        // bookingItem.toDate): b.toDate + campaign-compensation days +
-        // cumulative absent-day "extend" days, for this vehicle-type slot.
         effectiveToDate: effectiveToDateByVehicle[idx],
         totalScheduledDays,
         absentDaysCount,
@@ -3701,8 +3688,6 @@ exports.getCampaignCalculator = async (req, res) => {
         rtoCost: b.rtoCost || 0,
         needPromoter: !!b.needPromoter,
         promoterCost: b.promoterCost || 0,
-        // Estimate figures as stored at Order Creation time — used only to
-        // show the client the Estimated-vs-Actual breakdown, never re-billed.
         estimatedRentalCost: (b.rentalCost || 0) + (b.driverCost || 0),
         estimatedExtraKmCost: b.extraKmCost || 0,
         estimatedExtraHourCost: b.extraHourCost || 0,
@@ -3710,16 +3695,7 @@ exports.getCampaignCalculator = async (req, res) => {
       };
     });
 
-    // ── Extra KM / Hours balance ──────────────────────────────────────────
-    // The client pre-purchases a KM/hour pool at Order Creation (bookingItem
-    // .extraKm/.extraHours). That pool is billed as its own flat, one-time
-    // fee (item.extraKmCost/item.extraHourCost — charged once on the
-    // vehicle's first campaign day, see extraKmPoolFeeToday below) — it is
-    // NOT a free-usage allowance that offsets on-road-logged Extra KM/Hours.
-    // Every on-road-logged record is billed in full, in addition to the
-    // one-time pool fee. This block therefore only computes informational
-    // totals (how much was purchased vs how much was actually logged) for
-    // the Vehicle Breakdown summary card — it no longer reduces any cost.
+ 
     const extraKmBalanceByVehicle = {};
     bookingItems.forEach((item, vehicleIndex) => {
       const purchasedWindowFrom = item.purchasedExtraKmFromDate
@@ -3770,8 +3746,7 @@ exports.getCampaignCalculator = async (req, res) => {
         isPurchasedWindowCustom: !!(item.purchasedExtraKmFromDate || item.purchasedExtraKmToDate),
         usedKm: Math.round(usedKm * 10000) / 10000,
         usedHours: Math.round(usedHours * 10000) / 10000,
-        // The purchased pool is a flat one-time fee, not consumable — the
-        // full logged amount is always billable in full alongside it.
+       
         overageKm: Math.round(usedKm * 10000) / 10000,
         overageHours: Math.round(usedHours * 10000) / 10000,
         overageKmCost: Math.round(usedKmCost * 100) / 100,
@@ -3779,11 +3754,6 @@ exports.getCampaignCalculator = async (req, res) => {
       };
     });
 
-    // Computes the running/issue/unavailable-hour figures for one entry on
-    // one day — shared by both still-active entries and entries that were
-    // released (removed) on this exact day, so a released entry gets the
-    // same real, event-derived figures instead of being reduced to a bare
-    // registration-number string.
     function computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay) {
       const createdEvent = hist.find((h) => h.action === "created");
       resolved.isReplacement = !!(createdEvent && dateKey(createdEvent.changedAt) > itemFrom);
@@ -3805,12 +3775,6 @@ exports.getCampaignCalculator = async (req, res) => {
       const unavailForEntry = unavailByEntry[resolved.entryId] || [];
 
       let { start: dayWindowStart, end: dayWindowEnd } = resolveWorkWindow(dayKey, hoursLog);
-      // Bug C fix: for the current, still-in-progress calendar day, never
-      // project the timeline past the real current moment — a fresh entry
-      // with no down-events yet should show only its actual elapsed running
-      // time so far, not an assumed "runs uninterrupted to the end of the
-      // work window" projection. Past, fully-completed days keep the full
-      // window (legitimate for cost/reporting once the day is over).
       const now = new Date();
       if (dayKey === dateKey(now) && dayWindowEnd > now) {
         dayWindowEnd = now;
@@ -3844,10 +3808,6 @@ exports.getCampaignCalculator = async (req, res) => {
       resolved.compensationHours = compensationHoursFor(resolved.entryId, vehicleIndex, dayKey);
       resolved.isCompensationExtensionDay = isCompensationExtensionDay;
 
-      // Surface explicit replacement info: was this entry replaced by
-      // another vehicle on this day (per onRoadUnavailableHistory's
-      // "replaced" record)? Used so a released/removed entry's card can say
-      // "Replaced by <reg>" instead of silently vanishing into a bare name.
       const replacedRecord = unavailForEntry
         .filter((h) => h.eventType === "replaced" && h.replacedAt && dateKey(h.replacedAt) === dayKey)
         .sort((a, b) => new Date(b.replacedAt) - new Date(a.replacedAt))[0];
@@ -3873,18 +3833,12 @@ exports.getCampaignCalculator = async (req, res) => {
       bookingItems.forEach((item, vehicleIndex) => {
         const itemFrom = dateKey(item.fromDate);
         const itemTo = dateKey(item.toDate);
-        // Campaign Compensation ("days" type) + Absent-Day "extend" grants
-        // extend this slot's schedule (effectiveToDate, computed earlier).
+      
         const extraDaysGranted = extraDaysByVehicle[vehicleIndex] || 0;
         const extendDaysGranted = absentExtendDaysByVehicle[vehicleIndex] || 0;
         const itemToExtended = effectiveToDateByVehicle[vehicleIndex] || itemTo;
         if (dayKey < itemFrom || dayKey > itemToExtended) return; // this vehicle-type's window doesn't include today
         const isCompensationExtensionDay = dayKey > itemTo;
-        // Days added purely by an "extend" absent-day resolution (beyond
-        // whatever campaign-compensation "days" already extended to) must
-        // NOT project a default full-day charge when nothing real has been
-        // logged yet — the compensation-days window comes first, the
-        // absent-day-extend window comes after it.
         const compExtendedTo = extraDaysGranted > 0 ? addDaysUTC(itemTo, extraDaysGranted) : itemTo;
         const isAbsentExtensionDay = extendDaysGranted > 0 && dayKey > compExtendedTo && dayKey <= itemToExtended;
 
@@ -3902,20 +3856,13 @@ exports.getCampaignCalculator = async (req, res) => {
           if (!resolved) continue;
           if (resolved.removed) {
             if (resolved.releasedOnThisDay) {
-              // Give the released entry the same real, event-derived
-              // running/issue/unavailable figures (and replacement linkage)
-              // as an active entry gets, instead of collapsing it down to a
-              // bare registration-number string.
+             
               computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay);
               releasedToday.push(resolved);
             }
             continue;
           }
-          // Vehicle Issue Duration + Vehicle Unavailable/Replacement Duration:
-          // derived (not stored) from onRoadIssues / onRoadUnavailableHistory
-          // timestamps, via a real event-sequence walk across this entry/
-          // day's actual working window (logged hours, or the default
-          // window) instead of a hardcoded 9AM-5PM clip.
+          
           computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay);
 
           activeEntries.push(resolved);
@@ -3925,8 +3872,6 @@ exports.getCampaignCalculator = async (req, res) => {
         const baseDailyRate = (item.perDayRentalCost || 0) + (item.driverCharges || 0);
         const dailyVehicleAmount = activeCount * baseDailyRate;
 
-        // Compensation: for every entry with a logged absence today, dock a
-        // proportional share of that entry's daily rate.
         let compensationToday = 0;
         for (const entry of activeEntries) {
           if (!entry.absentHours || !entry.campaignHours) continue;
@@ -3936,10 +3881,7 @@ exports.getCampaignCalculator = async (req, res) => {
           compensationToday += deduction;
         }
 
-        // The client already paid for the purchased Extra KM/Hours pool at
-        // Order Creation (item.extraKmCost/extraHourCost) — that flat fee is
-        // part of the actual bill regardless of how much of the pool gets
-        // used, charged once on the vehicle's first campaign day, same as RTO.
+   
         const extraKmPoolFeeToday = dayKey === itemFrom ? item.extraKmCost || 0 : 0;
         const extraHourPoolFeeToday = dayKey === itemFrom ? item.extraHourCost || 0 : 0;
 
@@ -3947,19 +3889,11 @@ exports.getCampaignCalculator = async (req, res) => {
         let extraHourCost = extraHourPoolFeeToday;
         const extraDetailsToday = [];
 
-        // Extra KM/Hours resolution is scoped to the vehicle-type SLOT's
-        // full entry history — ALL extraKmDetailsArray records ever created
-        // against ANY entryId that has occupied this vehicleIndex (active or
-        // replaced/removed) are eligible for any day inside their own
-        // fromDate-toDate range, not just the currently-active entryId.
         const slotRecordsForDay = extraKmDetailsArray.filter(
           (e) => e.vehicleIndex === vehicleIndex && dateKey(e.fromDate) <= dayKey && dateKey(e.toDate) >= dayKey
         );
         if (slotRecordsForDay.length) {
-          // Daily vs Split distribution, resolved per day; when multiple
-          // records apply to the same day, only the latest-added (addedAt)
-          // record's resolved value counts for that day's cost math — all
-          // records stay visible/returned for history/audit regardless.
+        
           const winner = slotRecordsForDay
             .slice()
             .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))[0];
@@ -3972,12 +3906,7 @@ exports.getCampaignCalculator = async (req, res) => {
           const resolvedKmCostRaw = resolvedKm * (winner.perKmChargeRate || 0);
           const resolvedHourCostRaw = resolvedHours * (winner.additionalHourChargeRate || 0);
 
-          // The purchased Extra KM/Hours pool is already billed in full as
-          // its own one-time fee (extraKmPoolFeeToday/extraHourPoolFeeToday
-          // above) regardless of how much of it gets used — it is NOT a
-          // free-usage allowance that offsets on-road-logged KM/Hours. Every
-          // on-road-logged record is therefore billed in full at the
-          // package rate, independent of the pool.
+          
           const billableKmCost = Math.round(resolvedKmCostRaw * 100) / 100;
           const billableHourCost = Math.round(resolvedHourCostRaw * 100) / 100;
 
@@ -3996,9 +3925,7 @@ exports.getCampaignCalculator = async (req, res) => {
             extraHours: winner.extraHours,
             extraKmCost: billableKmCost,
             extraHourCost: billableHourCost,
-            // Purchased pool is billed separately as a flat one-time fee
-            // (see extraKmPoolFeeToday) — it never offsets this record's
-            // cost, so this is always billed in full.
+           
             withinPurchasedBalance: false,
             loggedFor: `${dateKey(winner.fromDate)} to ${dateKey(winner.toDate)}`,
             addedBy: winner.addedBy,
@@ -4013,10 +3940,7 @@ exports.getCampaignCalculator = async (req, res) => {
             ? Math.round(((item.promoterCost || 0) / item.totalDays) * 100) / 100
             : 0;
 
-        // Bill Partial Running Day / Absent billingMode: scale (or zero) RTO
-        // and Promoter charges too (Rental/Driver are already handled above
-        // via the existing absentHours-based compensationToday deduction,
-        // which already nets a fully-absent day's rental/driver to zero).
+
         if (activeEntries.length) {
           const billingFactors = activeEntries.map((entry) => {
             if (entry.isAbsentDay || entry.billingMode === "absent") return 0;
@@ -4042,11 +3966,7 @@ exports.getCampaignCalculator = async (req, res) => {
 
         dayTotal += itemDayTotal;
 
-        // Daily Campaign Running Summary rollup for this vehicle-type/day.
-        // Include releasedToday (an old vehicle replaced partway through the
-        // day) alongside activeEntries — the old vehicle's issue/unavailable
-        // time before its replacement is real campaign downtime too, same as
-        // combinedRunningHoursToday already does for running hours below.
+     
         const issueHoursToday = Math.round(
           [...activeEntries, ...releasedToday].reduce((s, e) => s + (e.issueHours || 0), 0) * 100
         ) / 100;
@@ -4056,20 +3976,12 @@ exports.getCampaignCalculator = async (req, res) => {
         const downtimeHoursToday = Math.round((issueHoursToday + unavailableHoursToday) * 100) / 100;
         const compensationHoursGrantedToday = Math.round(activeEntries.reduce((s, e) => s + (e.compensationHours || 0), 0) * 100) / 100;
 
-        // Combined Running Today: old (released/replaced) + new (active)
-        // entries' running hours added together — e.g. an old vehicle that
-        // ran 2h before being replaced, plus its replacement running 4h
-        // after, both count toward this slot's running total for the day.
+
         const combinedRunningHoursToday =
           Math.round(
             ([...activeEntries, ...releasedToday].reduce((s, e) => s + (e.runningHours || 0), 0)) * 100
           ) / 100;
 
-        // Compensation Status: does today's downtime loss actually have a
-        // matching compensation grant (campaignCompensationArray, "hours"
-        // type) covering this date? "this-date" = a grant scoped to exactly
-        // this single day; "split" = part of a multi-day range; "none" = the
-        // loss hasn't been compensated yet (actionable on the UI side).
         const relevantEntryIds = [...activeEntries, ...releasedToday]
           .map((e) => (e.entryId ? String(e.entryId) : null))
           .filter(Boolean);
@@ -4081,10 +3993,6 @@ exports.getCampaignCalculator = async (req, res) => {
           return true; // campaign-level grant (no entryId) applies to every entry of this slot
         });
 
-        // Pending FOC compensation requests (hours or days) that haven't
-        // been approved yet, but whose date range covers this day — shown
-        // as a third "pending approval" state distinct from
-        // "not requested"/"approved".
         const matchingPendingFoc = (order.campaignClosureArray || []).filter((c) => {
           if (c.type !== "foc" || c.status !== "pending") return false;
           if (c.focPurpose !== "compensation-hours" && c.focPurpose !== "compensation-days") return false;
@@ -4205,10 +4113,6 @@ exports.getCampaignCalculator = async (req, res) => {
     const gstAmount = Math.round(((finalAmountBeforeGst * gstPercent) / 100) * 100) / 100;
     const finalInvoiceAmount = Math.round((finalAmountBeforeGst + gstAmount) * 100) / 100;
 
-    // Estimate figures as stored at Order Creation — shown next to actuals so
-    // any gap (e.g. extra KM/hours guessed at booking time but not yet
-    // logged by Operations) is visible instead of collapsing into one
-    // unexplained "reconciliation" number.
     const estimatedRental = bookingItemsMeta.reduce((s, b) => s + (b.estimatedRentalCost || 0), 0);
     const estimatedRto = bookingItemsMeta.reduce((s, b) => s + (b.rtoCost || 0), 0);
     const estimatedPromoter = bookingItemsMeta.reduce((s, b) => s + (b.promoterCost || 0), 0);
@@ -4261,11 +4165,7 @@ exports.getCampaignCalculator = async (req, res) => {
   }
 };
 
-// ── Day-by-Day History ──────────────────────────────────────────────────
-// Flat, pre-labeled event lists for six history categories, each event
-// tagged with { day, vehicleIndex, vehicleRegistrationNumber } so the
-// frontend can filter by Vehicle Type → Registration Number → Campaign Date
-// without recomputing anything client-side.
+
 exports.getDayByDayHistory = async (req, res) => {
   try {
     const { id } = req.params;
@@ -4309,9 +4209,7 @@ exports.getDayByDayHistory = async (req, res) => {
         .filter((iss) => iss.vehicleIndex === vehicleIndex)
         .forEach((iss) => iss.vehicleRegNo && regSet.add(iss.vehicleRegNo));
 
-      // Status tag per registration number — resolved from the CURRENT
-      // onRoadExecutionArray state (most-recently-uploaded entry wins),
-      // so chained replacements (Vehicle1→2→3) are each labeled correctly.
+ 
       const entriesForType = onRoadExecutionArray.filter((e) => e.vehicleIndex === vehicleIndex);
       const registrationNumbers = Array.from(regSet).map((reg) => {
         const matches = entriesForType
@@ -4369,7 +4267,7 @@ exports.getDayByDayHistory = async (req, res) => {
       });
     }
 
-    // Replacement events surface as "Vehicle Replaced" on BOTH the old and new reg.
+  
     for (const h of onRoadUnavailableHistory.filter((h) => h.eventType === "replaced")) {
       const day = dateKey(h.replacedAt || h.reportedAt);
       driverChangeHistory.push({
@@ -4611,10 +4509,6 @@ exports.getDayByDayHistory = async (req, res) => {
   }
 };
 
-
-// Reassign the operation-handling handler — used for leave handovers
-// (temporary) or permanent reassignment. Mirrors Salesordercontroller's
-// reassignHandler, but against the ops-pipeline handlerName field.
 exports.reassignOpsHandler = async (req, res) => {
   try {
     const { id } = req.params;
@@ -4665,8 +4559,6 @@ exports.reassignOpsHandler = async (req, res) => {
 };
 
 
-// Ends a temporary ops handover — either returns the order to the previous
-// handler, or (manager decision) makes the current handover permanent.
 exports.resolveOpsHandlerHandover = async (req, res) => {
   try {
     const { id, assignmentId } = req.params;

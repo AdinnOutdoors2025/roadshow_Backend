@@ -152,6 +152,7 @@ router.post("/pipeline/:id/daily-hours", protect, ctrl.addDailyHoursLog);
 router.post("/pipeline/:id/compensation", protect, ctrl.addCampaignCompensation);
 router.post("/pipeline/:id/purchased-pool-window", protect, ctrl.setPurchasedPoolWindow);
 router.get("/pipeline/:id/campaign-calculator", protect, ctrl.getCampaignCalculator);
+router.patch("/pipeline/:id/invoice", protect, ctrl.saveInvoice);
 router.get("/pipeline/:id/day-by-day-history", protect, ctrl.getDayByDayHistory);
 
 router.get("/orders", protect, ctrl.getAllOrders);  
