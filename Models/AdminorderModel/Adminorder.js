@@ -562,6 +562,7 @@ const salesPipelineLogSchema = new mongoose.Schema(
 
 const invoiceLineItemSchema = new mongoose.Schema(
   {
+    groupLabel: { type: String, default: "" },
     description: { type: String, default: "" },
     hsnSac: { type: String, default: "" },
     qty: { type: Number, default: 1 },
@@ -587,6 +588,7 @@ const invoiceDataSchema = new mongoose.Schema(
     cgstPercent: { type: Number, default: 9 },
     sgstPercent: { type: Number, default: 9 },
     rounding: { type: Number, default: 0 },
+    signatureMode: { type: String, enum: ["signed", "unsigned"], default: "signed" },
     generatedBy: { type: String, default: "" },
     generatedAt: { type: Date, default: null },
   },

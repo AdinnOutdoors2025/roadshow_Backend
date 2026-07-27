@@ -3522,7 +3522,7 @@ exports.saveInvoice = async (req, res) => {
     const {
       invoiceDate, dueDate, poNumber, projectName, placeOfSupply,
       billToName, billToAddress, billToGstin, billToPan,
-      lineItems, cgstPercent, sgstPercent, rounding,
+      lineItems, cgstPercent, sgstPercent, rounding, signatureMode,
     } = req.body;
 
     const invoiceNumber = order.invoiceData?.invoiceNumber || `ASI-${order.orderId}`;
@@ -3542,6 +3542,7 @@ exports.saveInvoice = async (req, res) => {
       cgstPercent: Number(cgstPercent) || 0,
       sgstPercent: Number(sgstPercent) || 0,
       rounding: Number(rounding) || 0,
+      signatureMode: signatureMode === "unsigned" ? "unsigned" : "signed",
       generatedBy: req.user?.username || req.user?.name || "",
       generatedAt: new Date(),
     };
