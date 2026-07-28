@@ -3522,7 +3522,8 @@ exports.saveInvoice = async (req, res) => {
     const {
       invoiceDate, dueDate, poNumber, projectName, placeOfSupply,
       billToName, billToAddress, billToGstin, billToPan,
-      lineItems, cgstPercent, sgstPercent, rounding, signatureMode,
+      lineItems, discountLabel, discountMode, discountType, discountValue,
+      cgstPercent, sgstPercent, rounding, signatureMode,
     } = req.body;
 
     const invoiceNumber = order.invoiceData?.invoiceNumber || `ASI-${order.orderId}`;
@@ -3539,6 +3540,10 @@ exports.saveInvoice = async (req, res) => {
       billToGstin: billToGstin || "",
       billToPan: billToPan || "",
       lineItems: Array.isArray(lineItems) ? lineItems : [],
+      discountLabel: discountLabel || "Discount",
+      discountMode: discountMode === "add" ? "add" : "decrease",
+      discountType: discountType === "amount" ? "amount" : "percent",
+      discountValue: Number(discountValue) || 0,
       cgstPercent: Number(cgstPercent) || 0,
       sgstPercent: Number(sgstPercent) || 0,
       rounding: Number(rounding) || 0,
