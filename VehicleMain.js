@@ -39,6 +39,8 @@ const Driverdetailsroutes = require('./Routes/DriverdetailsRoutes/Driverdetailsr
 const RoadshowQuotationRoutes  = require('./Routes/roadshowQuotation/roadshowQuotationRoute')
 const clientRequestRoutes = require('./Routes/ClientRequestRoutes/ClientRequestRoutes');
 const shortUrlRoutes = require("./routes/shortUrl.routes.js");
+// CLIENT AUTHENTICATION 
+const clientAuthRoutes = require("./Routes/ClientAuthRoutes/ClientAuthRoutes.js");
 //Image upload requirements
 const multer = require("multer");
 const path = require("path");
@@ -119,6 +121,7 @@ if (process.env.STORAGE_TYPE !== "space") {
 
 const allowedOrigins = [
   "http://localhost:3000",
+  "http://localhost:3002",
   "http://localhost:5173",
   "https://roadshowratecard.netlify.app",
   "http://192.168.2.159:3000",
@@ -221,7 +224,8 @@ app.use('/drivers', Driverdetailsroutes);
 app.use("/api/roadshow-quotations", RoadshowQuotationRoutes);
 app.use('/client-requests', clientRequestRoutes);
 app.use("/", shortUrlRoutes);
-
+// CLIENT AUTHENTICATION 
+app.use( "/api/client-auth", clientAuthRoutes );
 // VEHICLE DETAILS STORED WITH CRUD OPERATIONS
 //IMAGE UPLOAD CLOUDINARY CORRECTED CODE
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
