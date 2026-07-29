@@ -65,6 +65,7 @@ const bookingItemSchema = new mongoose.Schema({
   city: String,
   fromLocation: String,
   toLocation: String,
+  campaignLocation: { type: String, default: "" },
   quantity: Number,
   needPromoter: { type: Boolean, default: false },
   promoterType: String,

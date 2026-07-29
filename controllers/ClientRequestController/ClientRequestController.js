@@ -90,6 +90,7 @@ const normalizeVehicleTypes = (vehicleTypes) => {
       vehicleType: vehicle.vehicleType,
       vehicleName: String(vehicle.vehicleName || "").trim(),
       quantity: Math.floor(quantity),
+      campaignLocation: String(vehicle.campaignLocation || "").trim(),
       fromDate: vehicle.fromDate,
       toDate: vehicle.toDate,
       totalDays,

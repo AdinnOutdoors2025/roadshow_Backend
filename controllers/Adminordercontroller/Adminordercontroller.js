@@ -196,8 +196,7 @@ exports.createAdminOrder = async (req, res) => {
       if (!v.toDate) missing.push("toDate");
       if (!v.state) missing.push("state");
       if (!v.city) missing.push("city");
-      if (!v.fromLocation) missing.push("fromLocation");
-      if (!v.toLocation) missing.push("toLocation");
+      if (!v.campaignLocation && !(v.fromLocation && v.toLocation)) missing.push("campaignLocation");
       if (!v.quantity || Number(v.quantity) < 1) missing.push("quantity");
       if (missing.length > 0)
         return errorResponse(res, `Vehicle ${i + 1}: Missing fields — ${missing.join(", ")}`, null, 400);
@@ -291,8 +290,9 @@ exports.createAdminOrder = async (req, res) => {
         toDate: new Date(v.toDate),
         state: v.state,
         city: v.city,
-        fromLocation: v.fromLocation,
-        toLocation: v.toLocation,
+        campaignLocation: v.campaignLocation || "",
+        fromLocation: v.fromLocation || "",
+        toLocation: v.toLocation || "",
         quantity: Number(v.quantity),
         extraKm: Number(v.extraKm) || 0,
         extraDays: Number(v.extraDays) || 0,
@@ -496,8 +496,7 @@ exports.updateAdminOrder = async (req, res) => {
       if (!v.toDate) missing.push("toDate");
       if (!v.state) missing.push("state");
       if (!v.city) missing.push("city");
-      if (!v.fromLocation) missing.push("fromLocation");
-      if (!v.toLocation) missing.push("toLocation");
+      if (!v.campaignLocation && !(v.fromLocation && v.toLocation)) missing.push("campaignLocation");
       if (!v.quantity || Number(v.quantity) < 1) missing.push("quantity");
       if (missing.length > 0)
         return errorResponse(res, `Vehicle ${i + 1}: Missing fields — ${missing.join(", ")}`, null, 400);
@@ -563,8 +562,9 @@ exports.updateAdminOrder = async (req, res) => {
         toDate: new Date(v.toDate),
         state: v.state,
         city: v.city,
-        fromLocation: v.fromLocation,
-        toLocation: v.toLocation,
+        campaignLocation: v.campaignLocation || "",
+        fromLocation: v.fromLocation || "",
+        toLocation: v.toLocation || "",
         quantity: Number(v.quantity),
         extraKm: Number(v.extraKm) || 0,
         extraDays: Number(v.extraDays) || 0,
@@ -677,6 +677,7 @@ exports.updateAdminOrder = async (req, res) => {
       toDate: "To Date",
       state: "State",
       city: "City",
+      campaignLocation: "Campaign Location",
       fromLocation: "From Location",
       toLocation: "To Location",
       quantity: "Quantity",

@@ -25,6 +25,11 @@ const vehicleTypeQuantitySchema = new mongoose.Schema(
       required: true,
       min: 1,
     },
+    campaignLocation: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     fromDate: {
       type: Date,
       required: true,

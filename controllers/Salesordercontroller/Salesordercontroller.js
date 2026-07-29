@@ -334,19 +334,14 @@ exports.updateSalesPipeline = async (req, res) => {
       const poFile = uploadedFiles.find(
         (f) => f.fieldname === "salesPoDocument"
       );
-      if (!poFile)
-        return errorResponse(
-          res,
-          "Sales PO document is required to close won",
-          null,
-          400
-        );
-      order.closedWonArray.push({
-        salesPoDocument: getFilePath(poFile),
-        salesPoNotes: (salesPoNotes || "").trim(),
-        uploadedBy: order.salesHandlerName,
-        uploadedAt: new Date(),
-      });
+      if (poFile || (salesPoNotes || "").trim()) {
+        order.closedWonArray.push({
+          salesPoDocument: poFile ? getFilePath(poFile) : "",
+          salesPoNotes: (salesPoNotes || "").trim(),
+          uploadedBy: order.salesHandlerName,
+          uploadedAt: new Date(),
+        });
+      }
     }
 
     if (salesPipelineStatus === "closedLost") {
@@ -651,7 +646,8 @@ exports.sendProjectMail = async (req, res) => {
       startDate: item.fromDate || "",
       endDate: item.toDate || "",
       totalDays: item.totalDays || 0,
-      fromLocation: item.fromLocation || "",
+      campaignLocation: item.campaignLocation || "",
+      fromLocation: item.campaignLocation || "",
       toLocation: item.toLocation || "",
       state: item.state || "",
       city: item.city || "",
