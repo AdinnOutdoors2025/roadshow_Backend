@@ -28,15 +28,21 @@ async function findDateConflictsForOrder(order) {
     );
 
   
-    const currentReserved = (order.onRoadExecutionArray || [])
-      .filter((e) => e.vehicleIndex === i)
-      .map((e) => ({
-        driverName: e.driverName,
-        driverPhone: e.driverPhone,
-        vehicleRegistrationNumber: e.vehicleRegistrationNumber,
-        onRoadStatus: e.onRoadStatus,
-        reservedAt: e.uploadedAt,
-      }));
+    const orderFinished =
+      order.pipelineStatus === "closedWon" ||
+      order.pipelineStatus === "closedLost" ||
+      order.salesPipelineStatus === "closedLost";
+    const currentReserved = orderFinished
+      ? []
+      : (order.onRoadExecutionArray || [])
+          .filter((e) => e.vehicleIndex === i && e.entryStatus !== "removed")
+          .map((e) => ({
+            driverName: e.driverName,
+            driverPhone: e.driverPhone,
+            vehicleRegistrationNumber: e.vehicleRegistrationNumber,
+            onRoadStatus: e.onRoadStatus,
+            reservedAt: e.uploadedAt,
+          }));
 
   const allEntries = [
       {
@@ -67,15 +73,28 @@ async function findDateConflictsForOrder(order) {
         const overlaps = otherFrom <= thisTo && otherTo >= thisFrom;
         if (!overlaps) return;
 
-        const reservedVehicles = (otherOrder.onRoadExecutionArray || [])
-          .filter((e) => e.vehicleIndex === otherIdx)
-          .map((e) => ({
-            driverName: e.driverName,
-            driverPhone: e.driverPhone,
-            vehicleRegistrationNumber: e.vehicleRegistrationNumber,
-            onRoadStatus: e.onRoadStatus,
-            reservedAt: e.uploadedAt,
-          }));
+        // A fully finished order (won/lost) no longer holds a vehicle for this slot,
+        // regardless of whether its execution entries were explicitly marked "removed".
+        const otherFinished =
+          otherOrder.pipelineStatus === "closedWon" ||
+          otherOrder.pipelineStatus === "closedLost" ||
+          otherOrder.salesPipelineStatus === "closedLost";
+
+        const reservedVehicles = otherFinished
+          ? []
+          : (otherOrder.onRoadExecutionArray || [])
+              .filter((e) => e.vehicleIndex === otherIdx && e.entryStatus !== "removed")
+              .map((e) => ({
+                driverName: e.driverName,
+                driverPhone: e.driverPhone,
+                vehicleRegistrationNumber: e.vehicleRegistrationNumber,
+                onRoadStatus: e.onRoadStatus,
+                reservedAt: e.uploadedAt,
+              }));
+
+        // Other order is finished and no longer holding a vehicle for this slot ->
+        // it isn't really competing for the vehicle anymore, skip it entirely.
+        if (otherFinished) return;
 
         allEntries.push({
           orderObjectId: otherOrder._id,

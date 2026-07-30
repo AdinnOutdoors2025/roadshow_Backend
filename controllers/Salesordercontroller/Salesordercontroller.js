@@ -95,13 +95,27 @@ exports.getSalesPipeline = async (req, res) => {
     // DB la irukura ELLA orders oda bookingItems (vehicleType + dates) mattum
     // light-a fetch pannurom (extra per-order query varaadhu nu single pass la calculate pannurathukku)
     const allBookingSnapshots = await Order.find({})
-      .select("_id bookingItems")
+      .select("_id bookingItems pipelineStatus salesPipelineStatus onRoadExecutionArray")
       .lean();
+
+    // Orders that are fully finished (won/lost) no longer hold a vehicle,
+    // so they should never contribute to the conflict badge — mirrors
+    // the same "orderFinished" rule used in Utils/dateConflictChecker.js.
+    const isOrderFinished = (o) =>
+      o.pipelineStatus === "closedWon" ||
+      o.pipelineStatus === "closedLost" ||
+      o.salesPipelineStatus === "closedLost";
 
     const vehicleTypeMap = {};
     allBookingSnapshots.forEach((o) => {
-      (o.bookingItems || []).forEach((item) => {
+      if (isOrderFinished(o)) return;
+      (o.bookingItems || []).forEach((item, idx) => {
         if (!item.vehicleType || !item.fromDate || !item.toDate) return;
+        // If this slot has execution entries and every single one is "removed",
+        // the vehicle has been released and no longer blocks new bookings.
+        const slotEntries = (o.onRoadExecutionArray || []).filter((e) => e.vehicleIndex === idx);
+        const slotReleased = slotEntries.length > 0 && slotEntries.every((e) => e.entryStatus === "removed");
+        if (slotReleased) return;
         const key = String(item.vehicleType);
         if (!vehicleTypeMap[key]) vehicleTypeMap[key] = [];
         vehicleTypeMap[key].push({
@@ -114,6 +128,7 @@ exports.getSalesPipeline = async (req, res) => {
 
     const conflictedOrderIds = new Set();
     allBookingSnapshots.forEach((o) => {
+      if (isOrderFinished(o)) return;
       const oId = String(o._id);
       let hasConflict = false;
       (o.bookingItems || []).forEach((item) => {
@@ -232,15 +247,7 @@ exports.updateSalesPipeline = async (req, res) => {
 
     if (order.salesPipelineStatus === "projectCodeCreation") {
       if (salesPipelineStatus === "closedLost") {
-        const mailLogsCount = (order.projectMailLogs || []).length;
-        if (mailLogsCount > 0) {
-          return errorResponse(
-            res,
-            "Mail already sent for this order. Cannot move to Closed Lost.",
-            null,
-            400
-          );
-        }
+        // Mail-sent count no longer blocks moving to Closed Lost.
       } else {
         return errorResponse(
           res,
