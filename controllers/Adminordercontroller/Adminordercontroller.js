@@ -875,7 +875,7 @@ exports.getAllOrders = async (req, res) => {
       .limit(limitNum)
      .select(
   "orderId name phone address email customerType " +
-  "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus " +
+  "grandTotal grandGst grandNegotiationTotal orderStatus pipelineStatus salesPipelineStatus " +
   "isAdminCreated handlerName bookingItems pipelineLogs negotiationLogs " +
   "createdAt updatedAt customerCategory companyName clientName designation gstNumber panNumber " +
   "projectCodeArray projectExecutionArray onRoadExecutionArray onRoadCommentsArray " +
@@ -3669,12 +3669,24 @@ exports.getCampaignCalculator = async (req, res) => {
         (hourCompByVehicle[c.vehicleIndex] = hourCompByVehicle[c.vehicleIndex] || []).push(c);
       }
     }
-    function compensationHoursFor(entryId, vehicleIndex, dayKeyStr) {
+    // Slot-level (entryId: null) compensation grants are a "position"
+    // entitlement, not tied to one specific vehicle — they should only be
+    // attributed to whichever entry is genuinely active (currently running)
+    // that day. A released/replaced entry has already "completed" as of its
+    // release day and must not keep picking up slot-level compensation
+    // granted for days it's no longer occupying the position — that
+    // compensation belongs to whichever vehicle (old, while active, or the
+    // replacement, once it takes over) is actually running the slot that day.
+    // Entry-specific grants (tied to this exact entryId) always apply — the
+    // caller already stops calling this for an entry once it's past its own
+    // release day, so no extra clipping is needed for that case.
+    function compensationHoursFor(entryId, vehicleIndex, dayKeyStr, isActiveToday = true) {
       const inRange = (c) => dateKey(c.fromDate) <= dayKeyStr && dateKey(c.toDate) >= dayKeyStr;
       const entryGrants = (hourCompByEntry[entryId] || []).filter(inRange);
       if (entryGrants.length) {
         return Math.round(entryGrants.reduce((s, c) => s + c.compensationValue, 0) * 100) / 100;
       }
+      if (!isActiveToday) return 0;
       const vehicleGrants = (hourCompByVehicle[vehicleIndex] || []).filter(inRange);
       return Math.round(vehicleGrants.reduce((s, c) => s + c.compensationValue, 0) * 100) / 100;
     }
@@ -3688,6 +3700,25 @@ exports.getCampaignCalculator = async (req, res) => {
     Object.values(historyByEntry).forEach((arr) =>
       arr.sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt))
     );
+
+    // Extra KM/Hours records logged against a specific vehicle (entryId) are
+    // "completed" once that vehicle is released/replaced — they must not
+    // keep applying on days after release, even if the record's own toDate
+    // extends further. Clips each entry-specific effective record's toDate
+    // to that entry's release day (day of its "removed" history event), if
+    // it was ever removed. Campaign-level records (entryId: null) aren't
+    // tied to one vehicle and are left untouched.
+    function clipExtraKmRecordsToEntryLifetime(records) {
+      return records.map((rec) => {
+        if (!rec.entryId) return rec;
+        const hist = historyByEntry[String(rec.entryId)] || [];
+        const removedEvent = hist.find((h) => h.action === "removed");
+        if (!removedEvent) return rec;
+        const releaseDay = dateKey(removedEvent.changedAt);
+        if (releaseDay >= dateKey(rec.toDate)) return rec; // already within lifetime
+        return { ...rec, toDate: new Date(releaseDay) };
+      });
+    }
 
     const bookingItemsMeta = bookingItems.map((b, idx) => {
  
@@ -3739,7 +3770,7 @@ exports.getCampaignCalculator = async (req, res) => {
       const slotItemFrom = dateKey(item.fromDate);
       const slotItemToExtended = effectiveToDateByVehicle[vehicleIndex] || dateKey(item.toDate);
       const slotRecords = extraKmDetailsArray.filter((e) => e.vehicleIndex === vehicleIndex);
-      const effectiveRecords = resolveEffectiveExtraKmRecords(slotRecords);
+      const effectiveRecords = clipExtraKmRecordsToEntryLifetime(resolveEffectiveExtraKmRecords(slotRecords));
 
       let usedKm = 0, usedHours = 0, usedKmCost = 0, usedHourCost = 0;
 
@@ -3786,7 +3817,7 @@ exports.getCampaignCalculator = async (req, res) => {
       };
     });
 
-    function computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay) {
+    function computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay, isActiveToday = true) {
       const createdEvent = hist.find((h) => h.action === "created");
       resolved.isReplacement = !!(createdEvent && dateKey(createdEvent.changedAt) > itemFrom);
 
@@ -3837,7 +3868,7 @@ exports.getCampaignCalculator = async (req, res) => {
         resolved.runningHours = entryTimeline.runningHours;
       }
 
-      resolved.compensationHours = compensationHoursFor(resolved.entryId, vehicleIndex, dayKey);
+      resolved.compensationHours = compensationHoursFor(resolved.entryId, vehicleIndex, dayKey, isActiveToday);
       resolved.isCompensationExtensionDay = isCompensationExtensionDay;
 
       const replacedRecord = unavailForEntry
@@ -3857,7 +3888,7 @@ exports.getCampaignCalculator = async (req, res) => {
     const effectiveExtraKmRecordsByVehicle = {};
     bookingItems.forEach((item, vehicleIndex) => {
       const slotRecords = extraKmDetailsArray.filter((e) => e.vehicleIndex === vehicleIndex);
-      effectiveExtraKmRecordsByVehicle[vehicleIndex] = resolveEffectiveExtraKmRecords(slotRecords);
+      effectiveExtraKmRecordsByVehicle[vehicleIndex] = clipExtraKmRecordsToEntryLifetime(resolveEffectiveExtraKmRecords(slotRecords));
     });
 
     const days = [];
@@ -3896,14 +3927,16 @@ exports.getCampaignCalculator = async (req, res) => {
           if (!resolved) continue;
           if (resolved.removed) {
             if (resolved.releasedOnThisDay) {
-             
-              computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay);
+              // Released on this exact day — still shown ("Released Today"),
+              // but no longer eligible for slot-level (broadcast) compensation;
+              // it has already "completed" as of this day.
+              computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay, false);
               releasedToday.push(resolved);
             }
             continue;
           }
-          
-          computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay);
+
+          computeEntryDayFigures(resolved, hist, dayKey, vehicleIndex, itemFrom, isCompensationExtensionDay, true);
 
           activeEntries.push(resolved);
         }
