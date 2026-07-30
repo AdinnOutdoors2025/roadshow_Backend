@@ -937,7 +937,7 @@ exports.getOrdersByPipeline = async (req, res) => {
     const orders = await Order.find()
       .sort({ createdAt: -1 })
      .select(
-  "orderId name phone customerType pipelineStatus orderStatus " +
+  "orderId name phone customerType pipelineStatus salesPipelineStatus orderStatus " +
   "grandTotal grandGst grandNegotiationTotal bookingItems handlerName " +
   "isAdminCreated createdAt updatedAt pipelineLogs negotiationLogs " +
   "companyName clientName designation email address gstNumber panNumber customerCategory invoiceData " +
@@ -948,7 +948,10 @@ exports.getOrdersByPipeline = async (req, res) => {
 );
 
     const filteredOrders = orders.filter(
-      (o) => o.projectCodeArray && o.projectCodeArray.length === 1
+      // Orders sales already closed-lost should never appear on the
+      // operations board (not even under its own Closed Lost column) —
+      // sales lost the deal before/without operations acting on it.
+      (o) => o.projectCodeArray && o.projectCodeArray.length === 1 && o.salesPipelineStatus !== "closedLost"
     );
 
     const grouped = {};
@@ -3754,6 +3757,7 @@ exports.getCampaignCalculator = async (req, res) => {
         estimatedRentalCost: (b.rentalCost || 0) + (b.driverCost || 0),
         estimatedExtraKmCost: b.extraKmCost || 0,
         estimatedExtraHourCost: b.extraHourCost || 0,
+        estimatedAdditionalCharges: b.additionalNet || 0,
         estimatedTotalAmount: b.totalAmount || 0,
       };
     });
@@ -4002,6 +4006,11 @@ exports.getCampaignCalculator = async (req, res) => {
           });
         }
 
+        // Additional Charges (from order-creation additionalFields, e.g. "+"/"-"
+        // adjustments) are a one-time flat amount for the vehicle-type slot —
+        // applied once on the campaign's first day, same pattern as RTO/extra-km pool fee.
+        const additionalChargesToday = dayKey === itemFrom ? (item.additionalNet || 0) : 0;
+
         let rtoAppliedToday = dayKey === itemFrom ? item.rtoCost || 0 : 0;
 
         let promoterAmountToday =
@@ -4030,7 +4039,8 @@ exports.getCampaignCalculator = async (req, res) => {
           extraKmCost +
           extraHourCost +
           rtoAppliedToday +
-          promoterAmountToday -
+          promoterAmountToday +
+          additionalChargesToday -
           compensationToday;
 
         dayTotal += itemDayTotal;
@@ -4131,6 +4141,7 @@ exports.getCampaignCalculator = async (req, res) => {
           extraDetailsToday,
           rtoAppliedToday,
           promoterAmountToday,
+          additionalChargesToday,
           compensationToday: Math.round(compensationToday * 100) / 100,
           issueHoursToday,
           unavailableHoursToday,
@@ -4167,6 +4178,7 @@ exports.getCampaignCalculator = async (req, res) => {
     const actualExtraHours = allVehicles.reduce((s, v) => s + (v.extraHourCost || 0), 0);
     const actualRto = allVehicles.reduce((s, v) => s + (v.rtoAppliedToday || 0), 0);
     const actualPromoter = allVehicles.reduce((s, v) => s + (v.promoterAmountToday || 0), 0);
+    const actualAdditionalCharges = allVehicles.reduce((s, v) => s + (v.additionalChargesToday || 0), 0);
     const totalCompensation = Math.round(cumulativeCompensation * 100) / 100;
     const campaignExtensionAmount = 0; // extension approval workflow not yet implemented
     const totalIssueHours = Math.round(allVehicles.reduce((s, v) => s + (v.issueHoursToday || 0), 0) * 100) / 100;
@@ -4187,6 +4199,7 @@ exports.getCampaignCalculator = async (req, res) => {
     const estimatedPromoter = bookingItemsMeta.reduce((s, b) => s + (b.promoterCost || 0), 0);
     const estimatedExtraKm = bookingItemsMeta.reduce((s, b) => s + (b.estimatedExtraKmCost || 0), 0);
     const estimatedExtraHours = bookingItemsMeta.reduce((s, b) => s + (b.estimatedExtraHourCost || 0), 0);
+    const estimatedAdditionalCharges = bookingItemsMeta.reduce((s, b) => s + (b.estimatedAdditionalCharges || 0), 0);
 
     const finalBilling = {
       estimatedAmount: orderTaxableAmount,
@@ -4195,11 +4208,13 @@ exports.getCampaignCalculator = async (req, res) => {
       estimatedPromoter: Math.round(estimatedPromoter * 100) / 100,
       estimatedExtraKm: Math.round(estimatedExtraKm * 100) / 100,
       estimatedExtraHours: Math.round(estimatedExtraHours * 100) / 100,
+      estimatedAdditionalCharges: Math.round(estimatedAdditionalCharges * 100) / 100,
       actualRental: Math.round(actualRental * 100) / 100,
       actualExtraKm: Math.round(actualExtraKm * 100) / 100,
       actualExtraHours: Math.round(actualExtraHours * 100) / 100,
       actualRto: Math.round(actualRto * 100) / 100,
       actualPromoter: Math.round(actualPromoter * 100) / 100,
+      actualAdditionalCharges: Math.round(actualAdditionalCharges * 100) / 100,
       totalCompensation,
       campaignExtensionAmount,
       totalIssueHours,

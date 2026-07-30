@@ -371,6 +371,12 @@ exports.updateSalesPipeline = async (req, res) => {
     }
 
     order.salesPipelineStatus = salesPipelineStatus;
+    // Note: order.pipelineStatus (operations field) is intentionally left
+    // untouched here — Sales Handling's own board query filters strictly on
+    // pipelineStatus:"todo", so overwriting it would make the order vanish
+    // from the Sales Handling board too. Operation Handling instead hides
+    // sales-closed-lost orders by filtering on salesPipelineStatus directly
+    // (see getOrdersByPipeline in Adminordercontroller.js).
     order.salesPipelineLogs.push({
       fromStage: oldStage,
       toStage: salesPipelineStatus,
