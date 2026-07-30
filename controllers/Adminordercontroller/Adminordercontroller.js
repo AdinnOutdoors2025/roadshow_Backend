@@ -3258,6 +3258,31 @@ function daysBetweenInclusive(fromKeyStr, toKeyStr) {
   return Math.round((t - f) / 86400000) + 1;
 }
 
+// Extra KM/Hours records for one vehicle-type slot, grouped by entryId (each
+// vehicle registration tracked separately) so that two different vehicles
+// running extra KM/Hours on the same day both get counted — instead of one
+// "winner" silently swallowing the other's usage.
+//
+// Within the SAME entryId, adding Extra KM/Hours a second time is treated as
+// a full replacement of that vehicle's earlier record — NOT a day-by-day
+// overlap pick. The single most-recently-added record per entryId is kept;
+// any older record for that same entryId is entirely discarded, even for
+// days the older record covered but the newer one doesn't (e.g. old record
+// 29→30 Jul gets fully superseded by a newer 29→29 Jul record — 30 Jul then
+// has zero extra KM/Hours for that vehicle, it does NOT fall back to the
+// old record).
+function resolveEffectiveExtraKmRecords(slotRecords) {
+  const byEntry = new Map();
+  slotRecords.forEach((rec) => {
+    const key = rec.entryId ? String(rec.entryId) : "campaign";
+    const existing = byEntry.get(key);
+    if (!existing || new Date(rec.addedAt) > new Date(existing.addedAt)) {
+      byEntry.set(key, rec);
+    }
+  });
+  return Array.from(byEntry.values());
+}
+
 // Replays onRoadDriverHistory events for one entry to find its
 // driver/registration state as of a given day, and whether it was
 // active (created & not yet removed) on that day.
@@ -3714,29 +3739,29 @@ exports.getCampaignCalculator = async (req, res) => {
       const slotItemFrom = dateKey(item.fromDate);
       const slotItemToExtended = effectiveToDateByVehicle[vehicleIndex] || dateKey(item.toDate);
       const slotRecords = extraKmDetailsArray.filter((e) => e.vehicleIndex === vehicleIndex);
+      const effectiveRecords = resolveEffectiveExtraKmRecords(slotRecords);
 
       let usedKm = 0, usedHours = 0, usedKmCost = 0, usedHourCost = 0;
 
       let balCursor = slotItemFrom;
       while (balCursor <= slotItemToExtended) {
-        const dayRecords = slotRecords.filter(
+        const dayRecords = effectiveRecords.filter(
           (e) => dateKey(e.fromDate) <= balCursor && dateKey(e.toDate) >= balCursor
         );
         if (dayRecords.length) {
-          const winner = dayRecords
-            .slice()
-            .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))[0];
-          const rangeDays = daysBetweenInclusive(dateKey(winner.fromDate), dateKey(winner.toDate));
-          const method = winner.distributionMethod === "split" ? "split" : "daily";
-          const dayKm = method === "split" ? (winner.extraKm || 0) / rangeDays : (winner.extraKm || 0);
-          const dayHours = method === "split" ? (winner.extraHours || 0) / rangeDays : (winner.extraHours || 0);
-          const dayKmCost = dayKm * (winner.perKmChargeRate || 0);
-          const dayHourCost = dayHours * (winner.additionalHourChargeRate || 0);
+          dayRecords.forEach((winner) => {
+            const rangeDays = daysBetweenInclusive(dateKey(winner.fromDate), dateKey(winner.toDate));
+            const method = winner.distributionMethod === "split" ? "split" : "daily";
+            const dayKm = method === "split" ? (winner.extraKm || 0) / rangeDays : (winner.extraKm || 0);
+            const dayHours = method === "split" ? (winner.extraHours || 0) / rangeDays : (winner.extraHours || 0);
+            const dayKmCost = dayKm * (winner.perKmChargeRate || 0);
+            const dayHourCost = dayHours * (winner.additionalHourChargeRate || 0);
 
-          usedKm += dayKm;
-          usedHours += dayHours;
-          usedKmCost += dayKmCost;
-          usedHourCost += dayHourCost;
+            usedKm += dayKm;
+            usedHours += dayHours;
+            usedKmCost += dayKmCost;
+            usedHourCost += dayHourCost;
+          });
         }
         balCursor = addDaysUTC(balCursor, 1);
       }
@@ -3827,6 +3852,14 @@ exports.getCampaignCalculator = async (req, res) => {
       return resolved;
     }
 
+    // Precompute, once per vehicle-type slot, the single effective (latest
+    // per entryId) Extra KM/Hours record — see resolveEffectiveExtraKmRecords.
+    const effectiveExtraKmRecordsByVehicle = {};
+    bookingItems.forEach((item, vehicleIndex) => {
+      const slotRecords = extraKmDetailsArray.filter((e) => e.vehicleIndex === vehicleIndex);
+      effectiveExtraKmRecordsByVehicle[vehicleIndex] = resolveEffectiveExtraKmRecords(slotRecords);
+    });
+
     const days = [];
     let cumulativeTotal = 0;
     let cumulativeCompensation = 0;
@@ -3896,47 +3929,43 @@ exports.getCampaignCalculator = async (req, res) => {
         let extraHourCost = extraHourPoolFeeToday;
         const extraDetailsToday = [];
 
-        const slotRecordsForDay = extraKmDetailsArray.filter(
-          (e) => e.vehicleIndex === vehicleIndex && dateKey(e.fromDate) <= dayKey && dateKey(e.toDate) >= dayKey
+        const slotRecordsForDay = (effectiveExtraKmRecordsByVehicle[vehicleIndex] || []).filter(
+          (e) => dateKey(e.fromDate) <= dayKey && dateKey(e.toDate) >= dayKey
         );
         if (slotRecordsForDay.length) {
-        
-          const winner = slotRecordsForDay
-            .slice()
-            .sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))[0];
+          slotRecordsForDay.forEach((winner) => {
+            const rangeDays = daysBetweenInclusive(dateKey(winner.fromDate), dateKey(winner.toDate));
+            const method = winner.distributionMethod === "split" ? "split" : "daily";
+            const resolvedKm = method === "split" ? (winner.extraKm || 0) / rangeDays : (winner.extraKm || 0);
+            const resolvedHours = method === "split" ? (winner.extraHours || 0) / rangeDays : (winner.extraHours || 0);
 
-          const rangeDays = daysBetweenInclusive(dateKey(winner.fromDate), dateKey(winner.toDate));
-          const method = winner.distributionMethod === "split" ? "split" : "daily";
-          const resolvedKm = method === "split" ? (winner.extraKm || 0) / rangeDays : (winner.extraKm || 0);
-          const resolvedHours = method === "split" ? (winner.extraHours || 0) / rangeDays : (winner.extraHours || 0);
+            const resolvedKmCostRaw = resolvedKm * (winner.perKmChargeRate || 0);
+            const resolvedHourCostRaw = resolvedHours * (winner.additionalHourChargeRate || 0);
 
-          const resolvedKmCostRaw = resolvedKm * (winner.perKmChargeRate || 0);
-          const resolvedHourCostRaw = resolvedHours * (winner.additionalHourChargeRate || 0);
+            const billableKmCost = Math.round(resolvedKmCostRaw * 100) / 100;
+            const billableHourCost = Math.round(resolvedHourCostRaw * 100) / 100;
 
-          
-          const billableKmCost = Math.round(resolvedKmCostRaw * 100) / 100;
-          const billableHourCost = Math.round(resolvedHourCostRaw * 100) / 100;
+            extraKmCost += billableKmCost;
+            extraHourCost += billableHourCost;
 
-          extraKmCost += billableKmCost;
-          extraHourCost += billableHourCost;
+            extraDetailsToday.push({
+              registrationNumber: winner.vehicleRegistrationNumber,
+              entryId: winner.entryId ? String(winner.entryId) : null,
+              distributionMethod: method,
+              recordExtraKm: winner.extraKm || 0,
+              recordExtraHours: winner.extraHours || 0,
+              resolvedExtraKmToday: Math.round(resolvedKm * 10000) / 10000,
+              resolvedExtraHoursToday: Math.round(resolvedHours * 10000) / 10000,
+              extraKm: winner.extraKm,
+              extraHours: winner.extraHours,
+              extraKmCost: billableKmCost,
+              extraHourCost: billableHourCost,
 
-          extraDetailsToday.push({
-            registrationNumber: winner.vehicleRegistrationNumber,
-            entryId: winner.entryId ? String(winner.entryId) : null,
-            distributionMethod: method,
-            recordExtraKm: winner.extraKm || 0,
-            recordExtraHours: winner.extraHours || 0,
-            resolvedExtraKmToday: Math.round(resolvedKm * 10000) / 10000,
-            resolvedExtraHoursToday: Math.round(resolvedHours * 10000) / 10000,
-            extraKm: winner.extraKm,
-            extraHours: winner.extraHours,
-            extraKmCost: billableKmCost,
-            extraHourCost: billableHourCost,
-           
-            withinPurchasedBalance: false,
-            loggedFor: `${dateKey(winner.fromDate)} to ${dateKey(winner.toDate)}`,
-            addedBy: winner.addedBy,
-            addedAt: winner.addedAt,
+              withinPurchasedBalance: false,
+              loggedFor: `${dateKey(winner.fromDate)} to ${dateKey(winner.toDate)}`,
+              addedBy: winner.addedBy,
+              addedAt: winner.addedAt,
+            });
           });
         }
 
