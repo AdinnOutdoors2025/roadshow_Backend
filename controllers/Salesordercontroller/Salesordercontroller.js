@@ -91,16 +91,12 @@ exports.getSalesPipeline = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    // ── Date Conflict Check (Board Badge) ──────────────────────────
-    // DB la irukura ELLA orders oda bookingItems (vehicleType + dates) mattum
-    // light-a fetch pannurom (extra per-order query varaadhu nu single pass la calculate pannurathukku)
+ 
     const allBookingSnapshots = await Order.find({})
       .select("_id bookingItems pipelineStatus salesPipelineStatus onRoadExecutionArray")
       .lean();
 
-    // Orders that are fully finished (won/lost) no longer hold a vehicle,
-    // so they should never contribute to the conflict badge — mirrors
-    // the same "orderFinished" rule used in Utils/dateConflictChecker.js.
+ 
     const isOrderFinished = (o) =>
       o.pipelineStatus === "closedWon" ||
       o.pipelineStatus === "closedLost" ||
@@ -111,8 +107,6 @@ exports.getSalesPipeline = async (req, res) => {
       if (isOrderFinished(o)) return;
       (o.bookingItems || []).forEach((item, idx) => {
         if (!item.vehicleType || !item.fromDate || !item.toDate) return;
-        // If this slot has execution entries and every single one is "removed",
-        // the vehicle has been released and no longer blocks new bookings.
         const slotEntries = (o.onRoadExecutionArray || []).filter((e) => e.vehicleIndex === idx);
         const slotReleased = slotEntries.length > 0 && slotEntries.every((e) => e.entryStatus === "removed");
         if (slotReleased) return;
@@ -143,7 +137,7 @@ exports.getSalesPipeline = async (req, res) => {
       });
       if (hasConflict) conflictedOrderIds.add(oId);
     });
-    // ─────────────────────────────────────────────────────────────
+   
 
     const grouped = {};
     SALES_STAGE_ORDER.forEach((s) => (grouped[s] = []));
@@ -371,12 +365,6 @@ exports.updateSalesPipeline = async (req, res) => {
     }
 
     order.salesPipelineStatus = salesPipelineStatus;
-    // Note: order.pipelineStatus (operations field) is intentionally left
-    // untouched here — Sales Handling's own board query filters strictly on
-    // pipelineStatus:"todo", so overwriting it would make the order vanish
-    // from the Sales Handling board too. Operation Handling instead hides
-    // sales-closed-lost orders by filtering on salesPipelineStatus directly
-    // (see getOrdersByPipeline in Adminordercontroller.js).
     order.salesPipelineLogs.push({
       fromStage: oldStage,
       toStage: salesPipelineStatus,

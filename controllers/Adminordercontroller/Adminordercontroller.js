@@ -1200,7 +1200,7 @@ exports.submitOnRoadDetails = async (req, res) => {
 
     order.onRoadDriverHistory.push({
       vehicleIndex: Number(vehicleIndex),
-      entryId: savedSubEntry._id,        // ← NEW
+      entryId: savedSubEntry._id,       
       action: "created",
       driverName: driverName.trim(),
       driverPhone: driverPhone.trim(),
@@ -1220,9 +1220,6 @@ exports.submitOnRoadDetails = async (req, res) => {
       e => e.vehicleIndex === vIdx && e.entryStatus !== "removed"
     );
 
-    // Adding a vehicle beyond the originally booked quantity bumps the
-    // booking's quantity to match, so drivers/quantity ratios (and
-    // downstream billing in Campaign Calculator) stay consistent.
     if (bookingItem && savedForThisVehicle.length > (bookingItem.quantity || 1)) {
       bookingItem.quantity = savedForThisVehicle.length;
     }
@@ -1245,115 +1242,6 @@ exports.submitOnRoadDetails = async (req, res) => {
     return errorResponse(res, error.message, null, 500);
   }
 };
-
-
-// exports.submitOnRoadDetails = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const { vehicleIndex, driverName, driverPhone,
-//       vehicleRegistrationNumber } = req.body;
-
-//     if (!driverName?.trim())
-//       return errorResponse(res, "Driver name is required", null, 400);
-//     if (!driverPhone?.trim())
-//       return errorResponse(res, "Driver phone is required", null, 400);
-//     if (!vehicleRegistrationNumber?.trim())
-//       return errorResponse(res, "Vehicle registration number is required", null, 400);
-
-//     const order = await Order.findById(id);
-//     if (!order) return errorResponse(res, "Order not found", null, 404);
-
-//     const vIdx = Number(vehicleIndex);
-//     const bookingItem = order.bookingItems[vIdx];
-//     if (!bookingItem) return errorResponse(res, "Vehicle not found in this order", null, 404);
-
-//     const requiredQty = bookingItem.quantity || 1;
-
-//     // ── Availability re-check before saving driver ──────────────────
-//     const savedForThisVehicle = order.onRoadExecutionArray.filter(
-//       (e) => e.vehicleIndex === vIdx
-//     );
-
-//     // Only enforce the check while we still need more drivers/vehicles
-//     // for this booking item (avoids blocking edits after quota already met)
-//     if (savedForThisVehicle.length < requiredQty) {
-//       try {
-//         const availability = await checkVehicleAvailability({
-//           vehicleType: bookingItem.vehicleType,
-//           quantity: requiredQty,
-//           fromDate: bookingItem.fromDate,
-//           toDate: bookingItem.toDate,
-//         });
-
-//         if (!availability.available) {
-//           return errorResponse(
-//             res,
-//             `You are required ${availability.requiredQuantity} vehicle(s) but only ${availability.availableCount} available`,
-//             null,
-//             400
-//           );
-//         }
-//       } catch (availErr) {
-//         return errorResponse(res, availErr.message || "Vehicle availability check failed", null, 400);
-//       }
-//     }
-//     // ──────────────────────────────────────────────────────────────
-
-//     const uploadedBy =
-//       Number(req.user.isAdmin) === 0
-//         ? req.user.username
-//         : order.handlerName || req.user?.username || "Admin";
-
-//     const gatepassFile = (req.files || []).find(f => f.fieldname === "gatepassPhoto");
-//     const photoUrl = gatepassFile ? getFileUrl(gatepassFile) : "";
-
-//     const newEntry = {
-//       vehicleIndex: vIdx,
-//       driverName: driverName.trim(),
-//       driverPhone: driverPhone.trim(),
-//       vehicleRegistrationNumber: vehicleRegistrationNumber.trim().toUpperCase(),
-//       gatepassPhoto: photoUrl,
-//       onRoadStatus: 0,
-//       uploadedBy,
-//       uploadedAt: new Date(),
-//     };
-//     order.onRoadExecutionArray.push(newEntry);
-
-//     const savedSubEntry = order.onRoadExecutionArray[order.onRoadExecutionArray.length - 1];
-
-//     order.onRoadDriverHistory.push({
-//       vehicleIndex: vIdx,
-//       entryId: savedSubEntry._id,
-//       action: "created",
-//       driverName: driverName.trim(),
-//       driverPhone: driverPhone.trim(),
-//       vehicleRegistrationNumber: vehicleRegistrationNumber.trim().toUpperCase(),
-//       gatepassPhoto: photoUrl,
-//       changedBy: uploadedBy,
-//       changedAt: new Date(),
-//       changedFields: {},
-//     });
-
-//     // Recompute after push (fresh count including the new entry)
-//     const savedForThisVehicleAfter = order.onRoadExecutionArray.filter(
-//       (e) => e.vehicleIndex === vIdx
-//     );
-
-//     if (savedForThisVehicleAfter.length >= requiredQty) {
-//       order.onRoadExecutionArray.forEach((e) => {
-//         if (e.vehicleIndex === vIdx) {
-//           e.onRoadStatus = 1;
-//         }
-//       });
-//     }
-
-//     await order.save();
-//     return successResponse(res, "Driver details saved", { order });
-
-//   } catch (error) {
-//     return errorResponse(res, error.message, null, 500);
-//   }
-// };
 
 
 
@@ -1408,63 +1296,6 @@ exports.updateOnRoadDriver = async (req, res) => {
     return errorResponse(res, error.message, null, 500);
   }
 };
-
-
-// exports.addOnRoadIssue = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-
-//     const { vehicleIndex, issueDescription, vehicleRegistrationNumber } = req.body;
-
-//     if (!issueDescription?.trim())
-//       return errorResponse(res, "Issue description is required", null, 400);
-
-//     const order = await Order.findById(id);
-//     if (!order) return errorResponse(res, "Order not found", null, 404);
-
-
-//     let entry;
-//     if (vehicleRegistrationNumber?.trim()) {
-//       entry = order.onRoadExecutionArray.find(
-//         (e) => e.vehicleRegistrationNumber === vehicleRegistrationNumber.trim().toUpperCase()
-//       );
-//     } else {
-//       entry = order.onRoadExecutionArray.find(
-//         (e) => e.vehicleIndex === Number(vehicleIndex) && e.onRoadStatus === 1
-//       );
-//     }
-
-//     const reportedBy =
-//       Number(req.user.isAdmin) === 0
-//         ? req.user.username
-//         : order.handlerName || req.user?.username || "Admin";
-
-//     const photoFile = (req.files || []).find(f => f.fieldname === "issuePhoto");
-
-//     if (photoFile) {
-//       const err = validateFile(photoFile, "Issue photo");
-//       if (err) return errorResponse(res, err, null, 400);
-//     }
-
-//     const photoUrl = photoFile ? getFileUrl(photoFile) : "";
-
-//     order.onRoadIssues.push({
-//       vehicleIndex: entry ? entry.vehicleIndex : Number(vehicleIndex),
-//       driverName: entry?.driverName || "",
-//       vehicleRegNo: entry?.vehicleRegistrationNumber || vehicleRegistrationNumber || "",
-//       issueDescription: issueDescription.trim(),
-//       issuePhoto: photoUrl,
-//       status: "open",
-//       reportedBy,
-//       reportedAt: new Date(),
-//     });
-
-//     await order.save();
-//     return successResponse(res, "Issue reported successfully", { order });
-//   } catch (error) {
-//     return errorResponse(res, error.message, null, 500);
-//   }
-// };
 
 exports.addOnRoadIssue = async (req, res) => {
   try {
@@ -3239,10 +3070,7 @@ exports.releaseOnRoadVehicle = async (req, res) => {
   }
 };
 
-// ── Campaign Calculator ────────────────────────────────────────────────────
-// Pure read-only derivation from existing data (onRoadExecutionArray,
-// onRoadDriverHistory, extraKmDetailsArray) — no new persisted state.
-// Gives a day-by-day, vehicle-wise billing breakdown for a running campaign.
+
 
 const dateKey = (d) => new Date(d).toISOString().slice(0, 10);
 
@@ -3252,28 +3080,12 @@ function addDaysUTC(dateKeyStr, days) {
   return dateKey(d);
 }
 
-// Inclusive day count between two YYYY-MM-DD keys, used to resolve the
-// "split" Extra KM/Hours distributionMethod (value ÷ number of days in the
-// record's own fromDate-toDate range).
 function daysBetweenInclusive(fromKeyStr, toKeyStr) {
   const f = new Date(fromKeyStr + "T00:00:00.000Z");
   const t = new Date(toKeyStr + "T00:00:00.000Z");
   return Math.round((t - f) / 86400000) + 1;
 }
 
-// Extra KM/Hours records for one vehicle-type slot, grouped by entryId (each
-// vehicle registration tracked separately) so that two different vehicles
-// running extra KM/Hours on the same day both get counted — instead of one
-// "winner" silently swallowing the other's usage.
-//
-// Within the SAME entryId, adding Extra KM/Hours a second time is treated as
-// a full replacement of that vehicle's earlier record — NOT a day-by-day
-// overlap pick. The single most-recently-added record per entryId is kept;
-// any older record for that same entryId is entirely discarded, even for
-// days the older record covered but the newer one doesn't (e.g. old record
-// 29→30 Jul gets fully superseded by a newer 29→29 Jul record — 30 Jul then
-// has zero extra KM/Hours for that vehicle, it does NOT fall back to the
-// old record).
 function resolveEffectiveExtraKmRecords(slotRecords) {
   const byEntry = new Map();
   slotRecords.forEach((rec) => {
@@ -3286,9 +3098,7 @@ function resolveEffectiveExtraKmRecords(slotRecords) {
   return Array.from(byEntry.values());
 }
 
-// Replays onRoadDriverHistory events for one entry to find its
-// driver/registration state as of a given day, and whether it was
-// active (created & not yet removed) on that day.
+
 function resolveEntryStateForDay(entry, historyForEntry, dayKey) {
   const eventsUpToDay = historyForEntry.filter((h) => dateKey(h.changedAt) <= dayKey);
   if (eventsUpToDay.length === 0) return null; // not created yet as of this day
@@ -3344,35 +3154,18 @@ function resolveEntryStateForDay(entry, historyForEntry, dayKey) {
     driverPhone: state.driverPhone,
     vehicleRegistrationNumber: state.vehicleRegistrationNumber,
     createdOnThisDay,
-    // "replacement" = this slot's vehicle was created after the campaign's
-    // own start date, i.e. it filled in mid-campaign rather than at kickoff.
-    isReplacement: false, // set by caller once campaignStart is known
+    isReplacement: false, 
   };
 }
 
-// Extra KM/Hours are resolved per vehicle-type SLOT (vehicleIndex), not per
-// currently-active entryId — a record logged against a replaced-out vehicle
-// (entryId of Vehicle A) keeps applying to any day within its own
-// fromDate-toDate range even after Vehicle B takes over the slot. Records
-// are never deleted/migrated/duplicated for this; this only changes which
-// records are "in scope" during resolution. Inclusive day-count between two
-// day-key strings (or dates), used to divide a "split"-distribution record's
-// total evenly across its fromDate-toDate range.
+
 function daysBetweenInclusive(fromDate, toDate) {
   const f = new Date(`${dateKey(fromDate)}T00:00:00.000Z`);
   const t = new Date(`${dateKey(toDate)}T00:00:00.000Z`);
   return Math.max(Math.round((t - f) / (1000 * 60 * 60 * 24)) + 1, 1);
 }
 
-// Default campaign working window when no actual hours were logged for an
-// entry/day: 4:00 PM – Midnight (8 hours), matching the frontend's
-// NEXT_PUBLIC_DEFAULT_LOGIN_TIME/NEXT_PUBLIC_DEFAULT_LOGOUT_TIME defaults
-// used by LogHoursModal. When an entry/day DOES have a real dailyHoursLog
-// entry, that log's own startTime/endTime is used as the window instead
-// (see resolveWorkWindow below) — this constant is only the fallback.
-// Env vars are entered as "HH:mm" wall-clock strings (e.g. "18:30"), not
-// plain decimal hours — parse them into a decimal hour (18.5) instead of
-// `Number(...)`, which silently produced NaN for any "HH:mm" value.
+
 function parseTimeToDecimalHour(str, fallback) {
   const m = String(str || "").trim().match(/^(\d{1,2}):(\d{2})$/);
   if (!m) {
@@ -3383,30 +3176,14 @@ function parseTimeToDecimalHour(str, fallback) {
 }
 
 const DEFAULT_WORK_START_HOUR = parseTimeToDecimalHour(process.env.DEFAULT_WORK_START_HOUR, 16);
-// If the logout time is numerically <= the login time, the shift crosses
-// midnight (e.g. 18:30 -> 02:30), so roll it into the next day (26.5).
+
 let _rawWorkEndHour = parseTimeToDecimalHour(process.env.DEFAULT_WORK_END_HOUR, 24);
 if (_rawWorkEndHour <= DEFAULT_WORK_START_HOUR) _rawWorkEndHour += 24;
 const DEFAULT_WORK_END_HOUR = _rawWorkEndHour;
 
-// The default work window's hours (e.g. 16:00-24:00) are meant to represent
-// wall-clock IST hours ("4:00 PM - Midnight IST"), matching the frontend's
-// NEXT_PUBLIC_DEFAULT_LOGIN_TIME/LOGOUT_TIME which are entered/displayed as
-// IST times by staff. They must therefore be anchored as literal IST instants
-// (UTC+5:30), NOT as raw UTC hours — anchoring them as UTC hours previously
-// made a "4:00 PM-Midnight" window actually fall at 9:30 PM-5:30 AM IST once
-// rendered in the browser's local timezone, which is what every OTHER
-// timestamp in this response (real event timestamps) is rendered in. Building
-// every timeline boundary — synthetic default-window ones AND real
-// event-derived ones — as genuine instants that equal the intended IST
-// wall-clock time keeps a single, consistent local-time rendering convention
-// usable everywhere on the frontend (see fmtClock/fmtDatetime in
-// CampaignCalculatorTab.tsx).
 const IST_OFFSET = "+05:30";
 function istWallClock(dayKeyStr, hourDecimal) {
-  // hourDecimal may be fractional (18.5 -> 18:30) and/or >= 24 (rollover into
-  // a following day, e.g. 26.5 -> next day 02:30), handled by converting to
-  // total minutes and letting addDaysUTC carry the day portion.
+
   const totalMinutes = Math.round(hourDecimal * 60);
   const dayOffset = Math.floor(totalMinutes / (24 * 60));
   const minutesInDay = totalMinutes - dayOffset * 24 * 60;
@@ -3416,11 +3193,7 @@ function istWallClock(dayKeyStr, hourDecimal) {
   return new Date(`${targetDay}T${hh}:${mm}:00${IST_OFFSET}`);
 }
 
-// Resolves the actual working window [start,end] for one entry/day: prefers
-// the real logged startTime/endTime from dailyHoursLogArray for that
-// entry/day (when it's a real timed log, not a full-day-absence placeholder
-// entry); otherwise falls back to the default 4PM-Midnight IST window built
-// on top of dayKeyStr (see istWallClock above).
+
 function resolveWorkWindow(dayKeyStr, hoursLog) {
   if (hoursLog && hoursLog.startTime && hoursLog.endTime && !hoursLog.isAbsentDay) {
     const start = new Date(hoursLog.startTime);
@@ -3430,23 +3203,10 @@ function resolveWorkWindow(dayKeyStr, hoursLog) {
     }
   }
   const start = istWallClock(dayKeyStr, DEFAULT_WORK_START_HOUR);
-  const end = istWallClock(dayKeyStr, DEFAULT_WORK_END_HOUR); // 24 correctly rolls into next-day 00:00 IST
+  const end = istWallClock(dayKeyStr, DEFAULT_WORK_END_HOUR);
   return { start, end };
 }
 
-// Builds the classified running-time event sequence for one entry/day: a
-// sorted walk across window-start, every issue's reportedAt/resolvedAt, and
-// every (non-replacement) unavailable-history reportedAt/resolvedAt, all
-// clipped into [windowStart, entryEndCap]. Gaps are running by default;
-// they become "issue" while an issue is open, and "unavailable" while a
-// standalone unavailable-status record is open. If this entry was replaced
-// this day (a "replaced" record with a `replacedAt`), that timestamp caps
-// the entry's own day (the new entryId picks up the rest via its own
-// creation-clip) and — since the vehicle demonstrably never resumed running
-// after its first down event that day — every gap from that first down
-// event onward through the cap is treated as "unavailable" too, so an
-// informational "marked unavailable" status change sitting inside that span
-// doesn't get misread as a return to running.
 function buildEntryDayTimeline(windowStart, windowEnd, issuesForEntry, unavailForEntry, entryCreatedClip) {
   const clip = (d) => {
     if (!d) return null;
@@ -3672,17 +3432,7 @@ exports.getCampaignCalculator = async (req, res) => {
         (hourCompByVehicle[c.vehicleIndex] = hourCompByVehicle[c.vehicleIndex] || []).push(c);
       }
     }
-    // Slot-level (entryId: null) compensation grants are a "position"
-    // entitlement, not tied to one specific vehicle — they should only be
-    // attributed to whichever entry is genuinely active (currently running)
-    // that day. A released/replaced entry has already "completed" as of its
-    // release day and must not keep picking up slot-level compensation
-    // granted for days it's no longer occupying the position — that
-    // compensation belongs to whichever vehicle (old, while active, or the
-    // replacement, once it takes over) is actually running the slot that day.
-    // Entry-specific grants (tied to this exact entryId) always apply — the
-    // caller already stops calling this for an entry once it's past its own
-    // release day, so no extra clipping is needed for that case.
+  
     function compensationHoursFor(entryId, vehicleIndex, dayKeyStr, isActiveToday = true) {
       const inRange = (c) => dateKey(c.fromDate) <= dayKeyStr && dateKey(c.toDate) >= dayKeyStr;
       const entryGrants = (hourCompByEntry[entryId] || []).filter(inRange);
@@ -3704,13 +3454,7 @@ exports.getCampaignCalculator = async (req, res) => {
       arr.sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt))
     );
 
-    // Extra KM/Hours records logged against a specific vehicle (entryId) are
-    // "completed" once that vehicle is released/replaced — they must not
-    // keep applying on days after release, even if the record's own toDate
-    // extends further. Clips each entry-specific effective record's toDate
-    // to that entry's release day (day of its "removed" history event), if
-    // it was ever removed. Campaign-level records (entryId: null) aren't
-    // tied to one vehicle and are left untouched.
+
     function clipExtraKmRecordsToEntryLifetime(records) {
       return records.map((rec) => {
         if (!rec.entryId) return rec;
@@ -3887,8 +3631,7 @@ exports.getCampaignCalculator = async (req, res) => {
       return resolved;
     }
 
-    // Precompute, once per vehicle-type slot, the single effective (latest
-    // per entryId) Extra KM/Hours record — see resolveEffectiveExtraKmRecords.
+
     const effectiveExtraKmRecordsByVehicle = {};
     bookingItems.forEach((item, vehicleIndex) => {
       const slotRecords = extraKmDetailsArray.filter((e) => e.vehicleIndex === vehicleIndex);
