@@ -264,6 +264,16 @@ const projectCodeCommentSchema = new mongoose.Schema(
   { _id: true }
 );
 
+const salesFinalClosedWonCommentSchema = new mongoose.Schema(
+  {
+    document: { type: String, default: "" },
+    notes: { type: String, default: "" },
+    uploadedBy: { type: String, default: "" },
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 const closedLostCommentSchema = new mongoose.Schema(
   {
     document: { type: String, default: "" },
@@ -740,6 +750,7 @@ orderEditHistory: { type: [orderEditHistorySchema], default: [] },
     handlerAssignmentHistory: { type: [handlerAssignmentSchema], default: [] },
     originalSalesHandlerName: { type: String, default: "" },
     projectCodeCommentsArray: { type: [projectCodeCommentSchema], default: [] },
+    salesFinalClosedWonArray: { type: [salesFinalClosedWonCommentSchema], default: [] },
     closedLostCommentsArray: { type: [closedLostCommentSchema], default: [] },
     orderClosedWonArray: { type: [orderClosedWonSchema], default: [] },
     orderClosedLostArray: { type: [orderClosedLostSchema], default: [] },
@@ -753,6 +764,8 @@ orderEditHistory: { type: [orderEditHistorySchema], default: [] },
         "negotiationReview",
         "closedWon",
         "projectCodeCreation",
+        "salesFinalClosedWon",
+        "invoiceGeneration",
         "closedLost",
       ],
       default: "enquiry",

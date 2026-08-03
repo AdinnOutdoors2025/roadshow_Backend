@@ -31,7 +31,9 @@ async function findDateConflictsForOrder(order) {
     const orderFinished =
       order.pipelineStatus === "closedWon" ||
       order.pipelineStatus === "closedLost" ||
-      order.salesPipelineStatus === "closedLost";
+      order.salesPipelineStatus === "closedLost" ||
+      order.salesPipelineStatus === "salesFinalClosedWon" ||
+      order.salesPipelineStatus === "invoiceGeneration";
     const currentReserved = orderFinished
       ? []
       : (order.onRoadExecutionArray || [])
@@ -78,7 +80,9 @@ async function findDateConflictsForOrder(order) {
         const otherFinished =
           otherOrder.pipelineStatus === "closedWon" ||
           otherOrder.pipelineStatus === "closedLost" ||
-          otherOrder.salesPipelineStatus === "closedLost";
+          otherOrder.salesPipelineStatus === "closedLost" ||
+          otherOrder.salesPipelineStatus === "salesFinalClosedWon" ||
+          otherOrder.salesPipelineStatus === "invoiceGeneration";
 
         const reservedVehicles = otherFinished
           ? []

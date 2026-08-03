@@ -21,6 +21,8 @@ const SALES_STAGE_ORDER = [
   "negotiationReview",
   "closedWon",
   "projectCodeCreation",
+  "salesFinalClosedWon",
+  "invoiceGeneration",
   "closedLost",
 ];
 
@@ -100,7 +102,9 @@ exports.getSalesPipeline = async (req, res) => {
     const isOrderFinished = (o) =>
       o.pipelineStatus === "closedWon" ||
       o.pipelineStatus === "closedLost" ||
-      o.salesPipelineStatus === "closedLost";
+      o.salesPipelineStatus === "closedLost" ||
+      o.salesPipelineStatus === "salesFinalClosedWon" ||
+      o.salesPipelineStatus === "invoiceGeneration";
 
     const vehicleTypeMap = {};
     allBookingSnapshots.forEach((o) => {
@@ -220,6 +224,18 @@ exports.updateSalesPipeline = async (req, res) => {
         400
       );
     }
+    if (
+      (salesPipelineStatus === "salesFinalClosedWon" || salesPipelineStatus === "invoiceGeneration") &&
+      !["projectCodeCreation", "salesFinalClosedWon"].includes(oldStage)
+    ) {
+      return errorResponse(
+        res,
+        "Cannot move directly to Closed Won/Invoice Generation stage — please move through Project Code Creation stage first.",
+        null,
+        400
+      );
+    }
+
     const isStaffAdmin = Number(req.user.isAdmin) === 0;
     // const movedBy = order.salesHandlerName || "Admin";
     const movedBy = req.user?.username || order.salesHandlerName || "Admin";
@@ -242,6 +258,34 @@ exports.updateSalesPipeline = async (req, res) => {
     if (order.salesPipelineStatus === "projectCodeCreation") {
       if (salesPipelineStatus === "closedLost") {
         // Mail-sent count no longer blocks moving to Closed Lost.
+      } else if (salesPipelineStatus === "salesFinalClosedWon") {
+        const mailSent = (order.projectMailLogs || []).length > 0;
+        const codeCreated = (order.projectCodeArray || []).length > 0;
+        if (!mailSent || !codeCreated) {
+          return errorResponse(
+            res,
+            "Please complete the Project Code Creation stage",
+            null,
+            400
+          );
+        }
+      } else if (salesPipelineStatus === "invoiceGeneration") {
+        const mailSent = (order.projectMailLogs || []).length > 0;
+        const codeCreated = (order.projectCodeArray || []).length > 0;
+        if (!mailSent || !codeCreated) {
+          return errorResponse(
+            res,
+            "Please complete the Project Code Creation stage",
+            null,
+            400
+          );
+        }
+        return errorResponse(
+          res,
+          "Please move the Closed Won stage completed",
+          null,
+          400
+        );
       } else {
         return errorResponse(
           res,
@@ -250,6 +294,26 @@ exports.updateSalesPipeline = async (req, res) => {
           400
         );
       }
+    }
+
+    if (order.salesPipelineStatus === "salesFinalClosedWon") {
+      if (salesPipelineStatus !== "invoiceGeneration") {
+        return errorResponse(
+          res,
+          "Closed Won stage can only move to Invoice Generation.",
+          null,
+          400
+        );
+      }
+    }
+
+    if (order.salesPipelineStatus === "invoiceGeneration") {
+      return errorResponse(
+        res,
+        "Invoice Generation is the final stage — this order cannot be moved further.",
+        null,
+        400
+      );
     }
 
 
@@ -409,6 +473,7 @@ exports.uploadStageDocument = async (req, res) => {
       salesPoDocument: "Sales PO",
       poCommentDocument: "PO Comment",
       projectCodeCommentDocument: "Project Code Comment",
+      salesFinalClosedWonDocument: "Closed Won Comment",
       closedLostCommentDocument: "Closed Lost Comment",
     };
     for (const file of uploadedFiles) {
@@ -531,6 +596,22 @@ if (stage === "closedWon") {
         uploadedBy,
         uploadedAt: new Date(),
       });
+    }
+
+    if (stage === "salesFinalClosedWon") {
+      // Notes, document, and image are all optional here — no restriction.
+      const fcwFile = uploadedFiles.find(
+        (f) => f.fieldname === "salesFinalClosedWonDocument"
+      );
+      const fcwNotes = req.body.salesFinalClosedWonNotes || "";
+      if (fcwFile || fcwNotes) {
+        order.salesFinalClosedWonArray.push({
+          document: getFilePath(fcwFile),
+          notes: fcwNotes.trim(),
+          uploadedBy,
+          uploadedAt: new Date(),
+        });
+      }
     }
 
    if (stage === "closedLost") {

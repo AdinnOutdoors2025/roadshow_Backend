@@ -124,6 +124,65 @@ const getAdminProfile = (req, res) => {
   });
 };
 
+// Self-service profile update — works for both "admin" and "staffAdmin" roles.
+// Identifies the account via req.user.id (from the JWT), never a route param,
+// so a logged-in user can only ever edit their own account here.
+const updateOwnProfile = async (req, res) => {
+  const { username, email, password, confirmPassword } = req.body;
+
+  try {
+    const user = await AdminUser.findById(req.user.id);
+    if (!user) return errorResponse(res, 'Account not found', null, 404);
+
+    if (username !== undefined) {
+      if (!/^[a-zA-Z0-9]{4,20}$/.test(username.trim()))
+        return errorResponse(res, 'Username must be 4-20 alphanumeric characters', null, 400);
+      user.username = username.trim();
+    }
+
+    if (email !== undefined) {
+      if (!EMAIL_REGEX.test(email.trim()))
+        return errorResponse(res, 'Please provide a valid email address', null, 400);
+
+      const existing = await AdminUser.findOne({
+        email: email.trim().toLowerCase(),
+        _id: { $ne: user._id },
+      });
+      if (existing) return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
+
+      user.email = email.trim().toLowerCase();
+    }
+
+    if (password) {
+      if (password.length < 6)
+        return errorResponse(res, 'Password must be at least 6 characters', null, 400);
+      if (password !== confirmPassword)
+        return errorResponse(res, 'Password and Confirm Password do not match', null, 400);
+      user.password = password; // pre-save hook hashes this
+    }
+
+    await user.save();
+
+    const token = generateToken(user);
+
+    return successResponse(res, 'Profile updated successfully', {
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        isAdmin: user.isAdmin,
+      },
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
+    }
+    return errorResponse(res, 'Server error', err.message);
+  }
+};
+
 const createStaffAdmin = async (req, res) => {
   const { username, email, password, phone } = req.body;
 
@@ -141,15 +200,10 @@ const createStaffAdmin = async (req, res) => {
       return errorResponse(res, 'Password must be at least 6 characters', null, 400);
 
     const existing = await AdminUser.findOne({
-      $or: [
-        { username: username.trim() },
-        { email: email.trim().toLowerCase() },
-      ],
+      email: email.trim().toLowerCase(),
     });
 
     if (existing) {
-      if (existing.username === username.trim())
-        return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
       return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
     }
 
@@ -179,10 +233,7 @@ const createStaffAdmin = async (req, res) => {
 
   } catch (err) {
     if (err.code === 11000) {
-      const field = Object.keys(err.keyPattern || {})[0];
-      if (field === 'email')
-        return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
-      return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+      return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
     }
     return errorResponse(res, 'Server error', err.message);
   }
@@ -238,10 +289,7 @@ const updateStaffAdmin = async (req, res) => {
     });
   } catch (err) {
     if (err.code === 11000) {
-      const field = Object.keys(err.keyPattern || {})[0];
-      if (field === 'email')
-        return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
-      return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+      return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
     }
     return errorResponse(res, 'Server error', err.message);
   }
@@ -262,4 +310,4 @@ const deleteStaffAdmin = async (req, res) => {
 
 
 
-module.exports = { registerAdmin, loginAdmin, getAdminProfile,createStaffAdmin, getAllStaffAdmins, updateStaffAdmin, deleteStaffAdmin };
+module.exports = { registerAdmin, loginAdmin, getAdminProfile, updateOwnProfile, createStaffAdmin, getAllStaffAdmins, updateStaffAdmin, deleteStaffAdmin };
