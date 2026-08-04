@@ -186,6 +186,7 @@ const vehicleChangeSchema = new mongoose.Schema(
     vehicleIndex: { type: Number, required: true },
     action: { type: String, enum: ["modified", "added", "removed"], default: "modified" },
     vehicleLabel: { type: String, default: "" },   // ← NEW: e.g. "2 Sided LED Models · Thoubal"
+    vehicleTypeId: { type: String, default: "" },
     changes: { type: [orderFieldChangeSchema], default: [] },
   },
   { _id: false }
@@ -567,6 +568,7 @@ const salesPipelineLogSchema = new mongoose.Schema(
     handlerName: { type: String, default: "" },
     movedAt: { type: Date, default: Date.now },
     notes: { type: String, default: "" },
+    logType: { type: String, enum: ["stage", "edit"], default: "stage" },
   },
   { _id: false }
 );

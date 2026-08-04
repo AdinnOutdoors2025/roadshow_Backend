@@ -405,14 +405,244 @@ exports.updateSalesPipeline = async (req, res) => {
       movedAt: new Date(),
     });
 
+    let autoMailError = null;
+    if (
+      oldStage === "closedWon" &&
+      salesPipelineStatus === "projectCodeCreation" &&
+      (order.projectMailLogs || []).length === 0
+    ) {
+      const autoTo = process.env.PROJECT_CODE_AUTO_MAIL_TO || "";
+      const autoCc = process.env.PROJECT_CODE_AUTO_MAIL_CC || "";
+      if (autoTo) {
+        try {
+          const { toArr, ccArr, subject } = await sendProjectCreationMail({
+            order,
+            to: autoTo,
+            cc: autoCc,
+            additionalNotes: "Auto-generated on moving to Project Code Creation stage.",
+          });
+          order.projectMailLogs.push({
+            sentTo: toArr.join(", "),
+            sentCc: ccArr.join(", "),
+            subject,
+            sentBy: movedBy,
+            sentAt: new Date(),
+            isResend: false,
+          });
+          order.salesPipelineLogs.push({
+            fromStage: salesPipelineStatus,
+            toStage: salesPipelineStatus,
+            movedBy,
+            handlerName: order.salesHandlerName || "",
+            movedAt: new Date(),
+            notes: `Project mail auto-sent to ${toArr.join(", ")}`,
+          });
+        } catch (mailErr) {
+          autoMailError = mailErr?.response?.data?.message || mailErr.message;
+          console.error("Auto project-code mail failed:", autoMailError);
+        }
+      } else {
+        console.warn(
+          "PROJECT_CODE_AUTO_MAIL_TO not configured; skipping auto project-code mail."
+        );
+      }
+    }
+
     await order.save();
     return successResponse(res, "Sales pipeline updated successfully", {
       order,
+      ...(autoMailError ? { autoMailError } : {}),
     });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
 };
+
+// Builds the Zoho project-code creation mail payload and posts it to the
+// mail service. Used both by the manual "Raise Project Creation Mail"
+// button and by the automatic mail fired when an order moves from
+// Order Confirmation (closedWon) to Project Code Creation.
+async function sendProjectCreationMail({ order, to, cc, subject, additionalNotes }) {
+  const subtotal = order.bookingItems.reduce(
+    (s, i) => s + (i.totalAmount || 0),
+    0
+  );
+  const totalNegotiated = order.salesNegotiationArray.reduce(
+    (s, n) => s + (n.amount || 0),
+    0
+  );
+  const taxable = subtotal;
+  const gstAmt = Math.floor(taxable * 0.18);
+  const finalAmt = taxable + gstAmt;
+
+  const latestPoEntry =
+    order.closedWonArray && order.closedWonArray.length > 0
+      ? order.closedWonArray[order.closedWonArray.length - 1]
+      : null;
+
+  const poDocumentPath = latestPoEntry?.salesPoDocument || "";
+
+  const vehicleTypeIds = [
+    ...new Set(
+      order.bookingItems
+        .map((item) => item.vehicleType)
+        .filter(Boolean)
+    ),
+  ];
+
+  const vehicleTypeDocs = await vehicletypes.find({
+    _id: { $in: vehicleTypeIds },
+  });
+
+  const vehicleTypeMap = {};
+  vehicleTypeDocs.forEach((vt) => {
+    vehicleTypeMap[vt._id.toString()] = vt.typeName;
+  });
+
+  const orders = order.bookingItems.map((item) => ({
+    vehicleType: vehicleTypeMap[item.vehicleType?.toString()] || item.vehicleType || "",
+    vehicleModel: item.vehicleModel || "",
+    campaignType:
+      item.campaignType === "Other"
+        ? item.otherCampaignType || "Other"
+        : item.campaignType || "",
+    fromDate: item.fromDate
+      ? new Date(item.fromDate).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+      : "",
+    toDate: item.toDate
+      ? new Date(item.toDate).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+      : "",
+    startDate: item.fromDate || "",
+    endDate: item.toDate || "",
+    totalDays: item.totalDays || 0,
+    campaignLocation: item.campaignLocation || "",
+    fromLocation: item.campaignLocation || "",
+    toLocation: item.toLocation || "",
+    state: item.state || "",
+    city: item.city || "",
+    vehicleCount: item.quantity || 1,
+    rental: item.rentalCost || 0,
+    rtoCharges: item.rtoCost || 0,
+    extraKm: item.extraKmCost || 0,
+    extraKmCost: item.extraKmCost || 0,
+    extraHours: item.extraHourCost || 0,
+    extraHourCost: item.extraHourCost || 0,
+    promotorCharges: item.promoterCost || 0,
+    additionalCharges: item.additionalNet || 0,
+    subtotal: item.subtotal || 0,
+    totalAmount: item.totalAmount || 0,
+    needPromoter: item.needPromoter || false,
+    promoterType: item.promoterType || "",
+    promoterGender: item.promoterGender || "",
+    promoterLanguage: Array.isArray(item.promoterLanguage)
+      ? item.promoterLanguage.join(", ")
+      : item.promoterLanguage || "",
+    promoterQuantity: item.promoterQuantity || 0,
+  }));
+
+  const form = new FormData();
+
+  const finalSubject =
+    subject || `Project Code Creation Request - ${order.orderId} - ${order.name}`;
+
+  const scalarFields = {
+    mailtype: "roadshowprojector",
+    subject: finalSubject,
+    customerType: order.customerType,
+    userName: order.name,
+    userEmail: order.email || "",
+    userContactNumber: order.phone,
+    orderId: order.orderId,
+    orderDate: new Date(order.createdAt).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }),
+    gstNumber: order.gstNumber || "",
+    companyName: order.companyName || "",
+    designation: order.designation || "",
+    salesHandlerName: order.salesHandlerName || "",
+    additionalNotes: additionalNotes || "",
+    subtotal,
+    discount: totalNegotiated,
+    taxable,
+    gst: gstAmt,
+    totalAmount: finalAmt,
+  };
+
+  Object.entries(scalarFields).forEach(([key, value]) => {
+    form.append(key, String(value));
+  });
+
+  const toArr = Array.isArray(to)
+    ? to.flatMap((e) => e.split(",").map((x) => x.trim())).filter(Boolean)
+    : String(to || "").split(",").map((e) => e.trim()).filter(Boolean);
+
+  const ccArr = cc
+    ? Array.isArray(cc)
+      ? cc.flatMap((e) => e.split(",").map((x) => x.trim())).filter(Boolean)
+      : String(cc).split(",").map((e) => e.trim()).filter(Boolean)
+    : [];
+
+  if (toArr.length === 0) {
+    throw new Error("Project creation mail requires at least one recipient");
+  }
+
+  toArr.forEach((email) => form.append("to[]", email));
+  ccArr.forEach((email) => form.append("cc[]", email));
+
+  form.append("orders", JSON.stringify(orders));
+
+  if (poDocumentPath) {
+    if (poDocumentPath.startsWith("http")) {
+      const fileResponse = await axios.get(poDocumentPath, {
+        responseType: "stream",
+      });
+
+      const fileName = path.basename(new URL(poDocumentPath).pathname);
+
+      form.append("poDocument", fileResponse.data, {
+        filename: fileName,
+        contentType:
+          fileResponse.headers["content-type"] ||
+          "application/octet-stream",
+      });
+    } else {
+      const absolutePath = path.join(
+        __dirname,
+        "../../public",
+        poDocumentPath
+      );
+      if (fs.existsSync(absolutePath)) {
+        form.append(
+          "poDocument",
+          fs.createReadStream(absolutePath),
+          path.basename(absolutePath)
+        );
+      }
+    }
+  }
+
+  const mailResponse = await axios.post(
+    process.env.CODECREATION_API_URL,
+    form,
+    { headers: form.getHeaders() }
+  );
+
+  if (mailResponse.data?.status !== "success") {
+    throw new Error(mailResponse.data?.message || "Mail sending failed");
+  }
+
+  return { toArr, ccArr, subject: finalSubject };
+}
 
 exports.uploadStageDocument = async (req, res) => {
   try {
@@ -625,204 +855,30 @@ if (stage === "closedWon") {
 exports.sendProjectMail = async (req, res) => {
   try {
     const { id } = req.params;
-    const { from, to, cc, additionalNotes, subject } = req.body;
+    const { to, cc, additionalNotes, subject } = req.body;
 
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
     const isResend = order.projectMailLogs && order.projectMailLogs.length > 0;
 
-
-    const subtotal = order.bookingItems.reduce(
-      (s, i) => s + (i.totalAmount || 0),
-      0
-    );
-    const totalNegotiated = order.salesNegotiationArray.reduce(
-      (s, n) => s + (n.amount || 0),
-      0
-    );
-    const taxable = subtotal;
-    const gstAmt = Math.floor(taxable * 0.18);
-    const finalAmt = taxable + gstAmt;
-
-
-    const latestPoEntry =
-      order.closedWonArray && order.closedWonArray.length > 0
-        ? order.closedWonArray[order.closedWonArray.length - 1]
-        : null;
-
-    const poDocumentPath = latestPoEntry?.salesPoDocument || "";
-
-    const vehicleTypeIds = [
-      ...new Set(
-        order.bookingItems
-          .map((item) => item.vehicleType)
-          .filter(Boolean)
-      ),
-    ];
-
-    const vehicleTypeDocs = await vehicletypes.find({
-      _id: { $in: vehicleTypeIds },
-    });
-
-    const vehicleTypeMap = {};
-    vehicleTypeDocs.forEach((vt) => {
-      vehicleTypeMap[vt._id.toString()] = vt.typeName;
-    });
-
-
-    const orders = order.bookingItems.map((item) => ({
-
-      vehicleType: vehicleTypeMap[item.vehicleType?.toString()] || item.vehicleType || "",
-      vehicleModel: item.vehicleModel || "",
-      campaignType:
-        item.campaignType === "Other"
-          ? item.otherCampaignType || "Other"
-          : item.campaignType || "",
-      fromDate: item.fromDate
-        ? new Date(item.fromDate).toLocaleDateString("en-IN", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        })
-        : "",
-      toDate: item.toDate
-        ? new Date(item.toDate).toLocaleDateString("en-IN", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        })
-        : "",
-      startDate: item.fromDate || "",
-      endDate: item.toDate || "",
-      totalDays: item.totalDays || 0,
-      campaignLocation: item.campaignLocation || "",
-      fromLocation: item.campaignLocation || "",
-      toLocation: item.toLocation || "",
-      state: item.state || "",
-      city: item.city || "",
-      vehicleCount: item.quantity || 1,
-      rental: item.rentalCost || 0,
-      rtoCharges: item.rtoCost || 0,
-      extraKm: item.extraKmCost || 0,
-      extraKmCost: item.extraKmCost || 0,
-      extraHours: item.extraHourCost || 0,
-      extraHourCost: item.extraHourCost || 0,
-      promotorCharges: item.promoterCost || 0,
-      additionalCharges: item.additionalNet || 0,
-      subtotal: item.subtotal || 0,
-      totalAmount: item.totalAmount || 0,
-      needPromoter: item.needPromoter || false,
-      promoterType: item.promoterType || "",
-      promoterGender: item.promoterGender || "",
-      promoterLanguage: Array.isArray(item.promoterLanguage)
-        ? item.promoterLanguage.join(", ")
-        : item.promoterLanguage || "",
-      promoterQuantity: item.promoterQuantity || 0,
-    }));
-
-
-    const form = new FormData();
-
-    const scalarFields = {
-      mailtype: "roadshowprojector",
-      subject:
-        subject ||
-        `Project Code Creation Request - ${order.orderId} - ${order.name}`,
-      customerType: order.customerType,
-      userName: order.name,
-      userEmail: order.email || "",
-      userContactNumber: order.phone,
-      orderId: order.orderId,
-      orderDate: new Date(order.createdAt).toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }),
-      gstNumber: order.gstNumber || "",
-      companyName: order.companyName || "",
-      designation: order.designation || "",
-      salesHandlerName: order.salesHandlerName || "",
-      additionalNotes: additionalNotes || "",
-      subtotal,
-      discount: totalNegotiated,
-      taxable,
-      gst: gstAmt,
-      totalAmount: finalAmt,
-    };
-
-    Object.entries(scalarFields).forEach(([key, value]) => {
-      form.append(key, String(value));
-    });
-
-
-    const toArr = Array.isArray(to)
-      ? to.flatMap((e) => e.split(",").map((x) => x.trim())).filter(Boolean)
-      : to.split(",").map((e) => e.trim()).filter(Boolean);
-
-
-    const ccArr = cc
-      ? Array.isArray(cc)
-        ? cc.flatMap((e) => e.split(",").map((x) => x.trim())).filter(Boolean)
-        : cc.split(",").map((e) => e.trim()).filter(Boolean)
-      : [];
-    toArr.forEach((email) => form.append("to[]", email));
-    ccArr.forEach((email) => form.append("cc[]", email));
-
-
-    form.append("orders", JSON.stringify(orders));
-
-
-    if (poDocumentPath) {
-      if (poDocumentPath.startsWith("http")) {
-        const fileResponse = await axios.get(poDocumentPath, {
-          responseType: "stream",
-        });
-
-        const fileName = path.basename(new URL(poDocumentPath).pathname);
-
-        form.append("poDocument", fileResponse.data, {
-          filename: fileName,
-          contentType:
-            fileResponse.headers["content-type"] ||
-            "application/octet-stream",
-        });
-      } else {
-        const absolutePath = path.join(
-          __dirname,
-          "../../public",
-          poDocumentPath
-        );
-        if (fs.existsSync(absolutePath)) {
-          form.append(
-            "poDocument",
-            fs.createReadStream(absolutePath),
-            path.basename(absolutePath)
-          );
-        }
-      }
-    }
-
-
-    const mailResponse = await axios.post(
-      process.env.CODECREATION_API_URL,
-      form,
-      { headers: form.getHeaders() }
-    );
-
-
-    if (
-      mailResponse.data?.status !== "success"
-    ) {
+    let toArr, ccArr, finalSubject;
+    try {
+      ({ toArr, ccArr, subject: finalSubject } = await sendProjectCreationMail({
+        order,
+        to,
+        cc,
+        subject,
+        additionalNotes,
+      }));
+    } catch (mailErr) {
       return errorResponse(
         res,
-        mailResponse.data?.message || "Mail sending failed",
+        mailErr?.response?.data?.message || mailErr.message,
         null,
         500
       );
     }
-
-
 
     const sentBy =
       req.user?.username || order.salesHandlerName || "Admin";
@@ -830,9 +886,7 @@ exports.sendProjectMail = async (req, res) => {
     order.projectMailLogs.push({
       sentTo: toArr.join(", "),
       sentCc: ccArr.join(", "),
-      subject:
-        subject ||
-        `Project Code Creation Request - ${order.orderId} - ${order.name}`,
+      subject: finalSubject,
       sentBy,
       sentAt: new Date(),
       isResend,

@@ -643,6 +643,7 @@ exports.updateAdminOrder = async (req, res) => {
       handlerName: order.salesHandlerName || "",
       movedAt: new Date(),
       notes: `Order details edited by ${editedBy}`,
+      logType: "edit",
     });
 
     // ── Build field-level Edit History (customer diff) ─────────────────────
@@ -730,6 +731,7 @@ exports.updateAdminOrder = async (req, res) => {
           vehicleIndex: i,
           action: "removed",
           vehicleLabel: buildVehicleLabel(oldV),
+          vehicleTypeId: oldV.vehicleType ? String(oldV.vehicleType) : "",
           changes,
         });
         continue;
@@ -749,6 +751,7 @@ exports.updateAdminOrder = async (req, res) => {
           vehicleIndex: i,
           action: "added",
           vehicleLabel: buildVehicleLabel(newV),
+          vehicleTypeId: newV.vehicleType ? String(newV.vehicleType) : "",
           changes,
         });
         continue;
@@ -769,6 +772,7 @@ exports.updateAdminOrder = async (req, res) => {
           vehicleIndex: i,
           action: "modified",
           vehicleLabel: buildVehicleLabel(newV),
+          vehicleTypeId: newV.vehicleType ? String(newV.vehicleType) : "",
           changes,
         });
       }
@@ -956,7 +960,7 @@ exports.getOrdersByPipeline = async (req, res) => {
       // Orders sales already closed-lost should never appear on the
       // operations board (not even under its own Closed Lost column) —
       // sales lost the deal before/without operations acting on it.
-      (o) => o.projectCodeArray && o.projectCodeArray.length === 1 && o.salesPipelineStatus !== "closedLost"
+      (o) => o.projectCodeArray && o.projectCodeArray.length === 1 && o.salesPipelineStatus !== "closedLost"&& o.salesPipelineStatus ==="salesFinalClosedWon"
     );
 
     const grouped = {};
