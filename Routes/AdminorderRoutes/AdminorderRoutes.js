@@ -157,7 +157,7 @@ router.get("/pipeline/:id/day-by-day-history", protect, ctrl.getDayByDayHistory)
 
 router.get("/orders", protect, ctrl.getAllOrders);  
 router.get("/orders/:orderId", ctrl.getOrderById);
-router.post("/orders/create", protect, adminOrderUpload, ctrl.createAdminOrder);
+router.post("/orders/create", adminOrderUpload, ctrl.createAdminOrder);
 
 router.get("/campaign-types", ctrl.getCampaignTypes);
 router.post("/campaign-types", ctrl.createCampaignType);

@@ -8,6 +8,7 @@ const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const { successResponse, errorResponse } = require("../../Utils/response");
 const { sendFocMail, getActiveAdminEmails, getEmailByUsername } = require('../../Utils/focMailer');
 const VehicleMaster = require("../../Models/vehicleDetails");
+const VehicleType = require("../../Models/VehicleTypeSchema");
 const { checkVehicleAvailability } = require("../../Utils/vehicleAvailability");
 
 
@@ -163,7 +164,6 @@ exports.createAdminOrder = async (req, res) => {
     } else {
       if (!companyName?.trim()) return errorResponse(res, "Company name is required", null, 400);
       if (!clientName?.trim()) return errorResponse(res, "Client name is required", null, 400);
-      if (!designation?.trim()) return errorResponse(res, "Designation is required", null, 400);
       if (!customerPhone) return errorResponse(res, "Phone number is required", null, 400);
       if (!/^[6-9]\d{9}$/.test(customerPhone.toString().trim()))
         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
@@ -184,18 +184,16 @@ exports.createAdminOrder = async (req, res) => {
       return errorResponse(res, "At least one vehicle is required", null, 400);
 
     const bookingItems = [];
+    const availabilityFailures = [];
+    const pkgCache = [];
 
     for (let i = 0; i < vehicles.length; i++) {
       const v = vehicles[i];
       const missing = [];
       if (!v.packageId) missing.push("packageId");
-      if (!v.campaignType) missing.push("campaignType");
-      if (!v.campaignName?.trim()) missing.push("campaignName");
       if (v.campaignType === "Other" && !v.otherCampaignType) missing.push("otherCampaignType");
       if (!v.fromDate) missing.push("fromDate");
       if (!v.toDate) missing.push("toDate");
-      if (!v.state) missing.push("state");
-      if (!v.city) missing.push("city");
       if (!v.campaignLocation && !(v.fromLocation && v.toLocation)) missing.push("campaignLocation");
       if (!v.quantity || Number(v.quantity) < 1) missing.push("quantity");
       if (missing.length > 0)
@@ -220,13 +218,25 @@ exports.createAdminOrder = async (req, res) => {
         toDate: v.toDate,
       });
       if (!availability.available) {
-        return errorResponse(
-          res,
-          `Vehicle ${i + 1}: Not enough vehicles available for the selected dates (${availability.availableCount} available, your required Quanitity ${availability.requiredQuantity} )`,
-          null,
-          409
+        const vt = await VehicleType.findById(pkg.vehicleType).catch(() => null);
+        const typeName = vt?.typeName || pkg.vehicleType;
+        const fmt = (d) => new Date(d).toLocaleDateString("en-GB").replace(/\//g, "-");
+        availabilityFailures.push(
+          `Vehicle ${i + 1} (${typeName}): Only ${availability.availableCount} vehicle(s) available, you requested ${availability.requiredQuantity}, for dates ${fmt(v.fromDate)} to ${fmt(v.toDate)}`
         );
+        pkgCache[i] = pkg;
+        continue;
       }
+      pkgCache[i] = pkg;
+    }
+
+    if (availabilityFailures.length > 0) {
+      return errorResponse(res, availabilityFailures.join("\n"), null, 409);
+    }
+
+    for (let i = 0; i < vehicles.length; i++) {
+      const v = vehicles[i];
+      const pkg = pkgCache[i];
 
       const fp = calcPricingBackend(pkg, v);
 
@@ -447,7 +457,6 @@ exports.updateAdminOrder = async (req, res) => {
     } else {
       if (!companyName?.trim()) return errorResponse(res, "Company name is required", null, 400);
       if (!clientName?.trim()) return errorResponse(res, "Client name is required", null, 400);
-      if (!designation?.trim()) return errorResponse(res, "Designation is required", null, 400);
       if (!customerPhone) return errorResponse(res, "Phone number is required", null, 400);
       if (!/^[6-9]\d{9}$/.test(customerPhone.toString().trim()))
         return errorResponse(res, "Enter a valid 10-digit mobile number", null, 400);
@@ -489,13 +498,9 @@ exports.updateAdminOrder = async (req, res) => {
       const v = vehicles[i];
       const missing = [];
       if (!v.packageId) missing.push("packageId");
-      if (!v.campaignType) missing.push("campaignType");
-      if (!v.campaignName?.trim()) missing.push("campaignName");
       if (v.campaignType === "Other" && !v.otherCampaignType) missing.push("otherCampaignType");
       if (!v.fromDate) missing.push("fromDate");
       if (!v.toDate) missing.push("toDate");
-      if (!v.state) missing.push("state");
-      if (!v.city) missing.push("city");
       if (!v.campaignLocation && !(v.fromLocation && v.toLocation)) missing.push("campaignLocation");
       if (!v.quantity || Number(v.quantity) < 1) missing.push("quantity");
       if (missing.length > 0)
