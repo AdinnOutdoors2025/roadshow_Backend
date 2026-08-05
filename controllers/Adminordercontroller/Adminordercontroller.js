@@ -916,6 +916,18 @@ exports.getOrderById = async (req, res) => {
   }
 };
 
+// Fetch by Mongo _id instead of orderId — needed for lookups where orderId
+// may contain characters (e.g. "#") that break as a URL path segment.
+exports.getOrderByMongoId = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+    return successResponse(res, "Order fetched successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message);
+  }
+};
+
 // ── Campaign Types ─────────────────────────────────────────────────────────
 exports.getCampaignTypes = async (req, res) => {
   try {
@@ -3312,6 +3324,159 @@ function buildEntryDayTimeline(windowStart, windowEnd, issuesForEntry, unavailFo
   };
 }
 
+const INVOICE_FIELD_SECTIONS = {
+  invoiceDate: { section: "Invoice Meta", label: "Invoice Date", type: "date" },
+  dueDate: { section: "Invoice Meta", label: "Due Date", type: "date" },
+  poNumber: { section: "Invoice Meta", label: "P.O.#" },
+  projectName: { section: "Invoice Meta", label: "Project Name" },
+  placeOfSupply: { section: "Invoice Meta", label: "Place Of Supply" },
+  billToName: { section: "Bill To", label: "Name / Company" },
+  billToAddress: { section: "Bill To", label: "Address" },
+  billToGstin: { section: "Bill To", label: "GSTIN" },
+  billToPan: { section: "Bill To", label: "PAN" },
+  discountLabel: { section: "Discount", label: "Label" },
+  discountMode: { section: "Discount", label: "Mode" },
+  discountType: { section: "Discount", label: "Type" },
+  discountValue: { section: "Discount", label: "Value" },
+  cgstPercent: { section: "Tax", label: "CGST %" },
+  sgstPercent: { section: "Tax", label: "SGST %" },
+  igstPercent: { section: "Tax", label: "IGST %" },
+  rounding: { section: "Tax", label: "Rounding" },
+  signatureMode: { section: "Signature", label: "Signature Mode" },
+};
+
+const toDateOnly = (v) => {
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return String(v);
+  return d.toISOString().slice(0, 10);
+};
+
+const DISCOUNT_FIELD_KEYS = ["discountLabel", "discountType", "discountValue", "discountMode"];
+
+const buildInvoiceDiff = (oldData, newData) => {
+  const changes = [];
+  const changedKeys = new Set();
+
+  Object.entries(INVOICE_FIELD_SECTIONS).forEach(([key, meta]) => {
+    const oldVal = oldData ? oldData[key] : undefined;
+    const newVal = newData[key];
+    const oldCmp = meta.type === "date" ? toDateOnly(oldVal) : (oldVal ?? null);
+    const newCmp = meta.type === "date" ? toDateOnly(newVal) : (newVal ?? null);
+    if (JSON.stringify(oldCmp) !== JSON.stringify(newCmp)) {
+      changedKeys.add(key);
+      changes.push({
+        section: meta.section,
+        field: meta.label,
+        oldValue: oldVal ?? null,
+        newValue: newVal ?? null,
+      });
+    }
+  });
+
+  // If any discount field changed, log every discount field together (even
+  // the unchanged ones) so the UI always has Value + Mode side by side to
+  // render the +/- sign correctly.
+  const anyDiscountChanged = DISCOUNT_FIELD_KEYS.some((k) => changedKeys.has(k));
+  if (anyDiscountChanged) {
+    DISCOUNT_FIELD_KEYS.forEach((key) => {
+      if (changedKeys.has(key)) return;
+      const meta = INVOICE_FIELD_SECTIONS[key];
+      const oldVal = oldData ? oldData[key] : undefined;
+      const newVal = newData[key];
+      changes.push({
+        section: meta.section,
+        field: meta.label,
+        oldValue: oldVal ?? null,
+        newValue: newVal ?? null,
+      });
+    });
+  }
+
+  return changes;
+};
+
+const normalizeLineItem = (li) => ({
+  groupLabel: li.groupLabel || "General",
+  description: (li.description || "").trim(),
+  hsnSac: li.hsnSac || "",
+  qty: Number(li.qty) || 0,
+  rate: Number(li.rate) || 0,
+});
+
+// Diffs line items per vehicle-type group, matching rows by description so
+// unchanged rows never show up — only genuinely added/removed/edited rows do.
+const buildLineItemDiff = (oldItems = [], newItems = []) => {
+  const oldNorm = (oldItems || []).map(normalizeLineItem);
+  const newNorm = (newItems || []).map(normalizeLineItem);
+
+  const groups = [...new Set([...oldNorm.map((i) => i.groupLabel), ...newNorm.map((i) => i.groupLabel)])];
+  const result = [];
+
+  groups.forEach((group) => {
+    const oldGroupItems = oldNorm.filter((i) => i.groupLabel === group);
+    const newGroupItems = newNorm.filter((i) => i.groupLabel === group);
+    const oldUsed = new Array(oldGroupItems.length).fill(false);
+    const newUsed = new Array(newGroupItems.length).fill(false);
+
+    newGroupItems.forEach((ni, niIdx) => {
+      const oiIdx = oldGroupItems.findIndex(
+        (oi, idx) => !oldUsed[idx] && oi.description.toLowerCase() === ni.description.toLowerCase()
+      );
+      if (oiIdx !== -1) {
+        oldUsed[oiIdx] = true;
+        newUsed[niIdx] = true;
+        const oi = oldGroupItems[oiIdx];
+        const fieldChanges = [];
+        if (oi.hsnSac !== ni.hsnSac) fieldChanges.push({ field: "HSN/SAC", oldValue: oi.hsnSac, newValue: ni.hsnSac });
+        if (oi.qty !== ni.qty) fieldChanges.push({ field: "Qty", oldValue: oi.qty, newValue: ni.qty });
+        if (oi.rate !== ni.rate) fieldChanges.push({ field: "Rate", oldValue: oi.rate, newValue: ni.rate });
+        if (fieldChanges.length > 0) {
+          result.push({
+            groupLabel: group,
+            action: "edited",
+            description: ni.description,
+            hsnSac: ni.hsnSac,
+            qty: ni.qty,
+            rate: ni.rate,
+            fieldChanges,
+          });
+        }
+      }
+    });
+
+    newGroupItems.forEach((ni, idx) => {
+      if (!newUsed[idx]) {
+        result.push({
+          groupLabel: group,
+          action: "added",
+          description: ni.description,
+          hsnSac: ni.hsnSac,
+          qty: ni.qty,
+          rate: ni.rate,
+          fieldChanges: [],
+        });
+      }
+    });
+
+    oldGroupItems.forEach((oi, idx) => {
+      if (!oldUsed[idx]) {
+        result.push({
+          groupLabel: group,
+          action: "removed",
+          description: oi.description,
+          hsnSac: oi.hsnSac,
+          qty: oi.qty,
+          rate: oi.rate,
+          fieldChanges: [],
+        });
+      }
+    });
+  });
+
+  return result;
+};
+
 exports.saveInvoice = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
@@ -3321,12 +3486,13 @@ exports.saveInvoice = async (req, res) => {
       invoiceDate, dueDate, poNumber, projectName, placeOfSupply,
       billToName, billToAddress, billToGstin, billToPan,
       lineItems, discountLabel, discountMode, discountType, discountValue,
-      cgstPercent, sgstPercent, rounding, signatureMode,
+      cgstPercent, sgstPercent, igstPercent, rounding, signatureMode,
     } = req.body;
 
+    const wasExisting = !!order.invoiceData;
     const invoiceNumber = order.invoiceData?.invoiceNumber || `ASI-${order.orderId}`;
 
-    order.invoiceData = {
+    const newInvoiceData = {
       invoiceNumber,
       invoiceDate: invoiceDate || new Date(),
       dueDate: dueDate || null,
@@ -3344,17 +3510,63 @@ exports.saveInvoice = async (req, res) => {
       discountValue: Number(discountValue) || 0,
       cgstPercent: Number(cgstPercent) || 0,
       sgstPercent: Number(sgstPercent) || 0,
+      igstPercent: Number(igstPercent) || 0,
       rounding: Number(rounding) || 0,
       signatureMode: signatureMode === "unsigned" ? "unsigned" : "signed",
       generatedBy: req.user?.username || req.user?.name || "",
       generatedAt: new Date(),
     };
 
+    const editedBy = req.user?.username || req.user?.name || "Admin";
+
+    // First-time save (auto-generated the moment a Project Code is selected
+    // with no invoice yet) is intentionally NOT logged to invoiceHistory —
+    // history starts recording only from the next actual edit onward.
+    if (wasExisting) {
+      const changes = buildInvoiceDiff(order.invoiceData, newInvoiceData);
+      const lineItemChanges = buildLineItemDiff(order.invoiceData?.lineItems, newInvoiceData.lineItems);
+      if (changes.length > 0 || lineItemChanges.length > 0) {
+        order.invoiceHistory.push({
+          action: "updated",
+          changes,
+          lineItemChanges,
+          editedBy,
+          editedAt: new Date(),
+        });
+      }
+    }
+
+    order.invoiceData = newInvoiceData;
+
     await order.save();
 
     return successResponse(res, "Invoice saved successfully", order.invoiceData);
   } catch (error) {
     return errorResponse(res, "Server Error", error.message, 500);
+  }
+};
+
+exports.getProjectCodeOrders = async (req, res) => {
+  try {
+    const orders = await Order.find({ "projectCodeArray.0": { $exists: true } })
+      .sort({ createdAt: -1 })
+      .select("orderId name companyName clientName projectCodeArray")
+      .lean();
+
+    const list = orders.map((o) => {
+      const latestCode = o.projectCodeArray[o.projectCodeArray.length - 1];
+      return {
+        _id: o._id,
+        orderId: o.orderId,
+        name: o.companyName || o.name,
+        projectCode: latestCode?.projectCode || "",
+        estimationCode: latestCode?.estimationCode || "",
+      };
+    });
+
+    return successResponse(res, "Project code orders fetched successfully", { data: list });
+  } catch (error) {
+    return errorResponse(res, error.message);
   }
 };
 

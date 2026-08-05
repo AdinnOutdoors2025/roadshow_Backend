@@ -155,7 +155,10 @@ router.get("/pipeline/:id/campaign-calculator", protect, ctrl.getCampaignCalcula
 router.patch("/pipeline/:id/invoice", protect, ctrl.saveInvoice);
 router.get("/pipeline/:id/day-by-day-history", protect, ctrl.getDayByDayHistory);
 
-router.get("/orders", protect, ctrl.getAllOrders);  
+router.get("/pipeline/project-codes", protect, ctrl.getProjectCodeOrders);
+
+router.get("/orders", protect, ctrl.getAllOrders);
+router.get("/orders/by-id/:id", protect, ctrl.getOrderByMongoId);
 router.get("/orders/:orderId", ctrl.getOrderById);
 router.post("/orders/create", adminOrderUpload, ctrl.createAdminOrder);
 

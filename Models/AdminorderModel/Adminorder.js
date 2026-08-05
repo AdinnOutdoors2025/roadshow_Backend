@@ -604,10 +604,54 @@ const invoiceDataSchema = new mongoose.Schema(
     discountValue: { type: Number, default: 0 },
     cgstPercent: { type: Number, default: 9 },
     sgstPercent: { type: Number, default: 9 },
+    igstPercent: { type: Number, default: 18 },
     rounding: { type: Number, default: 0 },
     signatureMode: { type: String, enum: ["signed", "unsigned"], default: "signed" },
     generatedBy: { type: String, default: "" },
     generatedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+const invoiceHistoryChangeSchema = new mongoose.Schema(
+  {
+    section: { type: String, default: "" },
+    field: { type: String, default: "" },
+    oldValue: { type: mongoose.Schema.Types.Mixed, default: null },
+    newValue: { type: mongoose.Schema.Types.Mixed, default: null },
+  },
+  { _id: false }
+);
+
+const invoiceLineItemFieldChangeSchema = new mongoose.Schema(
+  {
+    field: { type: String, default: "" },
+    oldValue: { type: mongoose.Schema.Types.Mixed, default: null },
+    newValue: { type: mongoose.Schema.Types.Mixed, default: null },
+  },
+  { _id: false }
+);
+
+const invoiceLineItemChangeSchema = new mongoose.Schema(
+  {
+    groupLabel: { type: String, default: "" },
+    action: { type: String, enum: ["added", "removed", "edited"], default: "edited" },
+    description: { type: String, default: "" },
+    hsnSac: { type: String, default: "" },
+    qty: { type: Number, default: 0 },
+    rate: { type: Number, default: 0 },
+    fieldChanges: { type: [invoiceLineItemFieldChangeSchema], default: [] },
+  },
+  { _id: false }
+);
+
+const invoiceHistorySchema = new mongoose.Schema(
+  {
+    action: { type: String, enum: ["created", "updated"], default: "updated" },
+    changes: { type: [invoiceHistoryChangeSchema], default: [] },
+    lineItemChanges: { type: [invoiceLineItemChangeSchema], default: [] },
+    editedBy: { type: String, default: "" },
+    editedAt: { type: Date, default: Date.now },
   },
   { _id: false }
 );
@@ -631,6 +675,7 @@ const orderSchema = new mongoose.Schema(
     gstNumber: String,
     panNumber: { type: String, default: "" },
     invoiceData: { type: invoiceDataSchema, default: null },
+    invoiceHistory: { type: [invoiceHistorySchema], default: [] },
     customerCategory: {
       type: String,
       enum: ["individual", "organization"],
