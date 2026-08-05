@@ -38,6 +38,7 @@ const promoterroutes = require('./Routes/Promoterroutes/Promoterroutes');
 const Driverdetailsroutes = require('./Routes/DriverdetailsRoutes/Driverdetailsroute');
 const RoadshowQuotationRoutes  = require('./Routes/roadshowQuotation/roadshowQuotationRoute')
 const clientRequestRoutes = require('./Routes/ClientRequestRoutes/ClientRequestRoutes');
+const projectSettingRoutes = require('./Routes/ProjectSettingRoutes/ProjectSettingRoutes');
 const shortUrlRoutes = require("./routes/shortUrl.routes.js");
 // CLIENT AUTHENTICATION 
 const clientAuthRoutes = require("./Routes/ClientAuthRoutes/ClientAuthRoutes.js");
@@ -223,6 +224,7 @@ app.use('/promoters', promoterroutes);
 app.use('/drivers', Driverdetailsroutes);
 app.use("/api/roadshow-quotations", RoadshowQuotationRoutes);
 app.use('/client-requests', clientRequestRoutes);
+app.use('/project-settings', projectSettingRoutes);
 app.use("/", shortUrlRoutes);
 // CLIENT AUTHENTICATION 
 app.use( "/api/client-auth", clientAuthRoutes );

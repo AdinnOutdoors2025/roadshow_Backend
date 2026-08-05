@@ -396,6 +396,44 @@ exports.updateSalesPipeline = async (req, res) => {
       });
     }
 
+    let projectMailResult = null;
+    if (
+      oldStage === "closedWon" &&
+      salesPipelineStatus === "projectCodeCreation"
+    ) {
+      const { to, cc, subject, additionalNotes } = req.body;
+
+      const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+      const isValidEmailField = (value) => {
+        const emails = String(value || "").split(",").map((e) => e.trim()).filter(Boolean);
+        if (emails.length === 0) return false;
+        return emails.every(isValidEmail);
+      };
+
+      if (!to || !String(to).trim()) {
+        return errorResponse(res, "To email is required to send the project creation mail.", null, 400);
+      }
+      if (!isValidEmailField(to)) {
+        return errorResponse(res, "Enter a valid email address in the To field.", null, 400);
+      }
+      if (cc && String(cc).trim() && !isValidEmailField(cc)) {
+        return errorResponse(res, "Enter a valid email address in the CC field.", null, 400);
+      }
+
+      try {
+        projectMailResult = await sendProjectCreationMail({
+          order,
+          to,
+          cc,
+          subject,
+          additionalNotes,
+        });
+      } catch (mailErr) {
+        const mailMsg = mailErr?.response?.data?.message || mailErr.message;
+        return errorResponse(res, `Failed to send project creation mail: ${mailMsg}`, null, 500);
+      }
+    }
+
     order.salesPipelineStatus = salesPipelineStatus;
     order.salesPipelineLogs.push({
       fromStage: oldStage,
@@ -405,54 +443,28 @@ exports.updateSalesPipeline = async (req, res) => {
       movedAt: new Date(),
     });
 
-    let autoMailError = null;
-    if (
-      oldStage === "closedWon" &&
-      salesPipelineStatus === "projectCodeCreation" &&
-      (order.projectMailLogs || []).length === 0
-    ) {
-      const autoTo = process.env.PROJECT_CODE_AUTO_MAIL_TO || "";
-      const autoCc = process.env.PROJECT_CODE_AUTO_MAIL_CC || "";
-      if (autoTo) {
-        try {
-          const { toArr, ccArr, subject } = await sendProjectCreationMail({
-            order,
-            to: autoTo,
-            cc: autoCc,
-            additionalNotes: "Auto-generated on moving to Project Code Creation stage.",
-          });
-          order.projectMailLogs.push({
-            sentTo: toArr.join(", "),
-            sentCc: ccArr.join(", "),
-            subject,
-            sentBy: movedBy,
-            sentAt: new Date(),
-            isResend: false,
-          });
-          order.salesPipelineLogs.push({
-            fromStage: salesPipelineStatus,
-            toStage: salesPipelineStatus,
-            movedBy,
-            handlerName: order.salesHandlerName || "",
-            movedAt: new Date(),
-            notes: `Project mail auto-sent to ${toArr.join(", ")}`,
-          });
-        } catch (mailErr) {
-          autoMailError = mailErr?.response?.data?.message || mailErr.message;
-          console.error("Auto project-code mail failed:", autoMailError);
-        }
-      } else {
-        console.warn(
-          "PROJECT_CODE_AUTO_MAIL_TO not configured; skipping auto project-code mail."
-        );
-      }
+    if (projectMailResult) {
+      const { toArr, ccArr, subject: finalSubject } = projectMailResult;
+      order.projectMailLogs.push({
+        sentTo: toArr.join(", "),
+        sentCc: ccArr.join(", "),
+        subject: finalSubject,
+        sentBy: movedBy,
+        sentAt: new Date(),
+        isResend: false,
+      });
+      order.salesPipelineLogs.push({
+        fromStage: salesPipelineStatus,
+        toStage: salesPipelineStatus,
+        movedBy,
+        handlerName: order.salesHandlerName || "",
+        movedAt: new Date(),
+        notes: `Project mail sent to ${toArr.join(", ")}`,
+      });
     }
 
     await order.save();
-    return successResponse(res, "Sales pipeline updated successfully", {
-      order,
-      ...(autoMailError ? { autoMailError } : {}),
-    });
+    return successResponse(res, "Sales pipeline updated successfully", { order });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);
   }
