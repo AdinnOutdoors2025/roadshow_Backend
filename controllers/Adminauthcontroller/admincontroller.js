@@ -122,6 +122,10 @@ const loginAdmin = async (req, res) => {
       return errorResponse(res, 'INVALID_PASSWORD', null, 401);
     }
 
+    if (admin.status === 'inactive') {
+      return errorResponse(res, 'ACCOUNT_INACTIVE', null, 401);
+    }
+
     const token = await generateToken(admin);
 
     return successResponse(res, 'Login successful', { token, user: admin });
@@ -132,6 +136,13 @@ const loginAdmin = async (req, res) => {
   }
 };
 
+
+// Cheap polling target for the frontend to detect mid-session deactivation —
+// `protect` itself already 401s with ACCOUNT_INACTIVE before this runs if the
+// account's status flipped since the token was issued.
+const checkSession = (req, res) => {
+  return successResponse(res, 'Session active', null);
+};
 
 const getAdminProfile = (req, res) => {
   return successResponse(res, 'Profile fetched successfully', {
@@ -349,6 +360,40 @@ const makeDeleteManagementUser = (role) => async (req, res) => {
   }
 };
 
+// Forgot Password — no OTP/email-verification step; identifies the account
+// by username or email and sets the new password directly.
+const forgotPasswordReset = async (req, res) => {
+  const { identifier, newPassword, confirmPassword } = req.body;
+
+  try {
+    if (!identifier || !newPassword || !confirmPassword)
+      return errorResponse(res, 'Username/email, new password and confirm password are required', null, 400);
+
+    if (newPassword.length < 6)
+      return errorResponse(res, 'Password must be at least 6 characters', null, 400);
+
+    if (newPassword !== confirmPassword)
+      return errorResponse(res, 'Password and Confirm Password do not match', null, 400);
+
+    const trimmedIdentifier = identifier.trim();
+    const user = await AdminUser.findOne({
+      $or: [
+        { username: trimmedIdentifier },
+        { email: trimmedIdentifier.toLowerCase() },
+      ],
+    });
+
+    if (!user) return errorResponse(res, 'ACCOUNT_NOT_FOUND', null, 404);
+
+    user.password = newPassword; // pre-save hook hashes this
+    await user.save();
+
+    return successResponse(res, 'Password reset successfully', null);
+  } catch (err) {
+    return errorResponse(res, 'Server error', err.message);
+  }
+};
+
 // Sales Management (reuses the former "Staff Admin" endpoints/UI)
 const createStaffAdmin = makeCreateManagementUser('sales');
 const getAllStaffAdmins = makeGetAllManagementUsers('sales');
@@ -365,4 +410,5 @@ module.exports = {
   registerAdmin, loginAdmin, getAdminProfile, updateOwnProfile,
   createStaffAdmin, getAllStaffAdmins, updateStaffAdmin, deleteStaffAdmin,
   createOperationUser, getAllOperationUsers, updateOperationUser, deleteOperationUser,
+  forgotPasswordReset, checkSession,
 };
