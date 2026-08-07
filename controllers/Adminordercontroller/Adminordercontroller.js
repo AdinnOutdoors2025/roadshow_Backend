@@ -1012,7 +1012,7 @@ exports.updateOrderPipeline = async (req, res) => {
     }
 
     const oldStage = order.pipelineStatus;
-    const isStaff = Number(req.user.isAdmin) === 0;
+    const isStaff = Number(req.user.isAdmin) !== 1;
 
 
     const LOCKED_BACK_STAGES = ["todo", "projectExecution"];
@@ -1104,7 +1104,7 @@ exports.uploadStageDocument = async (req, res) => {
     const uploadedBy =
       (order.pipelineStatus === "todo" ? order.todoUploadedBy : null) ||
       // req.body.uploadedBy?.trim() ||
-      (Number(req.user.isAdmin) === 0
+      (Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin");
 
@@ -1195,7 +1195,7 @@ exports.submitOnRoadDetails = async (req, res) => {
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
     const uploadedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -1281,7 +1281,7 @@ exports.updateOnRoadDriver = async (req, res) => {
     if (!entry) return errorResponse(res, "Entry not found", null, 404);
 
     const changedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -1347,7 +1347,7 @@ exports.addOnRoadIssue = async (req, res) => {
     }
 
     const reportedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -1394,7 +1394,7 @@ exports.resolveOnRoadIssue = async (req, res) => {
     if (!issue) return errorResponse(res, "Issue not found", null, 404);
 
     const resolvedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -1475,7 +1475,7 @@ exports.editOnRoadDetails = async (req, res) => {
     if (!entry) return errorResponse(res, "Entry not found", null, 404);
 
     const uploadedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -1549,7 +1549,7 @@ exports.markVehicleUnavailable = async (req, res) => {
       return errorResponse(res, "This vehicle is already marked unavailable", null, 400);
 
     const reportedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -1644,7 +1644,7 @@ exports.replaceOnRoadVehicle = async (req, res) => {
     }
 
     const performedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -1783,7 +1783,7 @@ exports.markVehicleAvailable = async (req, res) => {
     if (!history) return errorResponse(res, "History not found", null, 404);
 
     const resolvedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -1843,7 +1843,7 @@ exports.submitClientFeedback = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-    const createdBy = Number(req.user.isAdmin) === 0
+    const createdBy = Number(req.user.isAdmin) !== 1
       ? req.user.username
       : order.handlerName || req.user?.username || "Admin";
 
@@ -1897,12 +1897,12 @@ exports.submitCampaignClosure = async (req, res) => {
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
     // const createdBy =
-    //   Number(req.user.isAdmin) === 0
+    //   Number(req.user.isAdmin) !== 1
     //     ? req.user.username
     //     : order.handlerName || req.user?.username || "Admin";
 
     const createdBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : req.user?.username || order.handlerName || "Admin";
 
@@ -2251,7 +2251,7 @@ exports.submitOrderClosedWon = async (req, res) => {
     }
 
     const uploadedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -2323,7 +2323,7 @@ exports.submitOrderClosedLost = async (req, res) => {
     }
 
     const uploadedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -2413,7 +2413,8 @@ exports.sendFocChatMessage = async (req, res) => {
     }
     const attachmentUrl = attachmentFile ? getFileUrl(attachmentFile) : "";
 
-    const senderRole = Number(req.user.isAdmin) === 1 ? "admin" : "staffAdmin";
+    const isAdminNum = Number(req.user.isAdmin);
+    const senderRole = isAdminNum === 1 ? "admin" : isAdminNum === 2 ? "sales" : isAdminNum === 3 ? "operation" : "staffAdmin";
 
     entry.focChatMessages.push({
       senderUsername: req.user?.username || "Unknown",
@@ -2584,7 +2585,7 @@ exports.addExtraKmDetails = async (req, res) => {
     const totalCost = extraKmCost + extraHourCost;
 
     const addedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -2763,7 +2764,7 @@ exports.addDailyHoursLog = async (req, res) => {
     }
 
     const loggedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -2934,7 +2935,7 @@ exports.addCampaignCompensation = async (req, res) => {
     }
 
     const addedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
@@ -3041,7 +3042,7 @@ exports.releaseOnRoadVehicle = async (req, res) => {
     }
 
     const releasedBy =
-      Number(req.user.isAdmin) === 0
+      Number(req.user.isAdmin) !== 1
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 

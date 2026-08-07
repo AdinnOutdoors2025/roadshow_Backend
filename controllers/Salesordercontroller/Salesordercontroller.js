@@ -232,7 +232,7 @@ exports.updateSalesPipeline = async (req, res) => {
       );
     }
 
-    const isStaffAdmin = Number(req.user.isAdmin) === 0;
+    const isStaffAdmin = Number(req.user.isAdmin) !== 1;
     // const movedBy = order.salesHandlerName || "Admin";
     const movedBy = req.user?.username || order.salesHandlerName || "Admin";
     const uploadedFiles = req.files || [];

@@ -39,6 +39,7 @@ const Driverdetailsroutes = require('./Routes/DriverdetailsRoutes/Driverdetailsr
 const RoadshowQuotationRoutes  = require('./Routes/roadshowQuotation/roadshowQuotationRoute')
 const clientRequestRoutes = require('./Routes/ClientRequestRoutes/ClientRequestRoutes');
 const projectSettingRoutes = require('./Routes/ProjectSettingRoutes/ProjectSettingRoutes');
+const rolePermissionRoutes = require('./Routes/RolePermissionRoutes/RolePermissionRoutes');
 const shortUrlRoutes = require("./routes/shortUrl.routes.js");
 // CLIENT AUTHENTICATION 
 const clientAuthRoutes = require("./Routes/ClientAuthRoutes/ClientAuthRoutes.js");
@@ -225,6 +226,7 @@ app.use('/drivers', Driverdetailsroutes);
 app.use("/api/roadshow-quotations", RoadshowQuotationRoutes);
 app.use('/client-requests', clientRequestRoutes);
 app.use('/project-settings', projectSettingRoutes);
+app.use(rolePermissionRoutes);
 app.use("/", shortUrlRoutes);
 // CLIENT AUTHENTICATION 
 app.use( "/api/client-auth", clientAuthRoutes );

@@ -6,7 +6,11 @@ const router  = express.Router();
 const { registerAdmin, loginAdmin, getAdminProfile, updateOwnProfile, createStaffAdmin,
   getAllStaffAdmins,
   updateStaffAdmin,
-  deleteStaffAdmin, } = require('../../controllers/Adminauthcontroller/admincontroller');
+  deleteStaffAdmin,
+  createOperationUser,
+  getAllOperationUsers,
+  updateOperationUser,
+  deleteOperationUser, } = require('../../controllers/Adminauthcontroller/admincontroller');
 
 
 const {
@@ -22,6 +26,11 @@ router.post('/staff-admins',protect,  createStaffAdmin);
 router.get('/staff-admins',  protect,getAllStaffAdmins);
 router.put('/staff-admins/:id',  protect,  updateStaffAdmin);
 router.delete('/staff-admins/:id',protect, deleteStaffAdmin);
+
+router.post('/operation-users',protect,  createOperationUser);
+router.get('/operation-users',  protect,getAllOperationUsers);
+router.put('/operation-users/:id',  protect,  updateOperationUser);
+router.delete('/operation-users/:id',protect, deleteOperationUser);
 
 router.put('/admin/update-profile', protect, updateOwnProfile);
 

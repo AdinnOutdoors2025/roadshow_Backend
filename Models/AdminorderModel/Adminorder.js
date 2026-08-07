@@ -439,7 +439,7 @@ const focHistoryEntrySchema = new mongoose.Schema(
 const focChatMessageSchema = new mongoose.Schema(
   {
     senderUsername: { type: String, required: true },
-    senderRole: { type: String, enum: ["staffAdmin", "admin"], required: true },
+    senderRole: { type: String, enum: ["admin", "sales", "operation", "staffAdmin"], required: true },
     message: { type: String, default: "" },
     attachment: { type: String, default: "" },
     sentAt: { type: Date, default: Date.now },

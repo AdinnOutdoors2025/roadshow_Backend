@@ -2,17 +2,34 @@
 require("dotenv").config();
 const jwt = require('jsonwebtoken');
 const AdminUser = require('../../Models/MainLoginSchema');
+const RolePermission = require('../../Models/RolePermissionModel');
 const { successResponse, errorResponse } = require('../../Utils/response');
 
 const JWT_SECRET     = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN;
 
-const generateToken = (admin) =>
-  jwt.sign(
-    { id: admin._id, username: admin.username, role: admin.role , isAdmin: admin.isAdmin ,email:admin.email },
+// admin role gets full sidebar access, so no allowedMenus is embedded for it.
+// sales/operation roles get their currently-configured allowedMenus baked into
+// the token at login time — a permission change only takes effect on next login.
+const generateToken = async (admin) => {
+  let allowedMenus;
+  if (admin.role === 'sales' || admin.role === 'operation') {
+    const perm = await RolePermission.findOne({ role: admin.role });
+    allowedMenus = perm ? perm.allowedMenus : [];
+  }
+  return jwt.sign(
+    {
+      id: admin._id,
+      username: admin.username,
+      role: admin.role,
+      isAdmin: admin.isAdmin,
+      email: admin.email,
+      ...(allowedMenus ? { allowedMenus } : {}),
+    },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
   );
+};
 
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -59,7 +76,7 @@ const registerAdmin = async (req, res) => {
     });
     await admin.save();
 
-    const token = generateToken(admin);
+    const token = await generateToken(admin);
 
     return successResponse(res, 'Admin registered successfully', {
       token,
@@ -88,9 +105,12 @@ const loginAdmin = async (req, res) => {
       return errorResponse(res, 'Username and password are required', null, 400);
     }
 
+    const identifier = username.trim();
     const admin = await AdminUser.findOne({
-      username: username.trim(),
-      // role: 'admin',
+      $or: [
+        { username: identifier },
+        { email: identifier.toLowerCase() },
+      ],
     });
 
     if (!admin) {
@@ -102,7 +122,7 @@ const loginAdmin = async (req, res) => {
       return errorResponse(res, 'INVALID_PASSWORD', null, 401);
     }
 
-    const token = generateToken(admin);
+    const token = await generateToken(admin);
 
     return successResponse(res, 'Login successful', { token, user: admin });
 
@@ -163,7 +183,7 @@ const updateOwnProfile = async (req, res) => {
 
     await user.save();
 
-    const token = generateToken(user);
+    const token = await generateToken(user);
 
     return successResponse(res, 'Profile updated successfully', {
       token,
@@ -183,7 +203,11 @@ const updateOwnProfile = async (req, res) => {
   }
 };
 
-const createStaffAdmin = async (req, res) => {
+// Management-user CRUD (Sales Management / Operation Management) —
+// both roles share identical fields (username, email, phone, password, status),
+// so the create/list/update/delete handlers are parametrized by `role`
+// instead of duplicating the staffAdmin-era hardcoded functions.
+const makeCreateManagementUser = (role) => async (req, res) => {
   const { username, email, password, phone } = req.body;
 
   try {
@@ -200,34 +224,40 @@ const createStaffAdmin = async (req, res) => {
       return errorResponse(res, 'Password must be at least 6 characters', null, 400);
 
     const existing = await AdminUser.findOne({
-      email: email.trim().toLowerCase(),
+      $or: [
+        { username: username.trim() },
+        { email: email.trim().toLowerCase() },
+      ],
     });
 
     if (existing) {
+      if (existing.username === username.trim()) {
+        return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+      }
       return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
     }
 
-    const staffAdmin = new AdminUser({
+    const managementUser = new AdminUser({
       username: username.trim(),
       email: email.trim().toLowerCase(),
       password,
       phone: phone || '',
-      isAdmin: 0,
-      role: 'staffAdmin',
+      isAdmin: role === 'sales' ? 2 : role === 'operation' ? 3 : 0,
+      role,
       status: 'active',
     });
 
-    await staffAdmin.save();
+    await managementUser.save();
 
-    return successResponse(res, 'Staff admin created successfully', {
+    return successResponse(res, 'User created successfully', {
       user: {
-        id: staffAdmin._id,
-        username: staffAdmin.username,
-        email: staffAdmin.email,
-        phone: staffAdmin.phone,
-        role: staffAdmin.role,
-        isAdmin: staffAdmin.isAdmin,
-        status: staffAdmin.status,
+        id: managementUser._id,
+        username: managementUser.username,
+        email: managementUser.email,
+        phone: managementUser.phone,
+        role: managementUser.role,
+        isAdmin: managementUser.isAdmin,
+        status: managementUser.status,
       },
     }, 201);
 
@@ -239,52 +269,64 @@ const createStaffAdmin = async (req, res) => {
   }
 };
 
-// GET ALL
-const getAllStaffAdmins = async (req, res) => {
+const makeGetAllManagementUsers = (role) => async (req, res) => {
   try {
-    const list = await AdminUser.find({ role: 'staffAdmin' }).sort({ createdAt: -1 });
-    return successResponse(res, 'Staff admins fetched', { data: list });
+    const list = await AdminUser.find({ role }).sort({ createdAt: -1 });
+    return successResponse(res, 'Users fetched', { data: list });
   } catch (err) {
     return errorResponse(res, 'Server error', err.message);
   }
 };
 
-// UPDATE
-const updateStaffAdmin = async (req, res) => {
+const makeUpdateManagementUser = (role) => async (req, res) => {
   const { id } = req.params;
   const { username, email, phone, status, password } = req.body;
 
   try {
-    const staffAdmin = await AdminUser.findOne({ _id: id, role: 'staffAdmin' });
-    if (!staffAdmin)
-      return errorResponse(res, 'Staff admin not found', null, 404);
+    const managementUser = await AdminUser.findOne({ _id: id, role });
+    if (!managementUser)
+      return errorResponse(res, 'User not found', null, 404);
 
-    if (username) staffAdmin.username = username.trim();
-
-    if (email) {
-      if (!EMAIL_REGEX.test(email.trim()))
-        return errorResponse(res, 'Please provide a valid email address', null, 400);
-      staffAdmin.email = email.trim().toLowerCase();
+    if (username && username.trim() !== managementUser.username) {
+      if (!/^[a-zA-Z0-9]{4,20}$/.test(username.trim()))
+        return errorResponse(res, 'Username must be 4-20 alphanumeric characters', null, 400);
+      const usernameTaken = await AdminUser.findOne({
+        username: username.trim(),
+        _id: { $ne: managementUser._id },
+      });
+      if (usernameTaken) return errorResponse(res, 'USERNAME_ALREADY_EXISTS', null, 409);
+      managementUser.username = username.trim();
     }
 
-    if (phone !== undefined) staffAdmin.phone = phone;
-    if (status) staffAdmin.status = status;
+    if (email && email.trim().toLowerCase() !== managementUser.email) {
+      if (!EMAIL_REGEX.test(email.trim()))
+        return errorResponse(res, 'Please provide a valid email address', null, 400);
+      const emailTaken = await AdminUser.findOne({
+        email: email.trim().toLowerCase(),
+        _id: { $ne: managementUser._id },
+      });
+      if (emailTaken) return errorResponse(res, 'EMAIL_ALREADY_EXISTS', null, 409);
+      managementUser.email = email.trim().toLowerCase();
+    }
+
+    if (phone !== undefined) managementUser.phone = phone;
+    if (status) managementUser.status = status;
 
     if (password) {
       if (password.length < 6)
         return errorResponse(res, 'Password must be at least 6 characters', null, 400);
-      staffAdmin.password = password; // pre-save hook hash பண்ணும்
+      managementUser.password = password; // pre-save hook hashes this
     }
 
-    await staffAdmin.save();
+    await managementUser.save();
 
-    return successResponse(res, 'Staff admin updated successfully', {
+    return successResponse(res, 'User updated successfully', {
       user: {
-        id: staffAdmin._id,
-        username: staffAdmin.username,
-        email: staffAdmin.email,
-        phone: staffAdmin.phone,
-        status: staffAdmin.status,
+        id: managementUser._id,
+        username: managementUser.username,
+        email: managementUser.email,
+        phone: managementUser.phone,
+        status: managementUser.status,
       },
     });
   } catch (err) {
@@ -295,19 +337,32 @@ const updateStaffAdmin = async (req, res) => {
   }
 };
 
-// DELETE
-const deleteStaffAdmin = async (req, res) => {
+const makeDeleteManagementUser = (role) => async (req, res) => {
   const { id } = req.params;
   try {
-    const staffAdmin = await AdminUser.findOneAndDelete({ _id: id, role: 'staffAdmin' });
-    if (!staffAdmin)
-      return errorResponse(res, 'Staff admin not found', null, 404);
-    return successResponse(res, 'Staff admin deleted successfully', null);
+    const managementUser = await AdminUser.findOneAndDelete({ _id: id, role });
+    if (!managementUser)
+      return errorResponse(res, 'User not found', null, 404);
+    return successResponse(res, 'User deleted successfully', null);
   } catch (err) {
     return errorResponse(res, 'Server error', err.message);
   }
 };
 
+// Sales Management (reuses the former "Staff Admin" endpoints/UI)
+const createStaffAdmin = makeCreateManagementUser('sales');
+const getAllStaffAdmins = makeGetAllManagementUsers('sales');
+const updateStaffAdmin = makeUpdateManagementUser('sales');
+const deleteStaffAdmin = makeDeleteManagementUser('sales');
 
+// Operation Management
+const createOperationUser = makeCreateManagementUser('operation');
+const getAllOperationUsers = makeGetAllManagementUsers('operation');
+const updateOperationUser = makeUpdateManagementUser('operation');
+const deleteOperationUser = makeDeleteManagementUser('operation');
 
-module.exports = { registerAdmin, loginAdmin, getAdminProfile, updateOwnProfile, createStaffAdmin, getAllStaffAdmins, updateStaffAdmin, deleteStaffAdmin };
+module.exports = {
+  registerAdmin, loginAdmin, getAdminProfile, updateOwnProfile,
+  createStaffAdmin, getAllStaffAdmins, updateStaffAdmin, deleteStaffAdmin,
+  createOperationUser, getAllOperationUsers, updateOperationUser, deleteOperationUser,
+};
