@@ -3335,10 +3335,6 @@ const INVOICE_FIELD_SECTIONS = {
   billToAddress: { section: "Bill To", label: "Address" },
   billToGstin: { section: "Bill To", label: "GSTIN" },
   billToPan: { section: "Bill To", label: "PAN" },
-  discountLabel: { section: "Discount", label: "Label" },
-  discountMode: { section: "Discount", label: "Mode" },
-  discountType: { section: "Discount", label: "Type" },
-  discountValue: { section: "Discount", label: "Value" },
   cgstPercent: { section: "Tax", label: "CGST %" },
   sgstPercent: { section: "Tax", label: "SGST %" },
   igstPercent: { section: "Tax", label: "IGST %" },
@@ -3353,11 +3349,8 @@ const toDateOnly = (v) => {
   return d.toISOString().slice(0, 10);
 };
 
-const DISCOUNT_FIELD_KEYS = ["discountLabel", "discountType", "discountValue", "discountMode"];
-
 const buildInvoiceDiff = (oldData, newData) => {
   const changes = [];
-  const changedKeys = new Set();
 
   Object.entries(INVOICE_FIELD_SECTIONS).forEach(([key, meta]) => {
     const oldVal = oldData ? oldData[key] : undefined;
@@ -3365,7 +3358,6 @@ const buildInvoiceDiff = (oldData, newData) => {
     const oldCmp = meta.type === "date" ? toDateOnly(oldVal) : (oldVal ?? null);
     const newCmp = meta.type === "date" ? toDateOnly(newVal) : (newVal ?? null);
     if (JSON.stringify(oldCmp) !== JSON.stringify(newCmp)) {
-      changedKeys.add(key);
       changes.push({
         section: meta.section,
         field: meta.label,
@@ -3375,26 +3367,85 @@ const buildInvoiceDiff = (oldData, newData) => {
     }
   });
 
-  // If any discount field changed, log every discount field together (even
-  // the unchanged ones) so the UI always has Value + Mode side by side to
-  // render the +/- sign correctly.
-  const anyDiscountChanged = DISCOUNT_FIELD_KEYS.some((k) => changedKeys.has(k));
-  if (anyDiscountChanged) {
-    DISCOUNT_FIELD_KEYS.forEach((key) => {
-      if (changedKeys.has(key)) return;
-      const meta = INVOICE_FIELD_SECTIONS[key];
-      const oldVal = oldData ? oldData[key] : undefined;
-      const newVal = newData[key];
-      changes.push({
-        section: meta.section,
-        field: meta.label,
-        oldValue: oldVal ?? null,
-        newValue: newVal ?? null,
-      });
-    });
-  }
-
   return changes;
+};
+
+const normalizeDiscount = (d) => ({
+  label: (d.label || "Discount").trim(),
+  mode: d.mode === "add" ? "add" : "decrease",
+  type: d.type === "amount" ? "amount" : "percent",
+  value: Number(d.value) || 0,
+});
+
+// Diffs discount rows by label (same matching strategy as buildLineItemDiff)
+// so only genuinely added/removed/edited discounts show up in history —
+// unchanged rows, and rows whose sibling fields didn't change, stay silent.
+const buildDiscountDiff = (oldDiscounts = [], newDiscounts = []) => {
+  const oldNorm = (oldDiscounts || []).map(normalizeDiscount);
+  const newNorm = (newDiscounts || []).map(normalizeDiscount);
+  const oldUsed = new Array(oldNorm.length).fill(false);
+  const newUsed = new Array(newNorm.length).fill(false);
+  const result = [];
+
+  newNorm.forEach((nd, niIdx) => {
+    const oiIdx = oldNorm.findIndex(
+      (od, idx) => !oldUsed[idx] && od.label.toLowerCase() === nd.label.toLowerCase()
+    );
+    if (oiIdx !== -1) {
+      oldUsed[oiIdx] = true;
+      newUsed[niIdx] = true;
+      const od = oldNorm[oiIdx];
+      const modeChanged = od.mode !== nd.mode;
+      const typeChanged = od.type !== nd.type;
+      const valueChanged = od.value !== nd.value;
+      const fieldChanges = [];
+      if (modeChanged) fieldChanges.push({ field: "Mode", oldValue: od.mode, newValue: nd.mode });
+      if (typeChanged) fieldChanges.push({ field: "Type", oldValue: od.type, newValue: nd.type });
+      if (valueChanged) fieldChanges.push({ field: "Value", oldValue: od.value, newValue: nd.value });
+      // Mode/Value are shown as a formatted amount (+/-₹ or %), which needs
+      // all three of Mode+Type+Value even when only one of them changed —
+      // so always carry the others along (marked unchanged) for the
+      // frontend's sibling lookup to use.
+      if (modeChanged || valueChanged) {
+        if (!fieldChanges.some((fc) => fc.field === "Mode")) {
+          fieldChanges.push({ field: "Mode", oldValue: od.mode, newValue: nd.mode, unchanged: true });
+        }
+        if (!fieldChanges.some((fc) => fc.field === "Type")) {
+          fieldChanges.push({ field: "Type", oldValue: od.type, newValue: nd.type, unchanged: true });
+        }
+        if (!fieldChanges.some((fc) => fc.field === "Value")) {
+          fieldChanges.push({ field: "Value", oldValue: od.value, newValue: nd.value, unchanged: true });
+        }
+      }
+      if (fieldChanges.length > 0) {
+        result.push({ groupLabel: nd.label, action: "edited", description: nd.label, hsnSac: "", qty: 0, rate: 0, fieldChanges });
+      }
+    }
+  });
+
+  newNorm.forEach((nd, idx) => {
+    if (!newUsed[idx]) {
+      const fieldChanges = [
+        { field: "Mode", oldValue: null, newValue: nd.mode },
+        { field: "Type", oldValue: null, newValue: nd.type },
+        { field: "Value", oldValue: null, newValue: nd.value },
+      ];
+      result.push({ groupLabel: nd.label, action: "added", description: nd.label, hsnSac: "", qty: 0, rate: 0, fieldChanges });
+    }
+  });
+
+  oldNorm.forEach((od, idx) => {
+    if (!oldUsed[idx]) {
+      const fieldChanges = [
+        { field: "Mode", oldValue: od.mode, newValue: null },
+        { field: "Type", oldValue: od.type, newValue: null },
+        { field: "Value", oldValue: od.value, newValue: null },
+      ];
+      result.push({ groupLabel: od.label, action: "removed", description: od.label, hsnSac: "", qty: 0, rate: 0, fieldChanges });
+    }
+  });
+
+  return result;
 };
 
 const normalizeLineItem = (li) => ({
@@ -3486,7 +3537,7 @@ exports.saveInvoice = async (req, res) => {
     const {
       invoiceDate, dueDate, poNumber, projectName, placeOfSupply,
       billToName, billToAddress, billToGstin, billToPan,
-      lineItems, discountLabel, discountMode, discountType, discountValue,
+      lineItems, discounts,
       cgstPercent, sgstPercent, igstPercent, rounding, signatureMode,
     } = req.body;
 
@@ -3505,10 +3556,14 @@ exports.saveInvoice = async (req, res) => {
       billToGstin: billToGstin || "",
       billToPan: billToPan || "",
       lineItems: Array.isArray(lineItems) ? lineItems : [],
-      discountLabel: discountLabel || "Discount",
-      discountMode: discountMode === "add" ? "add" : "decrease",
-      discountType: discountType === "amount" ? "amount" : "percent",
-      discountValue: Number(discountValue) || 0,
+      discounts: Array.isArray(discounts)
+        ? discounts.map((d) => ({
+            label: d.label || "Discount",
+            mode: d.mode === "add" ? "add" : "decrease",
+            type: d.type === "amount" ? "amount" : "percent",
+            value: Number(d.value) || 0,
+          }))
+        : [],
       cgstPercent: Number(cgstPercent) || 0,
       sgstPercent: Number(sgstPercent) || 0,
       igstPercent: Number(igstPercent) || 0,
@@ -3526,11 +3581,13 @@ exports.saveInvoice = async (req, res) => {
     if (wasExisting) {
       const changes = buildInvoiceDiff(order.invoiceData, newInvoiceData);
       const lineItemChanges = buildLineItemDiff(order.invoiceData?.lineItems, newInvoiceData.lineItems);
-      if (changes.length > 0 || lineItemChanges.length > 0) {
+      const discountChanges = buildDiscountDiff(order.invoiceData?.discounts, newInvoiceData.discounts);
+      if (changes.length > 0 || lineItemChanges.length > 0 || discountChanges.length > 0) {
         order.invoiceHistory.push({
           action: "updated",
           changes,
           lineItemChanges,
+          discountChanges,
           editedBy,
           editedAt: new Date(),
         });
