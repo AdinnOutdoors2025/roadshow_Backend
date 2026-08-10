@@ -131,7 +131,8 @@ const allowedOrigins = [
   "https://frontend-roadshow-97ae.vercel.app",
   "https://frontend-roadshow-*-your-username.vercel.app",
   "https://ratecard-with-quotation-roadshow-ne.vercel.app",
-  "https://roadshowfrontend.netlify.app/"
+  "https://roadshowfrontend.netlify.app/",
+  "https://roadshow-backend.onrender.com"
 
 ];
 
