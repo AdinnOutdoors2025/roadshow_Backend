@@ -29,12 +29,20 @@ const productenquiry = require("./Routes/Productenquiry/productenquiry");
 const ContactEnquiryRoutes = require("./Routes/ContactEnquiryRoute/ContactEnquiryRoute");
 const packageRoutes = require('./Routes/PackageManagementRoutes/packagemanagement');
 const adminOrderRoutes = require("./Routes/AdminorderRoutes/AdminorderRoutes");
+const SalesOrderRoutes = require("./Routes/Salesorderroutes/salesorderRoutes");
+const DriverLocationRoutes = require("./Routes/driverlocationRoutes/driverlocationroutes");
 const locationRoutes = require('./Routes/locationRoutes/locationRoutes');
 const vehicleTypeRoutes = require("./Routes/VehicleTypeRoutes");
 const gstDetailRoutes = require('./Routes/GstDetailRoutes/gstDetailRoutes');
 const promoterroutes = require('./Routes/Promoterroutes/Promoterroutes');
 const Driverdetailsroutes = require('./Routes/DriverdetailsRoutes/Driverdetailsroute');
 const RoadshowQuotationRoutes  = require('./Routes/roadshowQuotation/roadshowQuotationRoute')
+const clientRequestRoutes = require('./Routes/ClientRequestRoutes/ClientRequestRoutes');
+const projectSettingRoutes = require('./Routes/ProjectSettingRoutes/ProjectSettingRoutes');
+const rolePermissionRoutes = require('./Routes/RolePermissionRoutes/RolePermissionRoutes');
+const shortUrlRoutes = require("./routes/shortUrl.routes.js");
+// CLIENT AUTHENTICATION 
+const clientAuthRoutes = require("./Routes/ClientAuthRoutes/ClientAuthRoutes.js");
 //Image upload requirements
 const multer = require("multer");
 const path = require("path");
@@ -115,15 +123,14 @@ app.use(cors({
 
 const allowedOrigins = [
   "http://localhost:3000",
-  // "http://192.168.2.159:3000",
-  // "https://frontend-roadshow.vercel.app",
-  // "https://frontend-roadshow-97ae.vercel.app",
-  // "https://frontend-roadshow-*-your-username.vercel.app",
-  "https://roadshowfrontend.netlify.app",
+  "http://localhost:3002",
+  "http://localhost:5173",
   "https://roadshowratecard.netlify.app",
-  "https://roadshowratecardquotation.netlify.app",
-  "https://roadshow-ratecard-quotation.netlify.app",
-  "https://adinn-space.sgp1.cdn.digitaloceanspaces.com/roadshowRateCard/vehicles.json"
+  "http://192.168.2.159:3000",
+  "https://frontend-roadshow.vercel.app",
+  "https://frontend-roadshow-97ae.vercel.app",
+  "https://frontend-roadshow-*-your-username.vercel.app",
+  "https://ratecard-with-quotation-roadshow-ne.vercel.app"
 ];
 
 app.use(
@@ -209,12 +216,19 @@ app.use('/productenquiry', productenquiry);
 app.use(ContactEnquiryRoutes);
 app.use('/packages', packageRoutes);
 app.use("/admin", adminOrderRoutes);
+app.use("/sales", SalesOrderRoutes);
+app.use("/api/orders", DriverLocationRoutes);
 app.use('/locations', locationRoutes);
 app.use('/gstdetails', gstDetailRoutes);
 app.use('/promoters', promoterroutes);
 app.use('/drivers', Driverdetailsroutes);
 app.use("/api/roadshow-quotations", RoadshowQuotationRoutes);
-
+app.use('/client-requests', clientRequestRoutes);
+app.use('/project-settings', projectSettingRoutes);
+app.use(rolePermissionRoutes);
+app.use("/", shortUrlRoutes);
+// CLIENT AUTHENTICATION 
+app.use( "/api/client-auth", clientAuthRoutes );
 // VEHICLE DETAILS STORED WITH CRUD OPERATIONS
 //IMAGE UPLOAD CLOUDINARY CORRECTED CODE
 const { CloudinaryStorage } = require("multer-storage-cloudinary");

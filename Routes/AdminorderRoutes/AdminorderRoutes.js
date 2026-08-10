@@ -1,5 +1,3 @@
-
-
 const path = require("path");
 const fs = require("fs");
 const express = require("express");
@@ -14,6 +12,19 @@ const spacesClient = require("../../config/spaces");
 
 const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
 const BUCKET_NAME = process.env.DO_SPACES_BUCKET || "adinn-space";
+
+
+const sanitizeFilename = (originalname) => {
+  const ext = path.extname(originalname);
+  const base = path.basename(originalname, ext);
+  const safeBase = base
+    .replace(/[#%?&+=\s]+/g, "-")     
+    .replace(/[^a-zA-Z0-9.\-_]/g, "") 
+    .replace(/-+/g, "-")              
+    .replace(/^-+|-+$/g, "")          
+    .slice(0, 100);                  
+  return `${safeBase || "file"}${ext}`;
+};
 
 
 const pipelineFileFilter = (req, file, cb) => {
@@ -56,21 +67,29 @@ if (STORAGE_TYPE === "space") {
       cb(null, uploadPath);
     },
     filename: (req, file, cb) => {
-      cb(null, `admin-${Date.now()}-${file.originalname}`);
+      const safeName = sanitizeFilename(file.originalname);
+      cb(null, `admin-${Date.now()}-${safeName}`);
     },
   });
 }
 
 const pipelineUpload = multer({
   storage: pipelineStorage,
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: pipelineFileFilter,
 }).any();
 
 // ── Routes ─────────────────────────────────────────────────────────────────
 router.get("/pipeline", protect, ctrl.getOrdersByPipeline);
 router.patch("/pipeline/:orderId", protect, pipelineUpload, ctrl.updateOrderPipeline);
-
+router.put("/orders/:id", protect, adminOrderUpload, ctrl.updateAdminOrder);
+router.patch("/pipeline/:id/reassign-handler", protect, ctrl.reassignOpsHandler);
+router.patch(
+  "/pipeline/:id/handover/:assignmentId/resolve",
+  protect,
+  ctrl.resolveOpsHandlerHandover
+);
+router.post("/pipeline/:id/onroad-release/:entryId", protect, ctrl.releaseOnRoadVehicle);
 
 router.post(
   "/pipeline/:id/documents",
@@ -79,18 +98,74 @@ router.post(
   ctrl.uploadStageDocument
 );
 
+router.patch("/pipeline/:id/onroad-driver/:entryId", protect, ctrl.updateOnRoadDriver);
+router.post("/pipeline/:id/onroad-issue", protect, pipelineUpload, ctrl.addOnRoadIssue);
+router.patch("/pipeline/:id/onroad-issue/:issueId/resolve", protect, pipelineUpload, ctrl.resolveOnRoadIssue);
+router.post("/pipeline/:id/onroad-unavailable", protect, pipelineUpload, ctrl.markVehicleUnavailable);
+router.post("/pipeline/:id/onroad-replace/:entryId", protect, pipelineUpload, ctrl.replaceOnRoadVehicle);
+router.patch("/pipeline/:id/onroad-unavailable/:historyId/available", protect, pipelineUpload, ctrl.markVehicleAvailable);
+
 router.patch("/pipeline/:id/todo-uploader", protect, ctrl.saveTodoUploadedBy);
+router.post(
+  "/pipeline/:id/campaign-closure/:closureId/chat",
+  protect,
+  pipelineUpload,
+  ctrl.sendFocChatMessage
+);
 
 router.post("/pipeline/:id/onroad-details", protect, pipelineUpload, ctrl.submitOnRoadDetails);
 router.patch("/pipeline/:id/onroad-status/:entryId", protect, ctrl.updateOnRoadStatus);
+router.post(
+  "/pipeline/:id/closed-won",
+  protect,
+  pipelineUpload,
+  ctrl.submitOrderClosedWon
+);
+
+router.post(
+  "/pipeline/:id/closed-lost",
+  protect,
+  pipelineUpload,
+  ctrl.submitOrderClosedLost
+);
 
 router.put("/pipeline/:id/onroad-details/:entryId", protect, ctrl.editOnRoadDetails);
 
-router.get("/orders", protect, ctrl.getAllOrders);  
+router.post("/pipeline/:id/client-feedback", protect, pipelineUpload, ctrl.submitClientFeedback);
+router.post("/pipeline/:id/campaign-closure", protect, pipelineUpload, ctrl.submitCampaignClosure);
+router.patch("/pipeline/:id/campaign-closure/:closureId", protect, pipelineUpload, ctrl.updateCampaignClosure);
+router.patch(
+  "/pipeline/:id/campaign-closure/:closureId/approve",
+  protect,
+  pipelineUpload,
+  ctrl.approveFocEntry
+);
+router.post(
+  "/pipeline/:id/foc/create-and-approve", 
+  protect,
+  pipelineUpload,
+  ctrl.createAndApproveFocEntry
+);
+
+router.post("/pipeline/:id/extra-km", protect, ctrl.addExtraKmDetails);
+router.post("/pipeline/:id/daily-hours", protect, ctrl.addDailyHoursLog);
+router.post("/pipeline/:id/compensation", protect, ctrl.addCampaignCompensation);
+router.post("/pipeline/:id/purchased-pool-window", protect, ctrl.setPurchasedPoolWindow);
+router.get("/pipeline/:id/campaign-calculator", protect, ctrl.getCampaignCalculator);
+router.patch("/pipeline/:id/invoice", protect, ctrl.saveInvoice);
+router.get("/pipeline/:id/day-by-day-history", protect, ctrl.getDayByDayHistory);
+
+router.get("/pipeline/project-codes", protect, ctrl.getProjectCodeOrders);
+
+router.get("/orders", protect, ctrl.getAllOrders);
+router.get("/orders/by-id/:id", protect, ctrl.getOrderByMongoId);
 router.get("/orders/:orderId", ctrl.getOrderById);
-router.post("/orders/create", protect, adminOrderUpload, ctrl.createAdminOrder);
+router.post("/orders/create", adminOrderUpload, ctrl.createAdminOrder);
 
 router.get("/campaign-types", ctrl.getCampaignTypes);
 router.post("/campaign-types", ctrl.createCampaignType);
+
+router.get("/vamosys/apikey", ctrl.getVamosysApiKey);
+router.get("/vamosys/vehicle-locations", ctrl.getVehicleLocationsProxy);
 
 module.exports = router;

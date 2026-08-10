@@ -560,6 +560,14 @@ const RoadshowQuotationSchema = new mongoose.Schema(
       publicUrl: String,
       cdnUrl: String,
 
+      shortUrl: {
+        provider: String,
+        shortUrl: String,
+        longUrl: String,
+        code: String,
+        createdAt: Date,
+      },
+
       signedDownloadUrlGeneratedAt: Date,
       uploadedAt: Date,
     },
