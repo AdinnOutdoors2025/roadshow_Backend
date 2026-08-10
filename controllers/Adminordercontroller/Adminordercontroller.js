@@ -3423,6 +3423,31 @@ const buildDiscountDiff = (oldDiscounts = [], newDiscounts = []) => {
     }
   });
 
+  // Second pass — a still-unmatched old/new pair with an identical
+  // mode+type+value is the same discount with just its label edited
+  // (e.g. "Tolcharge" -> "Testcase"), not a genuine remove+add. Surface
+  // that as a single "renamed" entry so it reads clearly in the history.
+  newNorm.forEach((nd, niIdx) => {
+    if (newUsed[niIdx]) return;
+    const oiIdx = oldNorm.findIndex(
+      (od, idx) => !oldUsed[idx] && od.mode === nd.mode && od.type === nd.type && od.value === nd.value
+    );
+    if (oiIdx !== -1) {
+      oldUsed[oiIdx] = true;
+      newUsed[niIdx] = true;
+      const od = oldNorm[oiIdx];
+      result.push({
+        groupLabel: nd.label,
+        action: "renamed",
+        description: nd.label,
+        hsnSac: "",
+        qty: 0,
+        rate: 0,
+        fieldChanges: [{ field: "Label", oldValue: od.label, newValue: nd.label }],
+      });
+    }
+  });
+
   newNorm.forEach((nd, idx) => {
     if (!newUsed[idx]) {
       const fieldChanges = [

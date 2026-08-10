@@ -653,7 +653,7 @@ const invoiceLineItemFieldChangeSchema = new mongoose.Schema(
 const invoiceLineItemChangeSchema = new mongoose.Schema(
   {
     groupLabel: { type: String, default: "" },
-    action: { type: String, enum: ["added", "removed", "edited"], default: "edited" },
+    action: { type: String, enum: ["added", "removed", "edited", "renamed"], default: "edited" },
     description: { type: String, default: "" },
     hsnSac: { type: String, default: "" },
     qty: { type: Number, default: 0 },
