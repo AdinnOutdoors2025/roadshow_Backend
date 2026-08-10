@@ -40,7 +40,7 @@ const RoadshowQuotationRoutes  = require('./Routes/roadshowQuotation/roadshowQuo
 const clientRequestRoutes = require('./Routes/ClientRequestRoutes/ClientRequestRoutes');
 const projectSettingRoutes = require('./Routes/ProjectSettingRoutes/ProjectSettingRoutes');
 const rolePermissionRoutes = require('./Routes/RolePermissionRoutes/RolePermissionRoutes');
-const shortUrlRoutes = require("./routes/shortUrl.routes.js");
+const shortUrlRoutes = require("./Routes/shortUrl.routes.js");
 // CLIENT AUTHENTICATION 
 const clientAuthRoutes = require("./Routes/ClientAuthRoutes/ClientAuthRoutes.js");
 //Image upload requirements
