@@ -11,7 +11,8 @@
 
 **Roadshow Backend** (Adinn Outdoors) — Express 5 + Mongoose 8 REST API for outdoor-advertising vehicle booking and campaign management. Single entry point `VehicleMain.js`, port 3001, shared production MongoDB Atlas cluster.
 
-- **Branch:** `karthi-claude` (main branch is `main`)
+- **Branch:** `main` (tracking `origin/main`)
+- **Deploy target:** Render — `https://roadshow-backend.onrender.com`, deployed from `main`
 - **State:** actively developed, in production use
 - **Working tree:** clean apart from the `.claude/` and `docs/` additions
 

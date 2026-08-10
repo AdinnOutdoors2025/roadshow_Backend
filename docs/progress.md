@@ -19,7 +19,7 @@
 
 ## Commit history — feature work to date
 
-Reconstructed from git log. Branch `karthi-claude`.
+Reconstructed from git log. Branch `main`.
 
 ### 2026-08 — pipeline & permissions
 
