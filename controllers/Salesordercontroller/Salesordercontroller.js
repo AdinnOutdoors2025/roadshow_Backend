@@ -945,6 +945,20 @@ exports.saveProjectCode = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
+    const duplicateProjectCode = await Order.findOne({
+      _id: { $ne: id },
+      "projectCodeArray.projectCode": projectCode.trim(),
+    });
+    if (duplicateProjectCode)
+      return errorResponse(res, "Project code already registered", null, 409);
+
+    const duplicateEstimationCode = await Order.findOne({
+      _id: { $ne: id },
+      "projectCodeArray.estimationCode": estimationCode.trim(),
+    });
+    if (duplicateEstimationCode)
+      return errorResponse(res, "Estimation code already registered", null, 409);
+
     const savedBy = req.user?.username || order.salesHandlerName || "Admin";
 
     order.projectCodeArray.push({

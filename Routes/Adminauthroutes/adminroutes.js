@@ -10,7 +10,9 @@ const { registerAdmin, loginAdmin, getAdminProfile, updateOwnProfile, createStaf
   createOperationUser,
   getAllOperationUsers,
   updateOperationUser,
-  deleteOperationUser, } = require('../../controllers/Adminauthcontroller/admincontroller');
+  deleteOperationUser,
+  forgotPasswordReset,
+  checkSession, } = require('../../controllers/Adminauthcontroller/admincontroller');
 
 
 const {
@@ -22,6 +24,7 @@ const {
 
 router.post('/register-admin', registerAdmin);
 router.post('/admin',   loginAdmin);
+router.post('/admin/forgot-password/reset', forgotPasswordReset);
 router.post('/staff-admins',protect,  createStaffAdmin);
 router.get('/staff-admins',  protect,getAllStaffAdmins);
 router.put('/staff-admins/:id',  protect,  updateStaffAdmin);
@@ -33,6 +36,7 @@ router.put('/operation-users/:id',  protect,  updateOperationUser);
 router.delete('/operation-users/:id',protect, deleteOperationUser);
 
 router.put('/admin/update-profile', protect, updateOwnProfile);
+router.get('/admin/session-check', protect, checkSession);
 
 router.get('/me',
     protect,        

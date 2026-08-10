@@ -585,6 +585,21 @@ const invoiceLineItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// One row per discount — supports multiple simultaneous discounts (e.g.
+// "Toll Charges" + "Loading Charges"), replacing the old single-discount
+// discountLabel/discountMode/discountType/discountValue fields (kept below,
+// unused by new saves, purely so already-saved old-format invoices still
+// read back their single discount for the frontend's migration fallback).
+const invoiceDiscountSchema = new mongoose.Schema(
+  {
+    label: { type: String, default: "Discount" },
+    mode: { type: String, enum: ["add", "decrease"], default: "decrease" },
+    type: { type: String, enum: ["percent", "amount"], default: "percent" },
+    value: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const invoiceDataSchema = new mongoose.Schema(
   {
     invoiceNumber: { type: String, default: "" },
@@ -598,6 +613,9 @@ const invoiceDataSchema = new mongoose.Schema(
     billToGstin: { type: String, default: "" },
     billToPan: { type: String, default: "" },
     lineItems: { type: [invoiceLineItemSchema], default: [] },
+    discounts: { type: [invoiceDiscountSchema], default: [] },
+    // Legacy single-discount fields — no longer written by saveInvoice, kept
+    // only so pre-migration documents still expose their old discount value.
     discountLabel: { type: String, default: "Discount" },
     discountMode: { type: String, enum: ["add", "decrease"], default: "decrease" },
     discountType: { type: String, enum: ["percent", "amount"], default: "percent" },
@@ -650,6 +668,11 @@ const invoiceHistorySchema = new mongoose.Schema(
     action: { type: String, enum: ["created", "updated"], default: "updated" },
     changes: { type: [invoiceHistoryChangeSchema], default: [] },
     lineItemChanges: { type: [invoiceLineItemChangeSchema], default: [] },
+    // Same added/removed/edited shape as lineItemChanges, reused for
+    // multi-row discounts — kept as its own array (not merged into
+    // lineItemChanges) so the history UI can render it under its own
+    // "Discounts" heading instead of inside "Line Items by Vehicle Type".
+    discountChanges: { type: [invoiceLineItemChangeSchema], default: [] },
     editedBy: { type: String, default: "" },
     editedAt: { type: Date, default: Date.now },
   },
