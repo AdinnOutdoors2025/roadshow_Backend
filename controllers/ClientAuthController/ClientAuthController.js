@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const axios = require("axios");
 
 const ClientUser = require("../../Models/ClientLoginModel/ClientLoginSchema");
+const GstDetail = require("../../Models/GstDetailsModel/gstdetails");
 const otpStore = {};
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -16,7 +17,9 @@ function generateToken(user) {
             name: user.name,
             email: user.email,
             phone: user.phone,
-            userType: user.userType
+            userType: user.userType,
+            accountType: user.accountType || "individual",
+            gstDetailId: user.gstDetailId ? String(user.gstDetailId._id || user.gstDetailId) : null
         },
 
         JWT_SECRET,
@@ -27,6 +30,59 @@ function generateToken(user) {
     );
 
 }
+
+/**
+ * Shape a ClientUser (with gstDetailId optionally populated) for the client.
+ * Agencies get a flat `business` object so the frontend never has to know
+ * whether the reference was populated.
+ */
+function shapeClientUser(user) {
+    const plain = user.toObject ? user.toObject() : { ...user };
+    const gst = plain.gstDetailId;
+    const isPopulated = gst && typeof gst === "object" && gst.gst_number;
+
+    return {
+        ...plain,
+        userType: plain.userType || 2,
+        accountType: plain.accountType || "individual",
+        gstDetailId: gst ? String(isPopulated ? gst._id : gst) : null,
+        business: isPopulated
+            ? {
+                gst_number: gst.gst_number,
+                business_name: gst.business_name,
+                business_pan: gst.business_pan,
+                business_address: gst.business_address,
+                business_entity_type: gst.business_entity_type,
+                business_registration_type: gst.business_registration_type,
+                business_registration_date: gst.business_registration_date,
+                business_department_code: gst.business_department_code,
+                nature_of_business: gst.nature_of_business,
+                status: gst.status
+            }
+            : null
+    };
+}
+
+/**
+ * Resolve the GST record an agency signup claims, by id or number.
+ * Never trusts the client-supplied business details — only the stored record
+ * counts, so a forged payload cannot invent a company.
+ */
+async function resolveAgencyGst({ gstDetailId, gstNumber }) {
+    let record = null;
+
+    if (gstDetailId && require("mongoose").Types.ObjectId.isValid(gstDetailId)) {
+        record = await GstDetail.findById(gstDetailId);
+    }
+
+    if (!record && gstNumber) {
+        record = await GstDetail.findOne({
+            gst_number: String(gstNumber).trim().toUpperCase()
+        });
+    }
+
+    return record;
+}
 // Configuration
 const NETTYFISH_API_KEY = process.env.NETTYFISH_API_KEY || 'aspv58uRbkqDbhCcCN87Mw';
 const NETTYFISH_SENDER_ID = process.env.NETTYFISH_SENDER_ID || 'ADINAD';
@@ -35,7 +91,8 @@ const NETTYFISH_TEMPLATE_ID = process.env.NETTYFISH_TEMPLATE_ID || '100781152302
 // SEND OTP
 exports.sendClientOtp = async (req, res) => {
     try {
-        const { name, email, phone, mode } = req.body; // mode: "register" or "login"
+        // mode: "register" or "login"
+        const { name, email, phone, mode, accountType, gstNumber, gstDetailId } = req.body;
 
         if (!phone) {
             return res.status(400).json({ success: false, message: "Phone required" });
@@ -43,6 +100,9 @@ exports.sendClientOtp = async (req, res) => {
 
         const userExists = await ClientUser.findOne({ phone });
         const emailExists = email ? await ClientUser.findOne({ email }) : null;
+
+        const requestedAccountType = accountType === "agency" ? "agency" : "individual";
+        let agencyGst = null;
 
         if (mode === "register") {
             // Require all fields for registration
@@ -56,6 +116,26 @@ exports.sendClientOtp = async (req, res) => {
             }
             if (emailExists && emailExists.email === email) {
                 return res.status(409).json({ success: false, message: "Email already exists" });
+            }
+
+            /* An agency's identity is its GST registration — verify it exists
+               here rather than trusting whatever the browser posted. */
+            if (requestedAccountType === "agency") {
+                agencyGst = await resolveAgencyGst({ gstDetailId, gstNumber });
+
+                if (!agencyGst) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "A verified GST number is required for an agency account"
+                    });
+                }
+
+                if (agencyGst.status && agencyGst.status !== "Active") {
+                    return res.status(400).json({
+                        success: false,
+                        message: `This GST registration is "${agencyGst.status}". An Active GSTIN is required.`
+                    });
+                }
             }
         }
 
@@ -71,7 +151,12 @@ exports.sendClientOtp = async (req, res) => {
             otp,
             expires: Date.now() + 300000, // 5 min
             name,
-            email
+            email,
+            /* Carried across the OTP round-trip — the user record is only
+               created at verify time, so this is where the agency identity
+               has to survive. */
+            accountType: mode === "register" ? requestedAccountType : undefined,
+            gstDetailId: agencyGst ? agencyGst._id : null
         };
 
         if (OTP_MODE === "local") {
@@ -118,15 +203,21 @@ exports.verifyClientOtp = async (req, res) => {
                 name: saved.name,
                 email: saved.email,
                 phone,
-                userType: 2
+                userType: 2,
+                accountType: saved.accountType || "individual",
+                gstDetailId: saved.gstDetailId || null
             });
         }
+
+        /* Business details are read live from GstDetail rather than copied,
+           so a corrected GST record is reflected on the next login. */
+        await user.populate("gstDetailId");
 
         const token = generateToken(user);
         res.json({
             success: true,
             token,
-            user
+            user: shapeClientUser(user)
         });
 
     } catch (err) {

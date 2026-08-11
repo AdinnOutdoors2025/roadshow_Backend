@@ -82,6 +82,28 @@ const createGstDetail = async (req, res) => {
 };
 
 
+/**
+ * Full public shape of a verified GST record.
+ *
+ * The frontend renders every one of these (business card on the agency
+ * signup, campaign request and admin order-creation) and gates on `status`,
+ * so the projection must not be trimmed.
+ */
+const toVerifiedGstPayload = (record, source) => ({
+    gstDetailId: record._id,
+    gst_number: record.gst_number,
+    business_name: record.business_name,
+    business_address: record.business_address,
+    business_pan: record.business_pan,
+    business_entity_type: record.business_entity_type,
+    business_registration_type: record.business_registration_type,
+    business_registration_date: record.business_registration_date,
+    business_department_code: record.business_department_code,
+    nature_of_business: record.nature_of_business,
+    status: record.status,
+    source,
+});
+
 const verifyGstNumber = async (req, res) => {
     try {
         const { gst_number } = req.body;
@@ -95,14 +117,11 @@ const verifyGstNumber = async (req, res) => {
       
         const existing = await GstDetail.findOne({ gst_number: gstUpper });
         if (existing) {
-            return successResponse(res, 'GST verified from database', {
-                gstDetailId: existing._id,
-                business_name: existing.business_name,
-                business_address: existing.business_address,
-                business_pan: existing.business_pan,
-                gst_number: existing.gst_number,
-                source: 'database',
-            });
+            return successResponse(
+                res,
+                'GST verified from database',
+                toVerifiedGstPayload(existing, 'database')
+            );
         }
 
       
@@ -164,14 +183,11 @@ const verifyGstNumber = async (req, res) => {
             nature_of_business: gstData.nature_of_business || '',
         });
 
-        return successResponse(res, 'GST verified and saved successfully', {
-            gstDetailId: newGst._id,
-            business_name: newGst.business_name,
-            business_address: newGst.business_address,
-            business_pan: newGst.business_pan,
-            gst_number: newGst.gst_number,
-            source: 'api',
-        });
+        return successResponse(
+            res,
+            'GST verified and saved successfully',
+            toVerifiedGstPayload(newGst, 'api')
+        );
 
     } catch (error) {
         return errorResponse(res, 'GST verification failed', error.message, 500);

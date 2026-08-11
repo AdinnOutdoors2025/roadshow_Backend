@@ -100,6 +100,45 @@ const clientRequestSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+
+    /* ── Agency / organization billing identity ──────────────────────────
+       Set when the request comes from a GST-verified agency. `name`/`phone`/
+       `email` above stay the contact person; these describe who is billed.
+       Admin order-creation reads them so an agency booking never has to be
+       re-typed or re-verified there. */
+    customerCategory: {
+      type: String,
+      enum: ["individual", "organization"],
+      default: "individual",
+    },
+    gstDetailId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "GstDetail",
+      default: null,
+    },
+    gstNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "",
+    },
+    companyName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    panNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "",
+    },
+    address: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     campaignType: {
       type: String,
       trim: true,

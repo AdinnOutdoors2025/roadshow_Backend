@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const ClientRequest = require("../../Models/ClientRequestModel/Clientrequestmodel");
+const GstDetail = require("../../Models/GstDetailsModel/gstdetails");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -105,6 +106,58 @@ const populateClientRequest = (query) =>
     .populate("userId", "name email phone")
     .populate("vehicleTypes.vehicleType", "name");
 
+/**
+ * Resolve the billing identity for a request.
+ *
+ * Company name, PAN and address are taken from the stored GST record, never
+ * from the request body — the browser can claim a GST number, but only what
+ * was actually verified gets persisted.
+ */
+const resolveBillingIdentity = async ({
+  customerCategory,
+  gstNumber,
+  gstDetailId,
+}) => {
+  const isOrganization = customerCategory === "organization";
+
+  if (!isOrganization) {
+    return { customerCategory: "individual" };
+  }
+
+  let record = null;
+
+  if (gstDetailId && mongoose.Types.ObjectId.isValid(gstDetailId)) {
+    record = await GstDetail.findById(gstDetailId);
+  }
+
+  if (!record && gstNumber) {
+    record = await GstDetail.findOne({
+      gst_number: String(gstNumber).trim().toUpperCase(),
+    });
+  }
+
+  if (!record) {
+    throw new Error(
+      "An organization request requires a verified GST number"
+    );
+  }
+
+  if (record.status && record.status !== "Active") {
+    throw new Error(
+      `This GST registration is "${record.status}". An Active GSTIN is required.`
+    );
+  }
+
+  return {
+    customerCategory: "organization",
+    gstDetailId: record._id,
+    gstNumber: record.gst_number,
+    companyName: record.business_name || "",
+    panNumber: record.business_pan || "",
+    address: record.business_address || "",
+  };
+};
+
 exports.createClientRequest = async (req, res) => {
   try {
     const {
@@ -121,6 +174,9 @@ exports.createClientRequest = async (req, res) => {
       gstPercentage,
       gstAmount,
       estimatedTotal,
+      customerCategory,
+      gstNumber,
+      gstDetailId,
     } = req.body;
 
     // Validation
@@ -139,6 +195,12 @@ exports.createClientRequest = async (req, res) => {
     }
 
     const processedVehicleTypes = normalizeVehicleTypes(vehicleTypes);
+
+    const billing = await resolveBillingIdentity({
+      customerCategory,
+      gstNumber,
+      gstDetailId,
+    });
 
     let clientRequest = null;
 
@@ -168,6 +230,7 @@ exports.createClientRequest = async (req, res) => {
           gstPercentage: Number(gstPercentage || 0),
           gstAmount: Number(gstAmount || 0),
           estimatedTotal: Number(estimatedTotal || 0),
+          ...billing,
         });
 
         break;
