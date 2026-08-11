@@ -1,3 +1,4 @@
+const path = require("path");
 const mongoose = require("mongoose");
 const ClientRequest = require("../../Models/ClientRequestModel/Clientrequestmodel");
 const GstDetail = require("../../Models/GstDetailsModel/gstdetails");
@@ -64,12 +65,70 @@ const calculateTotalDays = (fromDate, toDate) => {
   return Math.floor((toUtc - fromUtc) / MILLISECONDS_PER_DAY) + 1;
 };
 
-const normalizeVehicleTypes = (vehicleTypes) => {
+const toNonNegativeNumber = (value) => {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const toStringArray = (value) =>
+  Array.isArray(value)
+    ? value
+        .filter((item) => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : [];
+
+/**
+ * Resolve a stored upload to a URL.
+ *
+ * Mirrors getFileUrl in the admin order controller: Spaces uploads carry an
+ * absolute `location`, local disk uploads are served from /uploads.
+ */
+const getFileUrl = (file) => {
+  if (!file) return null;
+  if (file.location) return file.location;
+
+  return `/uploads/${path.basename(file.path)}`;
+};
+
+/**
+ * Campaign media for one vehicle line, keyed by position.
+ *
+ * The client posts `campaignImages_<index>` / `campaignVideos_<index>`, the
+ * same convention admin order creation uses. Requests with no files at all
+ * (the JSON path) get empty arrays and behave exactly as before.
+ */
+const collectMediaForIndex = (files, index) => {
+  const uploaded = Array.isArray(files) ? files : [];
+
+  return {
+    campaignImages: uploaded
+      .filter((file) => file.fieldname === `campaignImages_${index}`)
+      .map(getFileUrl)
+      .filter(Boolean),
+
+    campaignVideos: uploaded
+      .filter((file) => file.fieldname === `campaignVideos_${index}`)
+      .map(getFileUrl)
+      .filter(Boolean),
+  };
+};
+
+/**
+ * Normalizes the vehicle lines.
+ *
+ * Everything above the "campaign details" comment is unchanged from the
+ * original implementation. The block below it is additive: each field falls
+ * back to a neutral default, so a caller that sends none of them produces
+ * exactly the same document it produced before.
+ */
+const normalizeVehicleTypes = (vehicleTypes, files) => {
   if (!Array.isArray(vehicleTypes) || vehicleTypes.length === 0) {
     throw new Error("vehicleTypes is required");
   }
 
-  return vehicleTypes.map((vehicle) => {
+  return vehicleTypes.map((vehicle, index) => {
     if (!vehicle.vehicleType) {
       throw new Error("Each vehicle requires vehicleType");
     }
@@ -86,6 +145,12 @@ const normalizeVehicleTypes = (vehicleTypes) => {
 
     const totalDays = calculateTotalDays(vehicle.fromDate, vehicle.toDate);
 
+    /* Freshly uploaded media wins; otherwise keep whatever the caller
+       already had (an update replaying stored URLs, for instance). */
+    const media = collectMediaForIndex(files, index);
+
+    const needPromoter = Boolean(vehicle.needPromoter);
+
     return {
       vehicleId: vehicle.vehicleId || undefined,
       vehicleType: vehicle.vehicleType,
@@ -97,6 +162,47 @@ const normalizeVehicleTypes = (vehicleTypes) => {
       totalDays,
       pricePerDay: Number(vehicle.pricePerDay || 0),
       lineTotal: Number(vehicle.lineTotal || 0),
+
+      /* ── Campaign details (additive) ─────────────────────────────────── */
+      campaignType: String(vehicle.campaignType || "").trim(),
+      otherCampaignType: String(vehicle.otherCampaignType || "").trim(),
+      campaignName: String(vehicle.campaignName || "").trim(),
+
+      needPromoter,
+      /* The toggle being off zeroes the promoter block outright, so a
+         client that sends stale values cannot smuggle a charge through. */
+      promoterType: needPromoter
+        ? String(vehicle.promoterType || "").trim()
+        : "",
+      otherPromoterType: needPromoter
+        ? String(vehicle.otherPromoterType || "").trim()
+        : "",
+      promoterGender: needPromoter
+        ? String(vehicle.promoterGender || "").trim()
+        : "",
+      promoterLanguage: needPromoter
+        ? toStringArray(vehicle.promoterLanguage)
+        : [],
+      promoterQuantity: needPromoter
+        ? Math.floor(toNonNegativeNumber(vehicle.promoterQuantity))
+        : 0,
+      promoterChargePerDay: needPromoter
+        ? toNonNegativeNumber(vehicle.promoterChargePerDay)
+        : 0,
+      promoterCost: needPromoter
+        ? toNonNegativeNumber(vehicle.promoterCost)
+        : 0,
+
+      rentalCost: toNonNegativeNumber(vehicle.rentalCost),
+      rtoCost: toNonNegativeNumber(vehicle.rtoCost),
+
+      campaignImages: media.campaignImages.length
+        ? media.campaignImages
+        : toStringArray(vehicle.campaignImages),
+
+      campaignVideos: media.campaignVideos.length
+        ? media.campaignVideos
+        : toStringArray(vehicle.campaignVideos),
     };
   });
 };
@@ -158,8 +264,31 @@ const resolveBillingIdentity = async ({
   };
 };
 
+/**
+ * The request body, whether it arrived as JSON or multipart.
+ *
+ * Campaign media means the public flow now posts multipart/form-data, where
+ * every value would otherwise be a string — so the whole body travels as one
+ * JSON blob in a `payload` field. Requests without it (every existing caller,
+ * including the admin panel and the previous review modal) fall straight
+ * through to req.body untouched.
+ */
+const readRequestBody = (req) => {
+  const payload = req.body?.payload;
+
+  if (typeof payload !== "string") return req.body || {};
+
+  try {
+    return JSON.parse(payload);
+  } catch {
+    throw new Error("Invalid request payload");
+  }
+};
+
 exports.createClientRequest = async (req, res) => {
   try {
+    const body = readRequestBody(req);
+
     const {
       name,
       email,
@@ -177,7 +306,11 @@ exports.createClientRequest = async (req, res) => {
       customerCategory,
       gstNumber,
       gstDetailId,
-    } = req.body;
+      cgstAmount,
+      sgstAmount,
+      igstAmount,
+      promoterTotal,
+    } = body;
 
     // Validation
     if (!name || !phone || !userId) {
@@ -194,7 +327,10 @@ exports.createClientRequest = async (req, res) => {
       });
     }
 
-    const processedVehicleTypes = normalizeVehicleTypes(vehicleTypes);
+    const processedVehicleTypes = normalizeVehicleTypes(
+      vehicleTypes,
+      req.files
+    );
 
     const billing = await resolveBillingIdentity({
       customerCategory,
@@ -230,6 +366,21 @@ exports.createClientRequest = async (req, res) => {
           gstPercentage: Number(gstPercentage || 0),
           gstAmount: Number(gstAmount || 0),
           estimatedTotal: Number(estimatedTotal || 0),
+
+          /* Presentation split of the same gstAmount above — see the model.
+             Absent on requests from older callers, which keeps them at 0. */
+          cgstAmount: toNonNegativeNumber(cgstAmount),
+          sgstAmount: toNonNegativeNumber(sgstAmount),
+          igstAmount: toNonNegativeNumber(igstAmount),
+
+          /* Falls back to the sum of the lines when not sent explicitly */
+          promoterTotal:
+            toNonNegativeNumber(promoterTotal) ||
+            processedVehicleTypes.reduce(
+              (total, vehicle) => total + (vehicle.promoterCost || 0),
+              0
+            ),
+
           ...billing,
         });
 
@@ -336,11 +487,16 @@ exports.updateClientRequest = async (req, res) => {
       });
     }
 
-    const updateData = { ...req.body };
+    const updateData = { ...readRequestBody(req) };
     delete updateData.clientOrderId;
+    /* Never persisted — it is only the multipart envelope */
+    delete updateData.payload;
 
     if (Array.isArray(updateData.vehicleTypes)) {
-      updateData.vehicleTypes = normalizeVehicleTypes(updateData.vehicleTypes);
+      updateData.vehicleTypes = normalizeVehicleTypes(
+        updateData.vehicleTypes,
+        req.files
+      );
     }
 
     if (updateData.phone) {

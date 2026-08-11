@@ -53,6 +53,94 @@ const vehicleTypeQuantitySchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+
+    /* ── Per-vehicle campaign details ──────────────────────────────────────
+       Captured by the public Campaign Details step. Every field is optional
+       with a neutral default, so a request created before this step existed
+       — or by any caller that does not send them — still validates and
+       still saves exactly as it did before. Nothing above this block
+       changed. */
+
+    campaignType: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    /* What was typed when campaignType is "Others" */
+    otherCampaignType: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    campaignName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    needPromoter: {
+      type: Boolean,
+      default: false,
+    },
+    promoterType: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    /* What was typed when promoterType is "Other" */
+    otherPromoterType: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    promoterGender: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    promoterLanguage: {
+      type: [String],
+      default: [],
+    },
+    promoterQuantity: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    /* Snapshot of the rate used, so a later change to the configured
+       promoter charge cannot silently re-price a submitted request. */
+    promoterChargePerDay: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    promoterCost: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    /* lineTotal above is the full line; these break it down */
+    rentalCost: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    rtoCost: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    /* Resolved upload URLs — same shape admin orders store */
+    campaignImages: {
+      type: [String],
+      default: [],
+    },
+    campaignVideos: {
+      type: [String],
+      default: [],
+    },
   },
   { _id: false }
 );
@@ -186,6 +274,35 @@ const clientRequestSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+
+    /* ── Tax breakdown ────────────────────────────────────────────────────
+       `gstAmount` above remains the single source of truth for the total
+       tax and is unchanged. These three only record how that same total
+       was presented: CGST + SGST for an intra-state supply, IGST for an
+       inter-state one, derived from the customer's GSTIN state code.
+       cgst + sgst + igst always equals gstAmount. */
+    cgstAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    sgstAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    igstAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    /* Sum of every line's promoterCost, for reporting without re-summing */
+    promoterTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     status: {
       type: Number,
       enum: [0, 1, 2], // 0 - todo, 1 - inprogress, 2 - completed
