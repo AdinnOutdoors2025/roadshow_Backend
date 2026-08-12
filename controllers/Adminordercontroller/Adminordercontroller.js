@@ -3891,7 +3891,13 @@ exports.getCampaignCalculator = async (req, res) => {
 
       let { start: dayWindowStart, end: dayWindowEnd } = resolveWorkWindow(dayKey, hoursLog);
       const now = new Date();
-      if (dayKey === dateKey(now) && dayWindowEnd > now) {
+      // Clamp to "now" for TODAY and any future campaign day — not just
+      // dayKey === today. Without this, a still-open (resolvedAt: null)
+      // issue/unavailable record from an earlier day got treated as
+      // spanning the FULL day window on every future day too (since it
+      // hasn't happened yet, there's nothing to clip against), massively
+      // inflating totalIssueHours/totalUnavailableHours across the campaign.
+      if (dayWindowEnd > now) {
         dayWindowEnd = now;
       }
       const entryCreatedClip =
