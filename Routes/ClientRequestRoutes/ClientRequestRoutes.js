@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   createClientRequest,
   getAllClientRequests,
+  getMyClientRequests,
   getClientRequestById,
   updateClientRequest,
   updateStatus,
@@ -20,11 +21,30 @@ const {
    routes is unaffected. */
 const { adminOrderUpload } = require('../../Middleware/orderImageupload');
 
-router.post('/', adminOrderUpload, createClientRequest);
-router.get('/',  getAllClientRequests);
-router.get('/:id',  getClientRequestById);
-router.put('/:id', adminOrderUpload, updateClientRequest);
-router.patch('/:id/status',  updateStatus);
-router.delete('/:id',  deleteClientRequest);
+/* A client request carries the customer's contact details, GSTIN, PAN,
+   company, every campaign they booked and the full price breakdown. None of
+   these routes used to ask who was calling. See clientRequestAuth.js. */
+const {
+  protectClient,
+  protectStaff,
+  allowClientOrStaff,
+} = require('./clientRequestAuth');
+
+/* Customers: place a booking, list their own, read one of their own.
+   The guard runs BEFORE multer so an unauthenticated upload is rejected
+   without first writing its files to disk (or to Spaces). */
+router.post('/', protectClient, adminOrderUpload, createClientRequest);
+
+/* Registered before '/:id', or Express would read "mine" as an id. */
+router.get('/mine', protectClient, getMyClientRequests);
+
+/* Either audience — the controller narrows a customer to their own record */
+router.get('/:id', allowClientOrStaff, getClientRequestById);
+
+/* Staff only: the full listing, edits, status changes and deletion */
+router.get('/', protectStaff, getAllClientRequests);
+router.put('/:id', protectStaff, adminOrderUpload, updateClientRequest);
+router.patch('/:id/status', protectStaff, updateStatus);
+router.delete('/:id', protectStaff, deleteClientRequest);
 
 module.exports = router;

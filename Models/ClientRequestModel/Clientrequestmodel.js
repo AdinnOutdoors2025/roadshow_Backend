@@ -20,6 +20,23 @@ const vehicleTypeQuantitySchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+
+    /* The package this line was priced from. Optional with a null default,
+       so a request from any caller that does not send it still validates
+       exactly as before — but when it IS sent, the Order raised alongside
+       the request can read every rate from the package server-side rather
+       than trusting the browser's numbers. */
+    packageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Package",
+      default: null,
+    },
+    vehicleModel: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     quantity: {
       type: Number,
       required: true,
@@ -183,9 +200,16 @@ const clientRequestSchema = new mongoose.Schema(
         message: (props) => `${props.value} is not a valid 10-digit phone number!`,
       },
     },
+    /* The customer who placed this request.
+       ref was "User", but public sign-in issues its token for a ClientUser
+       (Models/ClientLoginModel) — two different collections. The id stored
+       here has always been a ClientUser id, so every populate("userId") was
+       silently resolving to null, and any ownership check built on it would
+       have passed for everyone. Pointing it at the right model is what makes
+       "is this booking yours?" answerable at all. */
     userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "ClientUser",
       required: true,
     },
 
@@ -307,6 +331,26 @@ const clientRequestSchema = new mongoose.Schema(
       type: Number,
       enum: [0, 1, 2], // 0 - todo, 1 - inprogress, 2 - completed
       default: 0,
+    },
+
+    /* ── The order this request became ────────────────────────────────────
+       A public booking now lands in the orders collection too, so it enters
+       the same operations pipeline an admin-created order does instead of
+       waiting to be retyped. These two fields are the link back.
+
+       Both stay null when the order could not be raised (no packageId on
+       the lines, or a package that has since been deleted) — the request
+       itself is still saved, and admin can create the order by hand from
+       the client-request screen exactly as before. */
+    orderRef: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Order",
+      default: null,
+    },
+    orderId: {
+      type: String,
+      trim: true,
+      default: "",
     },
   },
   { timestamps: true }
