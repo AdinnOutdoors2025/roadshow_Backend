@@ -11,11 +11,19 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN;
 // admin role gets full sidebar access, so no allowedMenus is embedded for it.
 // sales/operation roles get their currently-configured allowedMenus baked into
 // the token at login time — a permission change only takes effect on next login.
+// Per-user override (RolePermission.userId) takes priority over the
+// role-level default (RolePermission.role with userId: null) so two users
+// with the same role can be granted different menu access.
 const generateToken = async (admin) => {
   let allowedMenus;
   if (admin.role === 'sales' || admin.role === 'operation') {
-    const perm = await RolePermission.findOne({ role: admin.role });
-    allowedMenus = perm ? perm.allowedMenus : [];
+    const userPerm = await RolePermission.findOne({ userId: admin._id });
+    if (userPerm) {
+      allowedMenus = userPerm.allowedMenus;
+    } else {
+      const rolePerm = await RolePermission.findOne({ role: admin.role, userId: null });
+      allowedMenus = rolePerm ? rolePerm.allowedMenus : [];
+    }
   }
   return jwt.sign(
     {
