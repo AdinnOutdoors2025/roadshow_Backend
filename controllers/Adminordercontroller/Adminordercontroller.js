@@ -88,7 +88,11 @@ function calcPricingBackend(pkg, v) {
     // ? (pkg.promoterChargePerDay || 0) * totalDays * promoterQuantity
        ? (promoterChargePerDay || 0) * totalDays * promoterQuantity
     : 0;
-  const rtoCost = pkg.rtoCharges * quantity;
+  /* RTO charges are not priced for now — kept at 0 rather than removed
+     from the pricing shape, so every screen that reads rtoCost still
+     works unchanged. rtoCharges (the package's configured rate) is still
+     returned below for reference; it just isn't multiplied into cost. */
+  const rtoCost = 0;
   const extraKmCost = extraKm > 0 ? (pkg.perKmCharge || 0) * extraKm : 0;
   const extraHourCost = extraHours > 0 ? pkg.additionalHourCharges * extraHours : 0;
 
