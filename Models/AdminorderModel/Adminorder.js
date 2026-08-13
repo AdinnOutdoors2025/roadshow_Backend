@@ -589,18 +589,29 @@ const invoiceLineItemSchema = new mongoose.Schema(
 // discountLabel/discountMode/discountType/discountValue fields (kept below,
 // unused by new saves, purely so already-saved old-format invoices still
 // read back their single discount for the frontend's migration fallback).
-const invoiceDiscountSchema = new mongoose.Schema(
-  {
-    label: { type: String, default: "Discount" },
-    mode: { type: String, enum: ["add", "decrease"], default: "decrease" },
-    type: { type: String, enum: ["percent", "amount"], default: "percent" },
-    value: { type: Number, default: 0 },
-  },
-  { _id: false }
-);
+// _id: true (the default) — each discount row keeps a stable identity across
+// saves, so invoice-history diffing can match old vs new rows by id instead
+// of by label text. Matching by label broke as soon as two rows shared a
+// blank/duplicate label (e.g. right after adding a second discount before
+// typing its label): editing just one row's label made it fail the
+// label-match and got misattributed against the wrong sibling row, showing
+// spurious changes on the untouched discount too.
+const invoiceDiscountSchema = new mongoose.Schema({
+  label: { type: String, default: "Discount" },
+  mode: { type: String, enum: ["add", "decrease"], default: "decrease" },
+  type: { type: String, enum: ["percent", "amount"], default: "percent" },
+  value: { type: Number, default: 0 },
+});
 
 const invoiceDataSchema = new mongoose.Schema(
   {
+    // true only for the auto-generated invoiceData created the moment a
+    // Project Code is selected (before the admin has touched any field).
+    // Cleared to false on the admin's first real save so that save is
+    // treated as the invoice's true creation for history purposes, instead
+    // of being diffed against these untouched defaults and logged as a
+    // confusing "Edited" entry.
+    isDraft: { type: Boolean, default: false },
     invoiceNumber: { type: String, default: "" },
     invoiceDate: { type: Date, default: null },
     dueDate: { type: Date, default: null },
@@ -652,7 +663,7 @@ const invoiceLineItemFieldChangeSchema = new mongoose.Schema(
 const invoiceLineItemChangeSchema = new mongoose.Schema(
   {
     groupLabel: { type: String, default: "" },
-    action: { type: String, enum: ["added", "removed", "edited"], default: "edited" },
+    action: { type: String, enum: ["added", "removed", "edited", "renamed"], default: "edited" },
     description: { type: String, default: "" },
     hsnSac: { type: String, default: "" },
     qty: { type: Number, default: 0 },

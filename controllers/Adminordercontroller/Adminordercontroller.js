@@ -3422,28 +3422,35 @@ const normalizeDiscount = (d) => ({
   value: Number(d.value) || 0,
 });
 
-// Diffs discount rows by label (same matching strategy as buildLineItemDiff)
-// so only genuinely added/removed/edited discounts show up in history —
-// unchanged rows, and rows whose sibling fields didn't change, stay silent.
+// Diffs discount rows primarily by their persisted _id (stable across
+// saves) so only genuinely added/removed/edited discounts show up in
+// history — unchanged rows, and rows whose sibling fields didn't change,
+// stay silent. Falls back to label-matching only for rows that have no
+// _id yet (pre-migration invoices saved before discounts carried an _id).
 const buildDiscountDiff = (oldDiscounts = [], newDiscounts = []) => {
-  const oldNorm = (oldDiscounts || []).map(normalizeDiscount);
-  const newNorm = (newDiscounts || []).map(normalizeDiscount);
+  const oldNorm = (oldDiscounts || []).map((d) => ({ ...normalizeDiscount(d), _id: d._id ? String(d._id) : null }));
+  const newNorm = (newDiscounts || []).map((d) => ({ ...normalizeDiscount(d), _id: d._id ? String(d._id) : null }));
   const oldUsed = new Array(oldNorm.length).fill(false);
   const newUsed = new Array(newNorm.length).fill(false);
   const result = [];
 
   newNorm.forEach((nd, niIdx) => {
-    const oiIdx = oldNorm.findIndex(
-      (od, idx) => !oldUsed[idx] && od.label.toLowerCase() === nd.label.toLowerCase()
-    );
+    const oiIdx = oldNorm.findIndex((od, idx) => {
+      if (oldUsed[idx]) return false;
+      if (nd._id && od._id) return od._id === nd._id;
+      if (nd._id || od._id) return false; // one has an id, the other doesn't — not the same row
+      return od.label.toLowerCase() === nd.label.toLowerCase();
+    });
     if (oiIdx !== -1) {
       oldUsed[oiIdx] = true;
       newUsed[niIdx] = true;
       const od = oldNorm[oiIdx];
+      const labelChanged = od.label !== nd.label;
       const modeChanged = od.mode !== nd.mode;
       const typeChanged = od.type !== nd.type;
       const valueChanged = od.value !== nd.value;
       const fieldChanges = [];
+      if (labelChanged) fieldChanges.push({ field: "Label", oldValue: od.label, newValue: nd.label });
       if (modeChanged) fieldChanges.push({ field: "Mode", oldValue: od.mode, newValue: nd.mode });
       if (typeChanged) fieldChanges.push({ field: "Type", oldValue: od.type, newValue: nd.type });
       if (valueChanged) fieldChanges.push({ field: "Value", oldValue: od.value, newValue: nd.value });
@@ -3462,9 +3469,47 @@ const buildDiscountDiff = (oldDiscounts = [], newDiscounts = []) => {
           fieldChanges.push({ field: "Value", oldValue: od.value, newValue: nd.value, unchanged: true });
         }
       }
-      if (fieldChanges.length > 0) {
+      // Label-only change reads clearer as a single "renamed" entry
+      // (matches the legacy no-id rename path's presentation) rather than
+      // an "edited" entry whose only fieldChange happens to be Label.
+      if (labelChanged && !modeChanged && !typeChanged && !valueChanged) {
+        result.push({
+          groupLabel: nd.label,
+          action: "renamed",
+          description: nd.label,
+          hsnSac: "",
+          qty: 0,
+          rate: 0,
+          fieldChanges: [{ field: "Label", oldValue: od.label, newValue: nd.label }],
+        });
+      } else if (fieldChanges.length > 0) {
         result.push({ groupLabel: nd.label, action: "edited", description: nd.label, hsnSac: "", qty: 0, rate: 0, fieldChanges });
       }
+    }
+  });
+
+  // Second pass — a still-unmatched old/new pair with an identical
+  // mode+type+value is the same discount with just its label edited
+  // (e.g. "Tolcharge" -> "Testcase"), not a genuine remove+add. Surface
+  // that as a single "renamed" entry so it reads clearly in the history.
+  newNorm.forEach((nd, niIdx) => {
+    if (newUsed[niIdx]) return;
+    const oiIdx = oldNorm.findIndex(
+      (od, idx) => !oldUsed[idx] && od.mode === nd.mode && od.type === nd.type && od.value === nd.value
+    );
+    if (oiIdx !== -1) {
+      oldUsed[oiIdx] = true;
+      newUsed[niIdx] = true;
+      const od = oldNorm[oiIdx];
+      result.push({
+        groupLabel: nd.label,
+        action: "renamed",
+        description: nd.label,
+        hsnSac: "",
+        qty: 0,
+        rate: 0,
+        fieldChanges: [{ field: "Label", oldValue: od.label, newValue: nd.label }],
+      });
     }
   });
 
@@ -3584,12 +3629,21 @@ exports.saveInvoice = async (req, res) => {
       billToName, billToAddress, billToGstin, billToPan,
       lineItems, discounts,
       cgstPercent, sgstPercent, igstPercent, rounding, signatureMode,
+      isAutoSave,
     } = req.body;
 
-    const wasExisting = !!order.invoiceData;
+    // A prior save was only the auto-generated draft (fired the instant a
+    // Project Code was picked, before the admin touched anything) if
+    // invoiceData exists but is still flagged isDraft. Treat that the same
+    // as "no real invoice yet" for diffing purposes — the admin's first
+    // actual save should read as the invoice's creation, not an edit
+    // against blank/default values.
+    const previousWasDraft = !!order.invoiceData?.isDraft;
+    const wasExisting = !!order.invoiceData && !previousWasDraft;
     const invoiceNumber = order.invoiceData?.invoiceNumber || `ASI-${order.orderId}`;
 
     const newInvoiceData = {
+      isDraft: !!isAutoSave,
       invoiceNumber,
       invoiceDate: invoiceDate || new Date(),
       dueDate: dueDate || null,
@@ -3603,7 +3657,16 @@ exports.saveInvoice = async (req, res) => {
       lineItems: Array.isArray(lineItems) ? lineItems : [],
       discounts: Array.isArray(discounts)
         ? discounts.map((d) => ({
-            label: d.label || "Discount",
+            // Keep the row's real Mongo _id if the frontend sent one back
+            // (an existing, previously-saved row) — omitting it lets
+            // Mongoose mint a fresh _id, which is correct for a brand-new
+            // row the admin just added in this same edit.
+            ...(d._id ? { _id: d._id } : {}),
+            // Preserve an intentionally-blank label as "" — the admin must
+            // type their own name, so a blank row shouldn't silently save
+            // back as the literal text "Discount" and reappear pre-filled
+            // next time the invoice is opened.
+            label: d.label != null ? d.label : "Discount",
             mode: d.mode === "add" ? "add" : "decrease",
             type: d.type === "amount" ? "amount" : "percent",
             value: Number(d.value) || 0,
@@ -3620,8 +3683,8 @@ exports.saveInvoice = async (req, res) => {
 
     const editedBy = req.user?.username || req.user?.name || "Admin";
 
-    // First-time save (auto-generated the moment a Project Code is selected
-    // with no invoice yet) is intentionally NOT logged to invoiceHistory —
+    // Neither the auto-generated draft save itself, nor the admin's first
+    // real save that replaces that draft, is logged to invoiceHistory —
     // history starts recording only from the next actual edit onward.
     if (wasExisting) {
       const changes = buildInvoiceDiff(order.invoiceData, newInvoiceData);
@@ -3911,7 +3974,13 @@ exports.getCampaignCalculator = async (req, res) => {
 
       let { start: dayWindowStart, end: dayWindowEnd } = resolveWorkWindow(dayKey, hoursLog);
       const now = new Date();
-      if (dayKey === dateKey(now) && dayWindowEnd > now) {
+      // Clamp to "now" for TODAY and any future campaign day — not just
+      // dayKey === today. Without this, a still-open (resolvedAt: null)
+      // issue/unavailable record from an earlier day got treated as
+      // spanning the FULL day window on every future day too (since it
+      // hasn't happened yet, there's nothing to clip against), massively
+      // inflating totalIssueHours/totalUnavailableHours across the campaign.
+      if (dayWindowEnd > now) {
         dayWindowEnd = now;
       }
       const entryCreatedClip =
