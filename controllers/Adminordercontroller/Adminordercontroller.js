@@ -4147,7 +4147,11 @@ exports.getCampaignCalculator = async (req, res) => {
         // applied once on the campaign's first day, same pattern as RTO/extra-km pool fee.
         const additionalChargesToday = dayKey === itemFrom ? (item.additionalNet || 0) : 0;
 
-        let rtoAppliedToday = dayKey === itemFrom ? item.rtoCost || 0 : 0;
+        // RTO is no longer billed through Campaign Calculator (business
+        // change) — kept as a hardcoded 0 rather than deleted from the
+        // day-total formula below, so every downstream read of
+        // rtoAppliedToday still works unchanged.
+        let rtoAppliedToday = 0;
 
         let promoterAmountToday =
           item.needPromoter && item.totalDays
@@ -4331,7 +4335,8 @@ exports.getCampaignCalculator = async (req, res) => {
     const finalInvoiceAmount = Math.round((finalAmountBeforeGst + gstAmount) * 100) / 100;
 
     const estimatedRental = bookingItemsMeta.reduce((s, b) => s + (b.estimatedRentalCost || 0), 0);
-    const estimatedRto = bookingItemsMeta.reduce((s, b) => s + (b.rtoCost || 0), 0);
+    // RTO is no longer billed through Campaign Calculator — see rtoAppliedToday above.
+    const estimatedRto = 0;
     const estimatedPromoter = bookingItemsMeta.reduce((s, b) => s + (b.promoterCost || 0), 0);
     const estimatedExtraKm = bookingItemsMeta.reduce((s, b) => s + (b.estimatedExtraKmCost || 0), 0);
     const estimatedExtraHours = bookingItemsMeta.reduce((s, b) => s + (b.estimatedExtraHourCost || 0), 0);

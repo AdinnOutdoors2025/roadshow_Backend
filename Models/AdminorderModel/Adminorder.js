@@ -519,7 +519,8 @@ const salesNegotiationDocSchema = new mongoose.Schema(
 
 const closedWonDocSchema = new mongoose.Schema(
   {
-    salesPoDocument: { type: String, required: true },
+    // Frontend labels this "Sales PO Document (optional)" — not required.
+    salesPoDocument: { type: String, default: "" },
     salesPoNotes: { type: String, default: "" },
     uploadedBy: { type: String, default: "" },
     uploadedAt: { type: Date, default: Date.now },
