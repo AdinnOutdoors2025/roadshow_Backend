@@ -133,6 +133,14 @@ const dailyHoursLogSchema = new mongoose.Schema({
   remarks: { type: String, default: "" },
   loggedBy: { type: String, default: "" },
   loggedAt: { type: Date, default: Date.now },
+
+  // ── Client-facing day-wise campaign metrics ──────────────────────────
+  distanceCoveredKm: { type: Number, default: 0, min: 0 },
+  activationsCount: { type: Number, default: 0, min: 0 },
+  leadsCollected: { type: Number, default: 0, min: 0 },
+  peopleEngaged: { type: Number, default: 0, min: 0 },
+  routeNote: { type: String, default: "" },
+  photos: { type: [String], default: [] },
 }, { _id: true });
 
 

@@ -148,7 +148,7 @@ router.post(
 );
 
 router.post("/pipeline/:id/extra-km", protect, ctrl.addExtraKmDetails);
-router.post("/pipeline/:id/daily-hours", protect, ctrl.addDailyHoursLog);
+router.post("/pipeline/:id/daily-hours", protect, pipelineUpload, ctrl.addDailyHoursLog);
 router.post("/pipeline/:id/compensation", protect, ctrl.addCampaignCompensation);
 router.post("/pipeline/:id/purchased-pool-window", protect, ctrl.setPurchasedPoolWindow);
 router.get("/pipeline/:id/campaign-calculator", protect, ctrl.getCampaignCalculator);
@@ -159,13 +159,13 @@ router.get("/pipeline/project-codes", protect, ctrl.getProjectCodeOrders);
 
 router.get("/orders", protect, ctrl.getAllOrders);
 router.get("/orders/by-id/:id", protect, ctrl.getOrderByMongoId);
-router.get("/orders/:orderId", ctrl.getOrderById);
+router.get("/orders/:orderId", protect, ctrl.getOrderById);
 router.post("/orders/create", adminOrderUpload, ctrl.createAdminOrder);
 
 router.get("/campaign-types", ctrl.getCampaignTypes);
 router.post("/campaign-types", ctrl.createCampaignType);
 
-router.get("/vamosys/apikey", ctrl.getVamosysApiKey);
-router.get("/vamosys/vehicle-locations", ctrl.getVehicleLocationsProxy);
+router.get("/vamosys/apikey", protect, ctrl.getVamosysApiKey);
+router.get("/vamosys/vehicle-locations", protect, ctrl.getVehicleLocationsProxy);
 
 module.exports = router;

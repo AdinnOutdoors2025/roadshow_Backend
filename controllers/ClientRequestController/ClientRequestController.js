@@ -8,6 +8,25 @@ const GstDetail = require("../../Models/GstDetailsModel/gstdetails");
 const Order = require("../../Models/AdminorderModel/Adminorder");
 const Package = require("../../Models/PackageManagementModel/packagemanagement");
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
+const VehicleGroup = require("../../Models/vehicleDetails");
+const {
+  JOURNEY_STEPS,
+  LIST_ORDER_SELECT,
+  TRACKING_ORDER_SELECT,
+  LIVE_LOCATION_ORDER_SELECT,
+  deriveJourneyStage,
+  buildSteps,
+  buildActivity,
+  deriveOnRoadDay,
+  buildDayWiseReport,
+  flattenPhotos,
+  todayIndiaDateKey,
+} = require("../../Utils/clientJourneyStages");
+const {
+  getLiveLocationsForRegistrationNumbers,
+  getDrivingSummaryForDay,
+  getRouteTrackId,
+} = require("../../Utils/vamosysClient");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -228,6 +247,73 @@ const populateClientRequest = (query) =>
   query
     .populate("userId", "name email phone")
     .populate("vehicleTypes.vehicleType", "name");
+
+/* Same as populateClientRequest, plus a client-safe slice of the linked
+   Order (see Utils/clientJourneyStages LIST_ORDER_SELECT) so list rows can
+   show the real pipeline stage without a second round trip per booking. */
+const populateClientRequestForList = (query) =>
+  populateClientRequest(query).populate("orderRef", LIST_ORDER_SELECT);
+
+/* Best-effort representative photo per booked vehicle TYPE — a booking
+   line only snapshots the vehicle's name as plain text at request time,
+   it never links to one specific onboarded vehicle group, so this can
+   only match on the shared VehicleType category, not the exact named
+   vehicle. One batched query across every request being returned, never
+   an N+1 lookup per row. Purely additive: adds `vehicleTypeImage` to each
+   line, null when no onboarded vehicle of that type has a front-view
+   photo yet. Mutates `requests` in place. */
+const attachVehicleTypeImages = async (requests) => {
+  const typeIds = new Set();
+
+  for (const request of requests) {
+    for (const line of request.vehicleTypes || []) {
+      const typeId = line.vehicleType?._id || line.vehicleType;
+      if (typeId) typeIds.add(String(typeId));
+    }
+  }
+
+  if (!typeIds.size) return requests;
+
+  const groups = await VehicleGroup.find({
+    "basicInfo.vehicleType": { $in: [...typeIds] },
+  }).select("basicInfo.vehicleType mediaFiles.frontViewImage");
+
+  const imageByType = new Map();
+  for (const group of groups) {
+    const typeId = String(group.basicInfo?.vehicleType || "");
+    if (typeId && !imageByType.has(typeId) && group.mediaFiles?.frontViewImage) {
+      imageByType.set(typeId, group.mediaFiles.frontViewImage);
+    }
+  }
+
+  for (const request of requests) {
+    for (const line of request.vehicleTypes || []) {
+      const typeId = String(line.vehicleType?._id || line.vehicleType || "");
+      line.vehicleTypeImage = imageByType.get(typeId) || null;
+    }
+  }
+
+  return requests;
+};
+
+/* Attaches the derived journey stage to a plain (toObject()'d) client
+   request. Purely additive — never removes/changes an existing field. */
+const attachTrackingSummary = (request) => {
+  const { stageIndex, isCancelled, vehicleUnavailable } = deriveJourneyStage(request.orderRef);
+  const onRoad = deriveOnRoadDay(request.orderRef, request.vehicleTypes);
+
+  return {
+    ...request,
+    journeyStage: { index: stageIndex, key: JOURNEY_STEPS[stageIndex].key },
+    /* Per-milestone status + completedAt (null when not yet reached/logged —
+       see buildSteps' own "never fabricates history" contract) so the
+       client-facing timeline can show a real date under each stage. */
+    steps: buildSteps(request.orderRef, request.createdAt),
+    isCancelled,
+    vehicleUnavailable,
+    onRoad,
+  };
+};
 
 /**
  * Resolve the billing identity for a request.
@@ -777,15 +863,18 @@ exports.getAllClientRequests = async (req, res) => {
  */
 exports.getMyClientRequests = async (req, res) => {
   try {
-    const requests = await populateClientRequest(
+    const requests = await populateClientRequestForList(
       ClientRequest.find({ userId: req.clientUser._id }).sort({
         createdAt: -1,
       })
     );
 
+    const plain = requests.map((request) => request.toObject());
+    await attachVehicleTypeImages(plain);
+
     return res.status(200).json({
       success: true,
-      data: requests.map((request) => request.toObject()),
+      data: plain.map((request) => attachTrackingSummary(request)),
       count: requests.length,
     });
   } catch (error) {
@@ -806,7 +895,7 @@ exports.getClientRequestById = async (req, res) => {
       });
     }
 
-    const request = await populateClientRequest(
+    const request = await populateClientRequestForList(
       ClientRequest.findById(req.params.id)
     );
 
@@ -832,9 +921,318 @@ exports.getClientRequestById = async (req, res) => {
       });
     }
 
+    const plain = request.toObject();
+    await attachVehicleTypeImages([plain]);
+
     return res.status(200).json({
       success: true,
-      data: request.toObject(),
+      data: attachTrackingSummary(plain),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * The client-safe campaign tracking console payload for one booking:
+ * current stage, a dynamically generated progress timeline, a deduped
+ * milestone activity feed, and (only once the backend says the campaign is
+ * actually on road) a day-of-N counter. Deliberately excludes everything
+ * internal — handler names, notes, project codes, costing, driver contact
+ * details — the caller only ever gets what Utils/clientJourneyStages and
+ * TRACKING_ORDER_SELECT explicitly allow through.
+ */
+exports.getClientRequestTracking = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    const request = await ClientRequest.findById(req.params.id).populate(
+      "orderRef",
+      TRACKING_ORDER_SELECT
+    );
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    /* Same ownership rule as getClientRequestById — see comment there. */
+    if (
+      req.clientUser &&
+      String(request.userId) !== String(req.clientUser._id)
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    const order = request.orderRef || null;
+    const submittedAt = request.createdAt;
+    const { stageIndex, isCancelled, vehicleUnavailable } = deriveJourneyStage(order);
+
+    const campaignStart = request.vehicleTypes?.[0]?.fromDate || null;
+    const campaignEnd = request.vehicleTypes?.[0]?.toDate || null;
+    const dayWiseReport = buildDayWiseReport(order, campaignStart, campaignEnd, stageIndex);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        clientOrderId: request.clientOrderId,
+        bookingSummary: {
+          campaignName: request.vehicleTypes?.[0]?.campaignName || "",
+          location: request.location || request.vehicleTypes?.[0]?.campaignLocation || "",
+          startDate: campaignStart,
+          endDate: campaignEnd,
+          totalDays: request.vehicleTypes?.[0]?.totalDays || null,
+          vehicleTypeCount: request.vehicleTypes?.length || 0,
+          vehicleCount: (request.vehicleTypes || []).reduce(
+            (sum, v) => sum + (v.quantity || 0),
+            0
+          ),
+        },
+        journeyStage: { index: stageIndex, key: JOURNEY_STEPS[stageIndex].key },
+        isCancelled,
+        vehicleUnavailable,
+        onRoad: deriveOnRoadDay(order, request.vehicleTypes),
+        steps: buildSteps(order, submittedAt),
+        activity: buildActivity(order, submittedAt),
+        dayWiseReport,
+        photos: flattenPhotos(dayWiseReport),
+        lastUpdatedAt: order?.updatedAt || request.updatedAt,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * Lightweight, frequently-polled live GPS lookup for one booking. Kept
+ * separate from getClientRequestTracking (and its own populate select) so a
+ * live-tracking poll never has to pull the whole order — see Utils/
+ * clientJourneyStages LIVE_LOCATION_ORDER_SELECT. Returns an empty vehicle
+ * list (still 200, not an error) whenever the campaign isn't actually on
+ * road — no Vamosys call is made in that case at all.
+ */
+exports.getClientRequestLiveLocation = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    const request = await ClientRequest.findById(req.params.id).populate(
+      "orderRef",
+      LIVE_LOCATION_ORDER_SELECT
+    );
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    /* Same ownership rule as getClientRequestById — see comment there. */
+    if (
+      req.clientUser &&
+      String(request.userId) !== String(req.clientUser._id)
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    const order = request.orderRef || null;
+
+    if (!order || order.pipelineStatus !== "onRoad") {
+      return res.status(200).json({
+        success: true,
+        data: { vehicles: [] },
+      });
+    }
+
+    const registrationNumbers = (order.onRoadExecutionArray || [])
+      .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
+      .map((e) => e.vehicleRegistrationNumber)
+      .filter(Boolean);
+
+    const vehicles = await getLiveLocationsForRegistrationNumbers(registrationNumbers);
+
+    return res.status(200).json({
+      success: true,
+      data: { vehicles },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * Today's driving-time breakdown (moving/parked/idle/no-data) and trip
+ * stats per vehicle — a much heavier, server-cached Vamosys call than
+ * live-location, so it's deliberately its own endpoint polled on a slower
+ * interval by the frontend. Same empty-fleet short-circuit when the
+ * campaign isn't on road.
+ */
+exports.getClientRequestDrivingSummary = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    const request = await ClientRequest.findById(req.params.id).populate(
+      "orderRef",
+      LIVE_LOCATION_ORDER_SELECT
+    );
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    /* Same ownership rule as getClientRequestById — see comment there. */
+    if (
+      req.clientUser &&
+      String(request.userId) !== String(req.clientUser._id)
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    const order = request.orderRef || null;
+
+    if (!order || order.pipelineStatus !== "onRoad") {
+      return res.status(200).json({
+        success: true,
+        data: { vehicles: [] },
+      });
+    }
+
+    const registrationNumbers = (order.onRoadExecutionArray || [])
+      .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
+      .map((e) => e.vehicleRegistrationNumber)
+      .filter(Boolean);
+
+    const today = todayIndiaDateKey();
+
+    const vehicles = await Promise.all(
+      registrationNumbers.map(async (registrationNumber) => {
+        try {
+          const drivingSummary = await getDrivingSummaryForDay(registrationNumber, today);
+          return { registrationNumber, drivingSummary };
+        } catch {
+          return { registrationNumber, drivingSummary: null };
+        }
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: { vehicles },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * Track id for Vamosys's own public animated-route embed (moving marker +
+ * speedometer) per vehicle — same short-circuit rules as live-location.
+ * A vehicle's track id is best-effort: if Vamosys fails for one
+ * registration the others still come back, with that entry's trackId null
+ * (the frontend falls back to its own map for that vehicle only).
+ */
+exports.getClientRequestRouteTrack = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    const request = await ClientRequest.findById(req.params.id).populate(
+      "orderRef",
+      LIVE_LOCATION_ORDER_SELECT
+    );
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    /* Same ownership rule as getClientRequestById — see comment there. */
+    if (
+      req.clientUser &&
+      String(request.userId) !== String(req.clientUser._id)
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    const order = request.orderRef || null;
+
+    if (!order || order.pipelineStatus !== "onRoad") {
+      return res.status(200).json({
+        success: true,
+        data: { vehicles: [] },
+      });
+    }
+
+    const registrationNumbers = (order.onRoadExecutionArray || [])
+      .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
+      .map((e) => e.vehicleRegistrationNumber)
+      .filter(Boolean);
+
+    const vehicles = await Promise.all(
+      registrationNumbers.map(async (registrationNumber) => {
+        try {
+          const trackId = await getRouteTrackId(registrationNumber);
+          return { registrationNumber, trackId };
+        } catch {
+          return { registrationNumber, trackId: null };
+        }
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: { vehicles },
     });
   } catch (error) {
     return res.status(500).json({

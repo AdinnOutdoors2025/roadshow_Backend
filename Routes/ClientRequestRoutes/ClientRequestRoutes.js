@@ -5,6 +5,10 @@ const {
   getAllClientRequests,
   getMyClientRequests,
   getClientRequestById,
+  getClientRequestTracking,
+  getClientRequestLiveLocation,
+  getClientRequestDrivingSummary,
+  getClientRequestRouteTrack,
   updateClientRequest,
   updateStatus,
   deleteClientRequest
@@ -40,6 +44,26 @@ router.get('/mine', protectClient, getMyClientRequests);
 
 /* Either audience — the controller narrows a customer to their own record */
 router.get('/:id', allowClientOrStaff, getClientRequestById);
+
+/* Client-safe campaign tracking console payload — same ownership narrowing
+   as above, registered before '/' below (order doesn't matter here since
+   this segment count differs from '/:id', but kept next to its sibling). */
+router.get('/:id/tracking', allowClientOrStaff, getClientRequestTracking);
+
+/* Lightweight live GPS lookup, polled much more often than /tracking —
+   kept as its own endpoint/select so a location poll never pulls the
+   whole order. See getClientRequestLiveLocation for the empty-fleet
+   short-circuit when the campaign isn't on road. */
+router.get('/:id/live-location', allowClientOrStaff, getClientRequestLiveLocation);
+
+/* Heavier, server-cached day-driving-summary (moving/parked/idle/no-data
+   breakdown) — polled far less often than live-location, see
+   getClientRequestDrivingSummary. */
+router.get('/:id/driving-summary', allowClientOrStaff, getClientRequestDrivingSummary);
+
+/* Track id for Vamosys's own public animated-route embed (moving marker +
+   speedometer) per vehicle — see getClientRequestRouteTrack. */
+router.get('/:id/route-track', allowClientOrStaff, getClientRequestRouteTrack);
 
 /* Staff only: the full listing, edits, status changes and deletion */
 router.get('/', protectStaff, getAllClientRequests);
