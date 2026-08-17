@@ -27,6 +27,10 @@ const {
   getDrivingSummaryForDay,
   getRouteTrackId,
 } = require("../../Utils/vamosysClient");
+const {
+  getVehicleHistory,
+  resolveHistoryRange,
+} = require("../../Utils/vamosysHistoryClient");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -1069,16 +1073,31 @@ exports.getClientRequestLiveLocation = async (req, res) => {
       });
     }
 
-    const registrationNumbers = (order.onRoadExecutionArray || [])
-      .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
-      .map((e) => e.vehicleRegistrationNumber)
-      .filter(Boolean);
+    const activeEntries = (order.onRoadExecutionArray || []).filter(
+      (e) => e.entryStatus !== "removed" && e.vehicleRegistrationNumber
+    );
 
-    const vehicles = await getLiveLocationsForRegistrationNumbers(registrationNumbers);
+    /* A vehicle marked unavailable by operations must still be reported to
+       the client — just as "unavailable", not silently dropped. Only the
+       still-available registrations are worth a Vamosys lookup. */
+    const availableRegistrationNumbers = activeEntries
+      .filter((e) => !e.unavailableStatus)
+      .map((e) => e.vehicleRegistrationNumber);
+
+    const liveVehicles = await getLiveLocationsForRegistrationNumbers(
+      availableRegistrationNumbers
+    );
+
+    const unavailableVehicles = activeEntries
+      .filter((e) => e.unavailableStatus)
+      .map((e) => ({
+        registrationNumber: e.vehicleRegistrationNumber,
+        unavailable: true,
+      }));
 
     return res.status(200).json({
       success: true,
-      data: { vehicles },
+      data: { vehicles: [...liveVehicles, ...unavailableVehicles] },
     });
   } catch (error) {
     return res.status(500).json({
@@ -1136,17 +1155,29 @@ exports.getClientRequestDrivingSummary = async (req, res) => {
       });
     }
 
-    const registrationNumbers = (order.onRoadExecutionArray || [])
-      .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
-      .map((e) => e.vehicleRegistrationNumber)
-      .filter(Boolean);
+    const activeEntries = (order.onRoadExecutionArray || []).filter(
+      (e) => e.entryStatus !== "removed" && e.vehicleRegistrationNumber
+    );
 
-    const today = todayIndiaDateKey();
+    /* Frontend (useDrivingSummary.ts) already sends ?day=YYYY-MM-DD when the
+       client picks a past campaign day from the history tabs — honor it
+       instead of always defaulting to today, otherwise every day selection
+       silently returns today's summary. */
+    const requestedDay = String(req.query.day || "").trim();
+    const day = requestedDay || todayIndiaDateKey();
 
     const vehicles = await Promise.all(
-      registrationNumbers.map(async (registrationNumber) => {
+      activeEntries.map(async (entry) => {
+        const registrationNumber = entry.vehicleRegistrationNumber;
+
+        /* Unavailable vehicles are reported as such, not omitted — see
+           getClientRequestLiveLocation for the same rule. */
+        if (entry.unavailableStatus) {
+          return { registrationNumber, drivingSummary: null };
+        }
+
         try {
-          const drivingSummary = await getDrivingSummaryForDay(registrationNumber, today);
+          const drivingSummary = await getDrivingSummaryForDay(registrationNumber, day);
           return { registrationNumber, drivingSummary };
         } catch {
           return { registrationNumber, drivingSummary: null };
@@ -1214,13 +1245,20 @@ exports.getClientRequestRouteTrack = async (req, res) => {
       });
     }
 
-    const registrationNumbers = (order.onRoadExecutionArray || [])
-      .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
-      .map((e) => e.vehicleRegistrationNumber)
-      .filter(Boolean);
+    const activeEntries = (order.onRoadExecutionArray || []).filter(
+      (e) => e.entryStatus !== "removed" && e.vehicleRegistrationNumber
+    );
 
     const vehicles = await Promise.all(
-      registrationNumbers.map(async (registrationNumber) => {
+      activeEntries.map(async (entry) => {
+        const registrationNumber = entry.vehicleRegistrationNumber;
+
+        /* Unavailable vehicles are reported as such, not omitted — see
+           getClientRequestLiveLocation for the same rule. */
+        if (entry.unavailableStatus) {
+          return { registrationNumber, trackId: null };
+        }
+
         try {
           const trackId = await getRouteTrackId(registrationNumber);
           return { registrationNumber, trackId };
@@ -1347,19 +1385,286 @@ exports.deleteClientRequest = async (req, res) => {
   try {
     const deleted = await ClientRequest.findByIdAndDelete(req.params.id);
     if (!deleted) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Client request not found' 
+      return res.status(404).json({
+        success: false,
+        message: 'Client request not found'
       });
     }
-    res.status(200).json({ 
-      success: true, 
-      message: 'Deleted successfully' 
+    res.status(200).json({
+      success: true,
+      message: 'Deleted successfully'
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Detailed Vamosys vehicle history for the logged-in client's booking.
+ *
+ * Supports:
+ * - last 6 hours
+ * - last 12 hours
+ * - today
+ * - yesterday
+ * - custom date/time range
+ *
+ * Security:
+ * - Client can only access their own booking.
+ * - Vehicle number must exist inside onRoadExecutionArray.
+ * - Unavailable vehicles remain visible but are not queried from Vamosys.
+ */
+exports.getClientRequestVehicleHistory = async (req, res) => {
+  try {
+    /* =====================================================
+       VALIDATE BOOKING ID
+    ===================================================== */
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    /* =====================================================
+       GET REQUEST + CLIENT SAFE ORDER FIELDS
+    ===================================================== */
+
+    const request = await ClientRequest.findById(req.params.id).populate(
+      "orderRef",
+      LIVE_LOCATION_ORDER_SELECT
+    );
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    /* =====================================================
+       OWNERSHIP VALIDATION
+
+       Staff has no req.clientUser.
+       Client must own this booking.
+    ===================================================== */
+
+    if (
+      req.clientUser &&
+      String(request.userId) !== String(req.clientUser._id)
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    const order = request.orderRef || null;
+
+    /* =====================================================
+       RESOLVE REQUESTED HISTORY RANGE
+    ===================================================== */
+
+    let range;
+
+    try {
+      range = resolveHistoryRange(req.query);
+    } catch (rangeError) {
+      return res.status(400).json({
+        success: false,
+        message:
+          rangeError.message ||
+          "Invalid vehicle history date/time range",
+      });
+    }
+
+    /* =====================================================
+       ONLY ON-ROAD CAMPAIGNS HAVE GPS HISTORY
+    ===================================================== */
+
+    if (!order || order.pipelineStatus !== "onRoad") {
+      return res.status(200).json({
+        success: true,
+
+        data: {
+          range,
+          vehicles: [],
+        },
+      });
+    }
+
+    /* =====================================================
+       ACTIVE ON-ROAD VEHICLES
+    ===================================================== */
+
+    const activeEntries = (
+      order.onRoadExecutionArray || []
+    ).filter(
+      (entry) =>
+        entry.entryStatus !== "removed" &&
+        entry.vehicleRegistrationNumber
+    );
+
+    /* =====================================================
+       OPTIONAL VEHICLE FILTER
+
+       Frontend can send:
+
+       ?vehicle=TN58BF3736
+
+       But backend verifies that it belongs to this order.
+    ===================================================== */
+
+    const requestedVehicle = String(
+      req.query.vehicle || ""
+    )
+      .trim()
+      .replace(/\s+/g, "")
+      .toUpperCase();
+
+    let requestedEntries = activeEntries;
+
+    if (requestedVehicle) {
+      requestedEntries = activeEntries.filter(
+        (entry) => {
+          const registrationNumber = String(
+            entry.vehicleRegistrationNumber || ""
+          )
+            .trim()
+            .replace(/\s+/g, "")
+            .toUpperCase();
+
+          return (
+            registrationNumber === requestedVehicle
+          );
+        }
+      );
+
+      if (!requestedEntries.length) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This vehicle is not assigned to this booking.",
+        });
+      }
+    }
+
+    /* =====================================================
+       FETCH HISTORY VEHICLE BY VEHICLE
+    ===================================================== */
+
+    const vehicles = await Promise.all(
+      requestedEntries.map(async (entry) => {
+        const registrationNumber = String(
+          entry.vehicleRegistrationNumber || ""
+        )
+          .trim()
+          .replace(/\s+/g, "")
+          .toUpperCase();
+
+        /* -----------------------------------------------
+           VEHICLE MARKED UNAVAILABLE BY OPERATIONS
+        ------------------------------------------------ */
+
+        if (entry.unavailableStatus) {
+          return {
+            registrationNumber,
+
+            unavailable: true,
+
+            message:
+              "Vehicle is marked unavailable in On Road operations.",
+
+            rows: [],
+
+            summary: {
+              pointCount: 0,
+              distanceKm: 0,
+              maxSpeedKmh: 0,
+              movingCount: 0,
+              parkedCount: 0,
+              idleCount: 0,
+              ignitionOnCount: 0,
+              startAddress: "",
+              endAddress: "",
+            },
+          };
+        }
+
+        /* -----------------------------------------------
+           AVAILABLE VEHICLE → FETCH VAMOSYS HISTORY
+        ------------------------------------------------ */
+
+        try {
+          return await getVehicleHistory(
+            registrationNumber,
+            range
+          );
+        } catch (historyError) {
+          console.error(
+            `Vehicle history failed for ${registrationNumber}:`,
+            historyError.message
+          );
+
+          /*
+           One failed vehicle must NOT break history
+           for every other vehicle.
+          */
+          return {
+            registrationNumber,
+
+            unavailable: false,
+
+            message:
+              historyError.message ||
+              "Vehicle history is temporarily unavailable.",
+
+            rows: [],
+
+            summary: {
+              pointCount: 0,
+              distanceKm: 0,
+              maxSpeedKmh: 0,
+              movingCount: 0,
+              parkedCount: 0,
+              idleCount: 0,
+              ignitionOnCount: 0,
+              startAddress: "",
+              endAddress: "",
+            },
+          };
+        }
+      })
+    );
+
+    /* =====================================================
+       RESPONSE
+    ===================================================== */
+
+    return res.status(200).json({
+      success: true,
+
+      data: {
+        range,
+
+        vehicles: vehicles.filter(Boolean),
+      },
+    });
+  } catch (error) {
+    console.error(
+      "getClientRequestVehicleHistory error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message ||
+        "Unable to load vehicle history",
     });
   }
 };

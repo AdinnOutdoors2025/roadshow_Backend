@@ -70,6 +70,7 @@ function toClientSafeLocation(entry) {
     distanceCoveredKm: Number(entry.distanceCovered) || 0,
     lastUpdatedAt: lastCommMs ? new Date(lastCommMs).toISOString() : null,
     isStale: lastCommMs ? Date.now() - lastCommMs > STALE_AFTER_MS : true,
+    unavailable: false,
   };
 }
 
@@ -145,10 +146,10 @@ async function fetchVehicleDayHistoryRaw(registrationNumber, dayKey) {
 
 /**
  * Client-safe, cached driving summary for one vehicle/day. Explicitly
- * excludes driver contact (driverName/driverMobile), fuel levels, odometer
- * readings, idle/parking event counts, and every other internal fleet field
- * the raw response carries — only the aggregate time/distance/speed figures
- * and the two (reverse-geocoded) location addresses survive.
+ * excludes driver contact (driverName/driverMobile) and every other internal
+ * fleet field the raw response carries — aggregate time/distance/speed
+ * figures, odometer readings, fuel levels, idle/parking counts, and the two
+ * (reverse-geocoded) location addresses survive.
  */
 async function getDrivingSummaryForDay(registrationNumber, dayKey) {
   const cacheKey = `${registrationNumber}:${dayKey}`;
@@ -178,6 +179,12 @@ async function getDrivingSummaryForDay(registrationNumber, dayKey) {
     startAddress,
     endAddress,
     vehicleMode: raw.vehicleMode || "",
+    openingOdoReadingKm: Number(raw.openingOdoReading) || 0,
+    closingOdoReadingKm: Number(raw.closingOdoReading) || 0,
+    idleCount: Number(raw.idleCount) || 0,
+    parkingCount: Number(raw.parkingCount) || 0,
+    startFuelLitres: raw.startFuel != null ? Number(raw.startFuel) : null,
+    endFuelLitres: raw.endFuel != null ? Number(raw.endFuel) : null,
   };
 
   historyCache.set(cacheKey, { at: Date.now(), data: summary });
