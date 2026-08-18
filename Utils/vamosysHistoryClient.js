@@ -392,8 +392,15 @@ function normalizeHistoryRow(row, index) {
     latitude,
     longitude,
     maxSpeedKmh,
+    /* isOutOfOrder is gpsvtsprobend's real field for this column — confirmed
+       against Vamosys' own UI, which shows the same "No" this vehicle's rows
+       carry as isOutOfOrder: "no". */
     out: String(
-      firstDefined(row, ["out", "output", "digitalOut", "outStatus"], "")
+      firstDefined(
+        row,
+        ["isOutOfOrder", "out", "output", "digitalOut", "outStatus"],
+        ""
+      )
     ).trim(),
     address: String(
       firstDefined(row, [
@@ -433,10 +440,14 @@ function normalizeHistoryRow(row, index) {
         "odoReading",
       ])
     ),
+    /* fuelLitre (singular) is the real reading (confirmed: 1.29 matching
+       Vamosys' own UI for this vehicle). gpsvtsprobend also sends a
+       same-shaped but always-"0.00" decoy field, fuelLitres (plural) —
+       deliberately not in this list, or it would shadow real data. */
     fuelLitres: numberOrNull(
       firstDefined(row, [
+        "fuelLitre",
         "fuel",
-        "fuelLitres",
         "fuelLtr",
         "fuelLevel",
       ])
