@@ -3683,16 +3683,23 @@ exports.saveInvoice = async (req, res) => {
 
     const editedBy = req.user?.username || req.user?.name || "Admin";
 
-    // Neither the auto-generated draft save itself, nor the admin's first
-    // real save that replaces that draft, is logged to invoiceHistory —
-    // history starts recording only from the next actual edit onward.
-    if (wasExisting) {
+    // The auto-generated draft save itself is never logged. The admin's
+    // first real save (replacing that draft) IS logged, but as a "created"
+    // entry rather than an "updated" one — but the diff itself is computed
+    // the same way in both cases: always against the draft's own actual
+    // previous values, never an empty baseline. Since the draft already
+    // holds the system's auto-filled line items and a blank discount row,
+    // comparing against it (not against []) means only what the admin
+    // genuinely changed — a typed Label, a filled Place of Supply, an
+    // edited line item — shows up, and untouched auto-filled values don't
+    // falsely appear as "Added".
+    if (wasExisting || (order.invoiceData && previousWasDraft)) {
       const changes = buildInvoiceDiff(order.invoiceData, newInvoiceData);
       const lineItemChanges = buildLineItemDiff(order.invoiceData?.lineItems, newInvoiceData.lineItems);
       const discountChanges = buildDiscountDiff(order.invoiceData?.discounts, newInvoiceData.discounts);
       if (changes.length > 0 || lineItemChanges.length > 0 || discountChanges.length > 0) {
         order.invoiceHistory.push({
-          action: "updated",
+          action: previousWasDraft ? "created" : "updated",
           changes,
           lineItemChanges,
           discountChanges,
