@@ -3445,6 +3445,27 @@ const buildDiscountDiff = (oldDiscounts = [], newDiscounts = []) => {
       oldUsed[oiIdx] = true;
       newUsed[niIdx] = true;
       const od = oldNorm[oiIdx];
+      // The old row is still the untouched default placeholder (blank
+      // label, zero value) the draft auto-created — the admin is filling
+      // it in for the first time, not editing real prior content. Read
+      // this as a genuine "added" entry, not "edited".
+      const oldWasBlankPlaceholder = !od.label && !od.value;
+      if (oldWasBlankPlaceholder && (nd.label || nd.value)) {
+        result.push({
+          groupLabel: nd.label,
+          action: "added",
+          description: nd.label,
+          hsnSac: "",
+          qty: 0,
+          rate: 0,
+          fieldChanges: [
+            { field: "Mode", oldValue: null, newValue: nd.mode },
+            { field: "Type", oldValue: null, newValue: nd.type },
+            { field: "Value", oldValue: null, newValue: nd.value },
+          ],
+        });
+        return;
+      }
       const labelChanged = od.label !== nd.label;
       const modeChanged = od.mode !== nd.mode;
       const typeChanged = od.type !== nd.type;
