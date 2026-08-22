@@ -19,7 +19,7 @@ const ROADSHOW_CAMPAIGN_MAIL_TO =
 
 const ROADSHOW_CAMPAIGN_MAIL_CC =
   process.env.ROADSHOW_CAMPAIGN_MAIL_CC ||
-  "smm@adinn.co.in,2002karthikatg@gmail.com";
+  "smm@adinn.co.in,2002karthikatg@gmail.com,srbedev@adinn.co.in";
 
 const normalizeEmailCsv = (value = "") =>
   String(value || "")
