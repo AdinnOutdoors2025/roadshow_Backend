@@ -8,9 +8,11 @@ require("dotenv").config();
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const { successResponse, errorResponse } = require("../../Utils/response");
 const { sendFocMail, getActiveAdminEmails, getEmailByUsername } = require('../../Utils/focMailer');
+const { sendCampaignRequestMail } = require('../../Utils/campaignMailer');
 const VehicleMaster = require("../../Models/vehicleDetails");
 const VehicleType = require("../../Models/VehicleTypeSchema");
 const { checkVehicleAvailability } = require("../../Utils/vehicleAvailability");
+const { fetchVamosysApiKey, fetchAllVehicleLocations } = require("../../Utils/vamosysClient");
 
 
 async function generateAdminOrderId() {
@@ -423,6 +425,18 @@ exports.createAdminOrder = async (req, res) => {
     });
 
     await order.save();
+
+    /* Deliberately non-fatal — the order is already saved and must not be
+       rejected because the notification mail could not be sent. */
+    try {
+      await sendCampaignRequestMail(order);
+    } catch (mailError) {
+      console.error(
+        `Admin order ${order.orderId}: campaign request mail not sent —`,
+        mailError.message
+      );
+    }
+
     return successResponse(res, "Admin order created successfully", { orderId: order.orderId, order }, 201);
   } catch (error) {
     return errorResponse(res, error.message);
@@ -2478,35 +2492,12 @@ exports.sendFocChatMessage = async (req, res) => {
 
 
 
-async function fetchVamosysApiKey() {
-  const userId = "ADINN12";
-  const validDays = 365;
-  const time = Math.floor(Date.now() / 1000);
-
-  const url = `https://api.vamosys.com/getApiKey?userId=${userId}&validDays=${validDays}&time=${time}`;
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(errText || "Vamosys API returned an error");
-  }
-
-  const data = await response.json();
-  return data.apiKey || "";
-}
-
 exports.getVamosysApiKey = async (req, res) => {
   try {
-    const userId = "ADINN12";
-    const validDays = 365;
-    const time = Math.floor(Date.now() / 1000);
-    const url = `https://api.vamosys.com/getApiKey?userId=${userId}&validDays=${validDays}&time=${time}`;
-
     const apiKey = await fetchVamosysApiKey();
 
     return res.status(200).json({
       success: true,
-      requestedUrl: url,
       data: { apiKey },
     });
   } catch (error) {
@@ -2519,24 +2510,12 @@ exports.getVamosysApiKey = async (req, res) => {
   }
 };
 
-
-
-
 exports.getVehicleLocationsProxy = async (req, res) => {
   try {
-
-    const apiKey = await fetchVamosysApiKey();
-
-    const url = `http://api.vamosys.com/apiMobile/getVehicleLocations?apiKey=${apiKey}&userId=ADINN12&groupId=ADINN12`;
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      const errText = await response.text();
-      return errorResponse(res, "Vamosys locations API error: " + errText, null, 502);
-    }
-
-    const data = await response.json();
-    return successResponse(res, "Vehicle locations fetched", { data });
+    const locations = await fetchAllVehicleLocations();
+    return successResponse(res, "Vehicle locations fetched", {
+      data: [{ vehicleLocations: locations }],
+    });
   } catch (error) {
     console.error("Vamosys locations proxy error:", error.message);
     return errorResponse(res, error.message, null, 500);
@@ -2739,7 +2718,10 @@ const GST_PERCENT = Number(process.env.GST_PERCENT) || 18;
 exports.addDailyHoursLog = async (req, res) => {
   try {
     const { id } = req.params;
-    const { vehicleIndex, entryId, day, startTime, endTime, remarks, logId, isAbsentDay, billingMode, absentDayResolution } = req.body;
+    const {
+      vehicleIndex, entryId, day, startTime, endTime, remarks, logId, isAbsentDay, billingMode, absentDayResolution,
+      distanceCoveredKm, activationsCount, leadsCollected, peopleEngaged, routeNote,
+    } = req.body;
 
     const vIdx = Number(vehicleIndex);
     const absentDayFlag = !!isAbsentDay;
@@ -2813,6 +2795,23 @@ exports.addDailyHoursLog = async (req, res) => {
         ? req.user.username
         : order.handlerName || req.user?.username || "Admin";
 
+    const existing = logId
+      ? order.dailyHoursLogArray.id(logId)
+      : order.dailyHoursLogArray.find(
+          (l) => l.entryId && entry && l.entryId.toString() === entry._id.toString() && l.day === day
+        );
+
+    /* Day photos: a re-save that doesn't attach new files keeps whatever
+       was uploaded last time, rather than wiping them. */
+    const uploadedPhotoFiles = (req.files || []).filter((f) => f.fieldname === "photos");
+    for (const file of uploadedPhotoFiles) {
+      const err = validateFile(file, "Day photo");
+      if (err) return errorResponse(res, err, null, 400);
+    }
+    const photos = uploadedPhotoFiles.length
+      ? uploadedPhotoFiles.map(getFileUrl)
+      : existing?.photos || [];
+
     const payload = {
       vehicleIndex: vIdx,
       entryId: entry ? entry._id : null,
@@ -2831,13 +2830,13 @@ exports.addDailyHoursLog = async (req, res) => {
       remarks: remarks || "",
       loggedBy,
       loggedAt: new Date(),
+      distanceCoveredKm: Number(distanceCoveredKm) || 0,
+      activationsCount: Number(activationsCount) || 0,
+      leadsCollected: Number(leadsCollected) || 0,
+      peopleEngaged: Number(peopleEngaged) || 0,
+      routeNote: routeNote || "",
+      photos,
     };
-
-    const existing = logId
-      ? order.dailyHoursLogArray.id(logId)
-      : order.dailyHoursLogArray.find(
-          (l) => l.entryId && entry && l.entryId.toString() === entry._id.toString() && l.day === day
-        );
 
     if (existing) {
       Object.assign(existing, payload);

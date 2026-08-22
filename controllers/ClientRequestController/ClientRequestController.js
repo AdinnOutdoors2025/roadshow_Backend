@@ -8,6 +8,31 @@ const GstDetail = require("../../Models/GstDetailsModel/gstdetails");
 const Order = require("../../Models/AdminorderModel/Adminorder");
 const Package = require("../../Models/PackageManagementModel/packagemanagement");
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
+const VehicleGroup = require("../../Models/vehicleDetails");
+const VehicleType = require("../../Models/VehicleTypeSchema");
+const {
+  JOURNEY_STEPS,
+  LIST_ORDER_SELECT,
+  TRACKING_ORDER_SELECT,
+  LIVE_LOCATION_ORDER_SELECT,
+  deriveJourneyStage,
+  buildSteps,
+  buildActivity,
+  deriveOnRoadDay,
+  buildDayWiseReport,
+  flattenPhotos,
+  todayIndiaDateKey,
+} = require("../../Utils/clientJourneyStages");
+const {
+  getLiveLocationsForRegistrationNumbers,
+  getDrivingSummaryForDay,
+  getRouteTrackId,
+} = require("../../Utils/vamosysClient");
+const {
+  getVehicleHistory,
+  resolveHistoryRange,
+} = require("../../Utils/vamosysHistoryClient");
+const { sendCampaignRequestMail } = require("../../Utils/campaignMailer");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -228,6 +253,94 @@ const populateClientRequest = (query) =>
   query
     .populate("userId", "name email phone")
     .populate("vehicleTypes.vehicleType", "name");
+
+/* Same as populateClientRequest, plus a client-safe slice of the linked
+   Order (see Utils/clientJourneyStages LIST_ORDER_SELECT) so list rows can
+   show the real pipeline stage without a second round trip per booking. */
+const populateClientRequestForList = (query) =>
+  populateClientRequest(query).populate("orderRef", LIST_ORDER_SELECT);
+
+/* Best-effort representative photo per booked vehicle TYPE — a booking
+   line only snapshots the vehicle's name as plain text at request time,
+   it never links to one specific onboarded vehicle group, so this can
+   only match on the shared VehicleType category, not the exact named
+   vehicle. One batched query across every request being returned, never
+   an N+1 lookup per row. Purely additive: adds `vehicleTypeImage` to each
+   line, null when no onboarded vehicle of that type has a front-view
+   photo yet. Mutates `requests` in place. */
+const attachVehicleTypeImages = async (requests) => {
+  const typeIds = new Set();
+
+  for (const request of requests) {
+    for (const line of request.vehicleTypes || []) {
+      const typeId = line.vehicleType?._id || line.vehicleType;
+      if (typeId) typeIds.add(String(typeId));
+    }
+  }
+
+  if (!typeIds.size) return requests;
+
+  const groups = await VehicleGroup.find({
+    "basicInfo.vehicleType": { $in: [...typeIds] },
+  }).select("basicInfo.vehicleType mediaFiles.frontViewImage");
+
+  const imageByType = new Map();
+  for (const group of groups) {
+    const typeId = String(group.basicInfo?.vehicleType || "");
+    if (typeId && !imageByType.has(typeId) && group.mediaFiles?.frontViewImage) {
+      imageByType.set(typeId, group.mediaFiles.frontViewImage);
+    }
+  }
+
+  for (const request of requests) {
+    for (const line of request.vehicleTypes || []) {
+      const typeId = String(line.vehicleType?._id || line.vehicleType || "");
+      line.vehicleTypeImage = imageByType.get(typeId) || null;
+    }
+  }
+
+  return requests;
+};
+
+/* bookingItems.vehicleType is an ObjectId ref into VehicleType — typeName
+   is the descriptive display name (e.g. "4 Side LED Roadshow Vehicle").
+   One batched query per call, not one per booking line. Used by
+   getClientRequestLiveLocation to label a "pending assignment" vehicle
+   card with something more useful than a bare package/model name. */
+const resolveVehicleTypeNames = async (bookingItems) => {
+  const typeIds = [
+    ...new Set(
+      (bookingItems || [])
+        .map((item) => item.vehicleType && String(item.vehicleType))
+        .filter(Boolean)
+    ),
+  ];
+
+  if (!typeIds.length) return new Map();
+
+  const types = await VehicleType.find({ _id: { $in: typeIds } }).select("typeName");
+
+  return new Map(types.map((t) => [String(t._id), t.typeName]));
+};
+
+/* Attaches the derived journey stage to a plain (toObject()'d) client
+   request. Purely additive — never removes/changes an existing field. */
+const attachTrackingSummary = (request) => {
+  const { stageIndex, isCancelled, vehicleUnavailable } = deriveJourneyStage(request.orderRef);
+  const onRoad = deriveOnRoadDay(request.orderRef, request.vehicleTypes);
+
+  return {
+    ...request,
+    journeyStage: { index: stageIndex, key: JOURNEY_STEPS[stageIndex].key },
+    /* Per-milestone status + completedAt (null when not yet reached/logged —
+       see buildSteps' own "never fabricates history" contract) so the
+       client-facing timeline can show a real date under each stage. */
+    steps: buildSteps(request.orderRef, request.createdAt),
+    isCancelled,
+    vehicleUnavailable,
+    onRoad,
+  };
+};
 
 /**
  * Resolve the billing identity for a request.
@@ -708,6 +821,17 @@ exports.createClientRequest = async (req, res) => {
         clientRequest.orderId = order.orderId;
 
         await clientRequest.save();
+
+        /* Same non-fatal contract as the order mirror above — the
+           customer's request is already saved either way. */
+        try {
+          await sendCampaignRequestMail(order);
+        } catch (mailError) {
+          console.error(
+            `Client request ${clientRequest.clientOrderId}: campaign request mail not sent —`,
+            mailError.message
+          );
+        }
       }
     } catch (orderError) {
       console.error(
@@ -777,15 +901,18 @@ exports.getAllClientRequests = async (req, res) => {
  */
 exports.getMyClientRequests = async (req, res) => {
   try {
-    const requests = await populateClientRequest(
+    const requests = await populateClientRequestForList(
       ClientRequest.find({ userId: req.clientUser._id }).sort({
         createdAt: -1,
       })
     );
 
+    const plain = requests.map((request) => request.toObject());
+    await attachVehicleTypeImages(plain);
+
     return res.status(200).json({
       success: true,
-      data: requests.map((request) => request.toObject()),
+      data: plain.map((request) => attachTrackingSummary(request)),
       count: requests.length,
     });
   } catch (error) {
@@ -806,7 +933,7 @@ exports.getClientRequestById = async (req, res) => {
       });
     }
 
-    const request = await populateClientRequest(
+    const request = await populateClientRequestForList(
       ClientRequest.findById(req.params.id)
     );
 
@@ -832,9 +959,410 @@ exports.getClientRequestById = async (req, res) => {
       });
     }
 
+    const plain = request.toObject();
+    await attachVehicleTypeImages([plain]);
+
     return res.status(200).json({
       success: true,
-      data: request.toObject(),
+      data: attachTrackingSummary(plain),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * The client-safe campaign tracking console payload for one booking:
+ * current stage, a dynamically generated progress timeline, a deduped
+ * milestone activity feed, and (only once the backend says the campaign is
+ * actually on road) a day-of-N counter. Deliberately excludes everything
+ * internal — handler names, notes, project codes, costing, driver contact
+ * details — the caller only ever gets what Utils/clientJourneyStages and
+ * TRACKING_ORDER_SELECT explicitly allow through.
+ */
+exports.getClientRequestTracking = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    const request = await ClientRequest.findById(req.params.id).populate(
+      "orderRef",
+      TRACKING_ORDER_SELECT
+    );
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    /* Same ownership rule as getClientRequestById — see comment there. */
+    if (
+      req.clientUser &&
+      String(request.userId) !== String(req.clientUser._id)
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    const order = request.orderRef || null;
+    const submittedAt = request.createdAt;
+    const { stageIndex, isCancelled, vehicleUnavailable } = deriveJourneyStage(order);
+
+    const campaignStart = request.vehicleTypes?.[0]?.fromDate || null;
+    const campaignEnd = request.vehicleTypes?.[0]?.toDate || null;
+    const dayWiseReport = buildDayWiseReport(order, campaignStart, campaignEnd, stageIndex);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        clientOrderId: request.clientOrderId,
+        bookingSummary: {
+          campaignName: request.vehicleTypes?.[0]?.campaignName || "",
+          location: request.location || request.vehicleTypes?.[0]?.campaignLocation || "",
+          startDate: campaignStart,
+          endDate: campaignEnd,
+          totalDays: request.vehicleTypes?.[0]?.totalDays || null,
+          vehicleTypeCount: request.vehicleTypes?.length || 0,
+          vehicleCount: (request.vehicleTypes || []).reduce(
+            (sum, v) => sum + (v.quantity || 0),
+            0
+          ),
+        },
+        journeyStage: { index: stageIndex, key: JOURNEY_STEPS[stageIndex].key },
+        isCancelled,
+        vehicleUnavailable,
+        onRoad: deriveOnRoadDay(order, request.vehicleTypes),
+        steps: buildSteps(order, submittedAt),
+        activity: buildActivity(order, submittedAt),
+        dayWiseReport,
+        photos: flattenPhotos(dayWiseReport),
+        lastUpdatedAt: order?.updatedAt || request.updatedAt,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * Lightweight, frequently-polled live GPS lookup for one booking. Kept
+ * separate from getClientRequestTracking (and its own populate select) so a
+ * live-tracking poll never has to pull the whole order — see Utils/
+ * clientJourneyStages LIVE_LOCATION_ORDER_SELECT. Returns an empty vehicle
+ * list (still 200, not an error) whenever the campaign isn't actually on
+ * road — no Vamosys call is made in that case at all.
+ */
+exports.getClientRequestLiveLocation = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    const request = await ClientRequest.findById(req.params.id).populate(
+      "orderRef",
+      LIVE_LOCATION_ORDER_SELECT
+    );
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    /* Same ownership rule as getClientRequestById — see comment there. */
+    if (
+      req.clientUser &&
+      String(request.userId) !== String(req.clientUser._id)
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    const order = request.orderRef || null;
+
+    if (!order || order.pipelineStatus !== "onRoad") {
+      return res.status(200).json({
+        success: true,
+        data: { vehicles: [] },
+      });
+    }
+
+    const activeEntries = (order.onRoadExecutionArray || []).filter(
+      (e) => e.entryStatus !== "removed" && e.vehicleRegistrationNumber
+    );
+
+    /* A vehicle marked unavailable by operations must still be reported to
+       the client — just as "unavailable", not silently dropped. Only the
+       still-available registrations are worth a Vamosys lookup. */
+    const availableRegistrationNumbers = activeEntries
+      .filter((e) => !e.unavailableStatus)
+      .map((e) => e.vehicleRegistrationNumber);
+
+    const liveVehicleData = await getLiveLocationsForRegistrationNumbers(
+      availableRegistrationNumbers
+    );
+    const liveByReg = new Map(
+      liveVehicleData.map((v) => [v.registrationNumber, v])
+    );
+
+    const typeNameMap = await resolveVehicleTypeNames(order.bookingItems);
+
+    /* Every booked vehicle SLOT is reported, not just the ones operations
+       has already assigned a driver + registration number to. A booking
+       line with quantity 2 is 2 slots; onRoadExecutionArray only grows an
+       entry per slot as admin fills it in (submitOnRoadDetails), so any
+       slot with no matching entry yet is reported "pending" instead of
+       being silently omitted — otherwise a customer who booked 2 vehicle
+       types but only has 1 assigned sees just 1 vehicle card with no
+       indication the 2nd one even exists. */
+    const vehicles = [];
+
+    (order.bookingItems || []).forEach((item, vehicleIndex) => {
+      const vehicleName =
+        typeNameMap.get(item.vehicleType && String(item.vehicleType)) ||
+        item.vehicleModel ||
+        "Vehicle";
+
+      const slots = Math.max(Number(item.quantity) || 1, 1);
+      const entriesForLine = activeEntries.filter(
+        (e) => e.vehicleIndex === vehicleIndex
+      );
+
+      for (let slot = 0; slot < slots; slot += 1) {
+        const entry = entriesForLine[slot];
+
+        if (!entry) {
+          vehicles.push({
+            vehicleIndex,
+            vehicleName,
+            registrationNumber: null,
+            pending: true,
+            unavailable: false,
+            message: "Driver & vehicle not yet assigned",
+          });
+          continue;
+        }
+
+        if (entry.unavailableStatus) {
+          vehicles.push({
+            vehicleIndex,
+            vehicleName,
+            registrationNumber: entry.vehicleRegistrationNumber,
+            pending: false,
+            unavailable: true,
+          });
+          continue;
+        }
+
+        const live = liveByReg.get(entry.vehicleRegistrationNumber);
+
+        vehicles.push({
+          vehicleIndex,
+          vehicleName,
+          pending: false,
+          unavailable: false,
+          registrationNumber: entry.vehicleRegistrationNumber,
+          ...(live || {}),
+        });
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: { vehicles },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * Today's driving-time breakdown (moving/parked/idle/no-data) and trip
+ * stats per vehicle — a much heavier, server-cached Vamosys call than
+ * live-location, so it's deliberately its own endpoint polled on a slower
+ * interval by the frontend. Same empty-fleet short-circuit when the
+ * campaign isn't on road.
+ */
+exports.getClientRequestDrivingSummary = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    const request = await ClientRequest.findById(req.params.id).populate(
+      "orderRef",
+      LIVE_LOCATION_ORDER_SELECT
+    );
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    /* Same ownership rule as getClientRequestById — see comment there. */
+    if (
+      req.clientUser &&
+      String(request.userId) !== String(req.clientUser._id)
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    const order = request.orderRef || null;
+
+    if (!order || order.pipelineStatus !== "onRoad") {
+      return res.status(200).json({
+        success: true,
+        data: { vehicles: [] },
+      });
+    }
+
+    const activeEntries = (order.onRoadExecutionArray || []).filter(
+      (e) => e.entryStatus !== "removed" && e.vehicleRegistrationNumber
+    );
+
+    /* Frontend (useDrivingSummary.ts) already sends ?day=YYYY-MM-DD when the
+       client picks a past campaign day from the history tabs — honor it
+       instead of always defaulting to today, otherwise every day selection
+       silently returns today's summary. */
+    const requestedDay = String(req.query.day || "").trim();
+    const day = requestedDay || todayIndiaDateKey();
+
+    const vehicles = await Promise.all(
+      activeEntries.map(async (entry) => {
+        const registrationNumber = entry.vehicleRegistrationNumber;
+
+        /* Unavailable vehicles are reported as such, not omitted — see
+           getClientRequestLiveLocation for the same rule. */
+        if (entry.unavailableStatus) {
+          return { registrationNumber, drivingSummary: null };
+        }
+
+        try {
+          const drivingSummary = await getDrivingSummaryForDay(registrationNumber, day);
+          return { registrationNumber, drivingSummary };
+        } catch {
+          return { registrationNumber, drivingSummary: null };
+        }
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: { vehicles },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * Track id for Vamosys's own public animated-route embed (moving marker +
+ * speedometer) per vehicle — same short-circuit rules as live-location.
+ * A vehicle's track id is best-effort: if Vamosys fails for one
+ * registration the others still come back, with that entry's trackId null
+ * (the frontend falls back to its own map for that vehicle only).
+ */
+exports.getClientRequestRouteTrack = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    const request = await ClientRequest.findById(req.params.id).populate(
+      "orderRef",
+      LIVE_LOCATION_ORDER_SELECT
+    );
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    /* Same ownership rule as getClientRequestById — see comment there. */
+    if (
+      req.clientUser &&
+      String(request.userId) !== String(req.clientUser._id)
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    const order = request.orderRef || null;
+
+    if (!order || order.pipelineStatus !== "onRoad") {
+      return res.status(200).json({
+        success: true,
+        data: { vehicles: [] },
+      });
+    }
+
+    const activeEntries = (order.onRoadExecutionArray || []).filter(
+      (e) => e.entryStatus !== "removed" && e.vehicleRegistrationNumber
+    );
+
+    const vehicles = await Promise.all(
+      activeEntries.map(async (entry) => {
+        const registrationNumber = entry.vehicleRegistrationNumber;
+
+        /* Unavailable vehicles are reported as such, not omitted — see
+           getClientRequestLiveLocation for the same rule. */
+        if (entry.unavailableStatus) {
+          return { registrationNumber, trackId: null };
+        }
+
+        try {
+          const trackId = await getRouteTrackId(registrationNumber);
+          return { registrationNumber, trackId };
+        } catch {
+          return { registrationNumber, trackId: null };
+        }
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: { vehicles },
     });
   } catch (error) {
     return res.status(500).json({
@@ -949,19 +1477,286 @@ exports.deleteClientRequest = async (req, res) => {
   try {
     const deleted = await ClientRequest.findByIdAndDelete(req.params.id);
     if (!deleted) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Client request not found' 
+      return res.status(404).json({
+        success: false,
+        message: 'Client request not found'
       });
     }
-    res.status(200).json({ 
-      success: true, 
-      message: 'Deleted successfully' 
+    res.status(200).json({
+      success: true,
+      message: 'Deleted successfully'
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Detailed Vamosys vehicle history for the logged-in client's booking.
+ *
+ * Supports:
+ * - last 6 hours
+ * - last 12 hours
+ * - today
+ * - yesterday
+ * - custom date/time range
+ *
+ * Security:
+ * - Client can only access their own booking.
+ * - Vehicle number must exist inside onRoadExecutionArray.
+ * - Unavailable vehicles remain visible but are not queried from Vamosys.
+ */
+exports.getClientRequestVehicleHistory = async (req, res) => {
+  try {
+    /* =====================================================
+       VALIDATE BOOKING ID
+    ===================================================== */
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    /* =====================================================
+       GET REQUEST + CLIENT SAFE ORDER FIELDS
+    ===================================================== */
+
+    const request = await ClientRequest.findById(req.params.id).populate(
+      "orderRef",
+      LIVE_LOCATION_ORDER_SELECT
+    );
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    /* =====================================================
+       OWNERSHIP VALIDATION
+
+       Staff has no req.clientUser.
+       Client must own this booking.
+    ===================================================== */
+
+    if (
+      req.clientUser &&
+      String(request.userId) !== String(req.clientUser._id)
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    const order = request.orderRef || null;
+
+    /* =====================================================
+       RESOLVE REQUESTED HISTORY RANGE
+    ===================================================== */
+
+    let range;
+
+    try {
+      range = resolveHistoryRange(req.query);
+    } catch (rangeError) {
+      return res.status(400).json({
+        success: false,
+        message:
+          rangeError.message ||
+          "Invalid vehicle history date/time range",
+      });
+    }
+
+    /* =====================================================
+       ONLY ON-ROAD CAMPAIGNS HAVE GPS HISTORY
+    ===================================================== */
+
+    if (!order || order.pipelineStatus !== "onRoad") {
+      return res.status(200).json({
+        success: true,
+
+        data: {
+          range,
+          vehicles: [],
+        },
+      });
+    }
+
+    /* =====================================================
+       ACTIVE ON-ROAD VEHICLES
+    ===================================================== */
+
+    const activeEntries = (
+      order.onRoadExecutionArray || []
+    ).filter(
+      (entry) =>
+        entry.entryStatus !== "removed" &&
+        entry.vehicleRegistrationNumber
+    );
+
+    /* =====================================================
+       OPTIONAL VEHICLE FILTER
+
+       Frontend can send:
+
+       ?vehicle=TN58BF3736
+
+       But backend verifies that it belongs to this order.
+    ===================================================== */
+
+    const requestedVehicle = String(
+      req.query.vehicle || ""
+    )
+      .trim()
+      .replace(/\s+/g, "")
+      .toUpperCase();
+
+    let requestedEntries = activeEntries;
+
+    if (requestedVehicle) {
+      requestedEntries = activeEntries.filter(
+        (entry) => {
+          const registrationNumber = String(
+            entry.vehicleRegistrationNumber || ""
+          )
+            .trim()
+            .replace(/\s+/g, "")
+            .toUpperCase();
+
+          return (
+            registrationNumber === requestedVehicle
+          );
+        }
+      );
+
+      if (!requestedEntries.length) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This vehicle is not assigned to this booking.",
+        });
+      }
+    }
+
+    /* =====================================================
+       FETCH HISTORY VEHICLE BY VEHICLE
+    ===================================================== */
+
+    const vehicles = await Promise.all(
+      requestedEntries.map(async (entry) => {
+        const registrationNumber = String(
+          entry.vehicleRegistrationNumber || ""
+        )
+          .trim()
+          .replace(/\s+/g, "")
+          .toUpperCase();
+
+        /* -----------------------------------------------
+           VEHICLE MARKED UNAVAILABLE BY OPERATIONS
+        ------------------------------------------------ */
+
+        if (entry.unavailableStatus) {
+          return {
+            registrationNumber,
+
+            unavailable: true,
+
+            message:
+              "Vehicle is marked unavailable in On Road operations.",
+
+            rows: [],
+
+            summary: {
+              pointCount: 0,
+              distanceKm: 0,
+              maxSpeedKmh: 0,
+              movingCount: 0,
+              parkedCount: 0,
+              idleCount: 0,
+              ignitionOnCount: 0,
+              startAddress: "",
+              endAddress: "",
+            },
+          };
+        }
+
+        /* -----------------------------------------------
+           AVAILABLE VEHICLE → FETCH VAMOSYS HISTORY
+        ------------------------------------------------ */
+
+        try {
+          return await getVehicleHistory(
+            registrationNumber,
+            range
+          );
+        } catch (historyError) {
+          console.error(
+            `Vehicle history failed for ${registrationNumber}:`,
+            historyError.message
+          );
+
+          /*
+           One failed vehicle must NOT break history
+           for every other vehicle.
+          */
+          return {
+            registrationNumber,
+
+            unavailable: false,
+
+            message:
+              historyError.message ||
+              "Vehicle history is temporarily unavailable.",
+
+            rows: [],
+
+            summary: {
+              pointCount: 0,
+              distanceKm: 0,
+              maxSpeedKmh: 0,
+              movingCount: 0,
+              parkedCount: 0,
+              idleCount: 0,
+              ignitionOnCount: 0,
+              startAddress: "",
+              endAddress: "",
+            },
+          };
+        }
+      })
+    );
+
+    /* =====================================================
+       RESPONSE
+    ===================================================== */
+
+    return res.status(200).json({
+      success: true,
+
+      data: {
+        range,
+
+        vehicles: vehicles.filter(Boolean),
+      },
+    });
+  } catch (error) {
+    console.error(
+      "getClientRequestVehicleHistory error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message ||
+        "Unable to load vehicle history",
     });
   }
 };
