@@ -36,10 +36,15 @@ const TRACKING_ORDER_SELECT =
   "dailyHoursLogArray.photos dailyHoursLogArray.isAbsentDay";
 
 /* Fields safe to select for the lightweight, frequently-polled live-location
-   lookup — just enough to resolve which vehicles belong to this order. */
+   lookup — just enough to resolve which vehicles belong to this order.
+   bookingItems.{vehicleType,vehicleModel,quantity} and
+   onRoadExecutionArray.vehicleIndex let getClientRequestLiveLocation match
+   each booked vehicle slot to its assignment (or lack of one) — see the
+   "pending" placeholder handling there. */
 const LIVE_LOCATION_ORDER_SELECT =
-  "pipelineStatus onRoadExecutionArray.vehicleRegistrationNumber onRoadExecutionArray.entryStatus " +
-  "onRoadExecutionArray.unavailableStatus";
+  "pipelineStatus onRoadExecutionArray.vehicleIndex onRoadExecutionArray.vehicleRegistrationNumber " +
+  "onRoadExecutionArray.entryStatus onRoadExecutionArray.unavailableStatus " +
+  "bookingItems.vehicleType bookingItems.vehicleModel bookingItems.quantity";
 
 const SALES_TIER = {
   enquiry: 0,

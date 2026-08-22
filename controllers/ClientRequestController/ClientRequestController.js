@@ -9,6 +9,7 @@ const Order = require("../../Models/AdminorderModel/Adminorder");
 const Package = require("../../Models/PackageManagementModel/packagemanagement");
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const VehicleGroup = require("../../Models/vehicleDetails");
+const VehicleType = require("../../Models/VehicleTypeSchema");
 const {
   JOURNEY_STEPS,
   LIST_ORDER_SELECT,
@@ -31,6 +32,7 @@ const {
   getVehicleHistory,
   resolveHistoryRange,
 } = require("../../Utils/vamosysHistoryClient");
+const { sendCampaignRequestMail } = require("../../Utils/campaignMailer");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -298,6 +300,27 @@ const attachVehicleTypeImages = async (requests) => {
   }
 
   return requests;
+};
+
+/* bookingItems.vehicleType is an ObjectId ref into VehicleType — typeName
+   is the descriptive display name (e.g. "4 Side LED Roadshow Vehicle").
+   One batched query per call, not one per booking line. Used by
+   getClientRequestLiveLocation to label a "pending assignment" vehicle
+   card with something more useful than a bare package/model name. */
+const resolveVehicleTypeNames = async (bookingItems) => {
+  const typeIds = [
+    ...new Set(
+      (bookingItems || [])
+        .map((item) => item.vehicleType && String(item.vehicleType))
+        .filter(Boolean)
+    ),
+  ];
+
+  if (!typeIds.length) return new Map();
+
+  const types = await VehicleType.find({ _id: { $in: typeIds } }).select("typeName");
+
+  return new Map(types.map((t) => [String(t._id), t.typeName]));
 };
 
 /* Attaches the derived journey stage to a plain (toObject()'d) client
@@ -798,6 +821,17 @@ exports.createClientRequest = async (req, res) => {
         clientRequest.orderId = order.orderId;
 
         await clientRequest.save();
+
+        /* Same non-fatal contract as the order mirror above — the
+           customer's request is already saved either way. */
+        try {
+          await sendCampaignRequestMail(order);
+        } catch (mailError) {
+          console.error(
+            `Client request ${clientRequest.clientOrderId}: campaign request mail not sent —`,
+            mailError.message
+          );
+        }
       }
     } catch (orderError) {
       console.error(
@@ -1084,20 +1118,78 @@ exports.getClientRequestLiveLocation = async (req, res) => {
       .filter((e) => !e.unavailableStatus)
       .map((e) => e.vehicleRegistrationNumber);
 
-    const liveVehicles = await getLiveLocationsForRegistrationNumbers(
+    const liveVehicleData = await getLiveLocationsForRegistrationNumbers(
       availableRegistrationNumbers
     );
+    const liveByReg = new Map(
+      liveVehicleData.map((v) => [v.registrationNumber, v])
+    );
 
-    const unavailableVehicles = activeEntries
-      .filter((e) => e.unavailableStatus)
-      .map((e) => ({
-        registrationNumber: e.vehicleRegistrationNumber,
-        unavailable: true,
-      }));
+    const typeNameMap = await resolveVehicleTypeNames(order.bookingItems);
+
+    /* Every booked vehicle SLOT is reported, not just the ones operations
+       has already assigned a driver + registration number to. A booking
+       line with quantity 2 is 2 slots; onRoadExecutionArray only grows an
+       entry per slot as admin fills it in (submitOnRoadDetails), so any
+       slot with no matching entry yet is reported "pending" instead of
+       being silently omitted — otherwise a customer who booked 2 vehicle
+       types but only has 1 assigned sees just 1 vehicle card with no
+       indication the 2nd one even exists. */
+    const vehicles = [];
+
+    (order.bookingItems || []).forEach((item, vehicleIndex) => {
+      const vehicleName =
+        typeNameMap.get(item.vehicleType && String(item.vehicleType)) ||
+        item.vehicleModel ||
+        "Vehicle";
+
+      const slots = Math.max(Number(item.quantity) || 1, 1);
+      const entriesForLine = activeEntries.filter(
+        (e) => e.vehicleIndex === vehicleIndex
+      );
+
+      for (let slot = 0; slot < slots; slot += 1) {
+        const entry = entriesForLine[slot];
+
+        if (!entry) {
+          vehicles.push({
+            vehicleIndex,
+            vehicleName,
+            registrationNumber: null,
+            pending: true,
+            unavailable: false,
+            message: "Driver & vehicle not yet assigned",
+          });
+          continue;
+        }
+
+        if (entry.unavailableStatus) {
+          vehicles.push({
+            vehicleIndex,
+            vehicleName,
+            registrationNumber: entry.vehicleRegistrationNumber,
+            pending: false,
+            unavailable: true,
+          });
+          continue;
+        }
+
+        const live = liveByReg.get(entry.vehicleRegistrationNumber);
+
+        vehicles.push({
+          vehicleIndex,
+          vehicleName,
+          pending: false,
+          unavailable: false,
+          registrationNumber: entry.vehicleRegistrationNumber,
+          ...(live || {}),
+        });
+      }
+    });
 
     return res.status(200).json({
       success: true,
-      data: { vehicles: [...liveVehicles, ...unavailableVehicles] },
+      data: { vehicles },
     });
   } catch (error) {
     return res.status(500).json({

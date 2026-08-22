@@ -8,6 +8,7 @@ require("dotenv").config();
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const { successResponse, errorResponse } = require("../../Utils/response");
 const { sendFocMail, getActiveAdminEmails, getEmailByUsername } = require('../../Utils/focMailer');
+const { sendCampaignRequestMail } = require('../../Utils/campaignMailer');
 const VehicleMaster = require("../../Models/vehicleDetails");
 const VehicleType = require("../../Models/VehicleTypeSchema");
 const { checkVehicleAvailability } = require("../../Utils/vehicleAvailability");
@@ -424,6 +425,18 @@ exports.createAdminOrder = async (req, res) => {
     });
 
     await order.save();
+
+    /* Deliberately non-fatal — the order is already saved and must not be
+       rejected because the notification mail could not be sent. */
+    try {
+      await sendCampaignRequestMail(order);
+    } catch (mailError) {
+      console.error(
+        `Admin order ${order.orderId}: campaign request mail not sent —`,
+        mailError.message
+      );
+    }
+
     return successResponse(res, "Admin order created successfully", { orderId: order.orderId, order }, 201);
   } catch (error) {
     return errorResponse(res, error.message);
