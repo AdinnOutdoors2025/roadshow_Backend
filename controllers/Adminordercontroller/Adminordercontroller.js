@@ -3415,7 +3415,10 @@ const buildInvoiceDiff = (oldData, newData) => {
 };
 
 const normalizeDiscount = (d) => ({
-  label: (d.label || "Discount").trim(),
+  // Keep a genuinely blank label as "" (not defaulted to "Discount") — the
+  // blank-placeholder check in buildDiscountDiff below relies on this to
+  // tell an untouched draft row apart from a real previously-saved one.
+  label: (d.label || "").trim(),
   mode: d.mode === "add" ? "add" : "decrease",
   type: d.type === "amount" ? "amount" : "percent",
   value: Number(d.value) || 0,
