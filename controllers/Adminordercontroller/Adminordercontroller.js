@@ -4086,6 +4086,12 @@ exports.getCampaignCalculator = async (req, res) => {
         const entriesForSlot = onRoadExecutionArray.filter(
           (e) => e.vehicleIndex === vehicleIndex
         );
+        // A booking item/vehicle that hasn't actually been moved onto the
+        // On Road tab yet has no execution entries at all — keep it out of
+        // the Daily Timeline entirely (no cost line, no card) until it is
+        // genuinely moved On Road, instead of showing it just because its
+        // campaign date window includes today.
+        if (entriesForSlot.length === 0) return;
 
         const activeEntries = [];
         const releasedToday = [];
@@ -4490,7 +4496,14 @@ exports.getDayByDayHistory = async (req, res) => {
         toDate: b.toDate,
         registrationNumbers,
       };
-    });
+    })
+      // Only a booking item/vehicle that has actually been moved onto the
+      // On Road tab (i.e. has at least one on-road-side record — execution
+      // entry, driver history, unavailable event, extra KM, or issue) shows
+      // up here. A booking item still sitting in Project Execution has none
+      // of these yet, so it stays out of Timeline / Timeline Hours until it
+      // is genuinely moved On Road.
+      .filter((vt) => vt.registrationNumbers.length > 0);
 
     // ── 2.1 / 2.4 Driver Change + Driver Status History ──
     const driverChangeHistory = [];
