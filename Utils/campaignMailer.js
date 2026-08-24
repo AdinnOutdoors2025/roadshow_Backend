@@ -152,6 +152,43 @@ const buildCampaignMailData = async (order) => {
 };
 
 /**
+ * Reshapes buildCampaignMailData's { customer, vehicles, pricing } nesting
+ * into the flat BookingSummaryPdfData shape src/lib/bookingSummaryPdf.ts /
+ * BookingSummaryDocument.tsx expect — same underlying numbers, just a
+ * different top-level layout. Consumed by the internal booking-summary-data
+ * endpoint that the print-only frontend route fetches from.
+ */
+const buildBookingSummaryPdfData = async (order) => {
+  const mailData = await buildCampaignMailData(order);
+  const { customer, vehicles, pricing } = mailData;
+
+  return {
+    clientOrderId: mailData.orderId,
+    name: customer.name,
+    email: customer.email,
+    phone: customer.phone,
+    status: mailData.status,
+    createdAt: mailData.createdAt,
+
+    customerCategory: customer.customerCategory,
+    gstNumber: customer.gstNumber,
+    companyName: customer.companyName,
+    panNumber: customer.panNumber,
+
+    vehicleTypes: vehicles,
+
+    subtotal: pricing.subtotal,
+    gstPercentage: pricing.gstPercentage,
+    gstAmount: pricing.gstAmount,
+    cgstAmount: pricing.cgstAmount,
+    sgstAmount: pricing.sgstAmount,
+    igstAmount: pricing.igstAmount,
+    promoterTotal: pricing.promoterTotal,
+    estimatedTotal: pricing.estimatedTotal,
+  };
+};
+
+/**
  * Sends the roadshowCampaignRequest mail for one order — same payload/
  * recipients for both an admin-created order (createAdminOrder) and a
  * public booking's mirrored order (createOrderForClientRequest), since
@@ -163,6 +200,26 @@ const buildCampaignMailData = async (order) => {
 async function sendCampaignRequestMail(order) {
   const base = frontendBaseUrl();
   const mailData = await buildCampaignMailData(order);
+
+  let bookingSummaryPdfUrl = order.bookingSummaryPdfUrl || "";
+
+  if (!bookingSummaryPdfUrl) {
+    try {
+      // Required lazily to avoid a circular require with this module
+      // (bookingSummaryPdfRenderer only needs the order id — the print
+      // page it navigates to fetches its own data via the internal
+      // booking-summary-data endpoint).
+      const { renderAndUploadBookingSummaryPdf } = require("./bookingSummaryPdfRenderer");
+      bookingSummaryPdfUrl = await renderAndUploadBookingSummaryPdf(order);
+      order.bookingSummaryPdfUrl = bookingSummaryPdfUrl;
+      await order.save();
+    } catch (pdfError) {
+      console.error(
+        `Order ${order.orderId}: booking summary PDF generation/upload failed —`,
+        pdfError.message
+      );
+    }
+  }
 
   const payload = {
     mailtype: "roadshowCampaignRequest",
@@ -176,7 +233,7 @@ async function sendCampaignRequestMail(order) {
     customerBookingUrl: `${base}/roadshow/my-bookings`,
     adminRequestUrl: `${base}/admin/sales-handling`,
 
-    bookingSummaryPdf: "",
+    bookingSummaryPdf: bookingSummaryPdfUrl,
     bookingSummaryFilename: `Booking_Summary_${order.orderId}.pdf`,
 
     data: mailData,
@@ -204,4 +261,4 @@ async function sendCampaignRequestMail(order) {
   return data;
 }
 
-module.exports = { sendCampaignRequestMail, buildCampaignMailData };
+module.exports = { sendCampaignRequestMail, buildCampaignMailData, buildBookingSummaryPdfData };

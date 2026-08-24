@@ -166,7 +166,8 @@ exports.sendClientOtp = async (req, res) => {
             const formattedNumber = mobileNumber.length === 10 ? `91${mobileNumber}` : mobileNumber;
             const message = `Welcome to Adinn Roadshows! : Use ${otp} to verify your mobile number. This OTP is valid for 5 minutes. Please do not share this code. - Adinn`;
             const url = `https://retailsms.nettyfish.com/api/mt/SendSMS?APIKey=${NETTYFISH_API_KEY}&senderid=${NETTYFISH_SENDER_ID}&channel=Trans&DCS=0&flashsms=0&number=${formattedNumber}&dlttemplateid=${NETTYFISH_TEMPLATE_ID}&text=${encodeURIComponent(message)}&route=17`;
-            await axios.get(url);
+            const smsResponse = await axios.get(url);
+            console.log("Nettyfish CLIENT SMS response:", smsResponse.data);
         }
         res.json({ success: true, message: "OTP sent" });
 

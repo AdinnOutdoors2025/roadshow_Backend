@@ -8,7 +8,7 @@ require("dotenv").config();
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const { successResponse, errorResponse } = require("../../Utils/response");
 const { sendFocMail, getActiveAdminEmails, getEmailByUsername } = require('../../Utils/focMailer');
-const { sendCampaignRequestMail } = require('../../Utils/campaignMailer');
+const { sendCampaignRequestMail, buildBookingSummaryPdfData } = require('../../Utils/campaignMailer');
 const VehicleMaster = require("../../Models/vehicleDetails");
 const VehicleType = require("../../Models/VehicleTypeSchema");
 const { checkVehicleAvailability } = require("../../Utils/vehicleAvailability");
@@ -982,6 +982,22 @@ exports.getOrderByMongoId = async (req, res) => {
     const order = await Order.findById(req.params.id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
     return successResponse(res, "Order fetched successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message);
+  }
+};
+
+// Internal-only (see the `internalOnly` shared-secret middleware in
+// AdminorderRoutes.js): feeds the print-only frontend route
+// (src/app/print-summary/[orderId]/page.tsx) the data it renders
+// BookingSummaryDocument.tsx with, so Puppeteer can print the exact same
+// template the browser "Download Summary" flow uses.
+exports.getBookingSummaryPdfData = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+    const data = await buildBookingSummaryPdfData(order);
+    return successResponse(res, "Booking summary data fetched successfully", data);
   } catch (error) {
     return errorResponse(res, error.message);
   }

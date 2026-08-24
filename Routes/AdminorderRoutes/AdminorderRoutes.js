@@ -13,6 +13,18 @@ const spacesClient = require("../../config/spaces");
 const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
 const BUCKET_NAME = process.env.DO_SPACES_BUCKET || "adinn-space";
 
+// Gates the internal booking-summary-data route: only the print-only
+// frontend route (src/app/print-summary/[orderId]/page.tsx) should ever
+// call this, using a shared secret rather than the admin JWT (the page
+// renders for admin-created orders too, which have no customer session).
+const internalOnly = (req, res, next) => {
+  const secret = req.headers["x-internal-secret"];
+  if (!process.env.INTERNAL_API_SECRET || secret !== process.env.INTERNAL_API_SECRET) {
+    return res.status(403).json({ success: false, message: "Forbidden" });
+  }
+  next();
+};
+
 
 const sanitizeFilename = (originalname) => {
   const ext = path.extname(originalname);
@@ -159,6 +171,7 @@ router.get("/pipeline/project-codes", protect, ctrl.getProjectCodeOrders);
 
 router.get("/orders", protect, ctrl.getAllOrders);
 router.get("/orders/by-id/:id", protect, ctrl.getOrderByMongoId);
+router.get("/internal/orders/:id/booking-summary-data", internalOnly, ctrl.getBookingSummaryPdfData);
 router.get("/orders/:orderId", protect, ctrl.getOrderById);
 router.post("/orders/create", adminOrderUpload, ctrl.createAdminOrder);
 
