@@ -2006,6 +2006,12 @@ const createVehicle = async (req, res) => {
       rightScreenHeight: "",
       rightResolutionWidth: "",
       rightResolutionHeight: "",
+      singleBackScreenWidth: "",
+      singleBackScreenHeight: "",
+      singleBackResolutionWidth: "",
+      singleBackResolutionHeight: "",
+      flexHeight: "",
+      flexWidth: "",
       audioOutput: "",
       brightness: "",
       displayVersion: "",
@@ -2625,6 +2631,12 @@ const updateVehicle = async (req, res) => {
         rightScreenHeight: updateData.techSpecs.rightScreenHeight || "",    // NEW
         rightResolutionWidth: updateData.techSpecs.rightResolutionWidth || "", // NEW
         rightResolutionHeight: updateData.techSpecs.rightResolutionHeight || "", // NEW
+        singleBackScreenWidth: updateData.techSpecs.singleBackScreenWidth || "",
+        singleBackScreenHeight: updateData.techSpecs.singleBackScreenHeight || "",
+        singleBackResolutionWidth: updateData.techSpecs.singleBackResolutionWidth || "",
+        singleBackResolutionHeight: updateData.techSpecs.singleBackResolutionHeight || "",
+        flexHeight: updateData.techSpecs.flexHeight || "",
+        flexWidth: updateData.techSpecs.flexWidth || "",
         audioOutput: updateData.techSpecs.audioOutput || "",
         brightness: updateData.techSpecs.brightness || "",
         displayVersion: updateData.techSpecs.displayVersion || "",

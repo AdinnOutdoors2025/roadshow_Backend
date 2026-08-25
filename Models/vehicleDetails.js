@@ -340,7 +340,7 @@ const vehicleSchema = new mongoose.Schema(
       leftRightScreenWidth: { type: String, default: "" },
       leftRightScreenHeight: { type: String, default: "" },
 
-      // Back Screen Size (ft) — used when numberOfScreens === "1" or "3"
+      // Back Screen Size (ft) — used when numberOfScreens === "3"
       backScreenWidth: { type: String, default: "" },
       backScreenHeight: { type: String, default: "" },
 
@@ -348,9 +348,22 @@ const vehicleSchema = new mongoose.Schema(
       leftRightResolutionWidth: { type: String, default: "" },
       leftRightResolutionHeight: { type: String, default: "" },
 
-      // Back Resolution (px) — used when numberOfScreens === "1" or "3"
+      // Back Resolution (px) — used when numberOfScreens === "3"
       backResolutionWidth: { type: String, default: "" },
       backResolutionHeight: { type: String, default: "" },
+
+      // Back Screen Size (ft) / Resolution (px) — separate fields used only
+      // when numberOfScreens === "1", kept distinct from the "3"-screen
+      // backScreenWidth/backResolutionWidth fields above so the two cases
+      // never collide.
+      singleBackScreenWidth: { type: String, default: "" },
+      singleBackScreenHeight: { type: String, default: "" },
+      singleBackResolutionWidth: { type: String, default: "" },
+      singleBackResolutionHeight: { type: String, default: "" },
+
+      // Flex Height / Width — shown only when screenType === "Flex+LED"
+      flexHeight: { type: String, default: "" },
+      flexWidth: { type: String, default: "" },
 
       // ── NEW FIELDS: Separate Left screen — used when numberOfScreens === "2"
       leftScreenWidth: { type: String, default: "" },

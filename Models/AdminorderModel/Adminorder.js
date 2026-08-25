@@ -65,6 +65,12 @@ const bookingItemSchema = new mongoose.Schema({
   campaignLocation: { type: String, default: "" },
   quantity: Number,
   needPromoter: { type: Boolean, default: false },
+  // Only the promoter's own required days within the campaign window —
+  // pricing uses these (falling back to the full campaign span when unset,
+  // e.g. older orders saved before this field existed).
+  promoterFromDate: { type: Date, default: null },
+  promoterToDate: { type: Date, default: null },
+  promoterDays: { type: Number, default: 0 },
   promoterType: String,
   otherPromoterType: String,
   promoterGender: { type: String, default: "" },
@@ -75,6 +81,9 @@ const bookingItemSchema = new mongoose.Schema({
   driverCharges: { type: Number, default: 0 },
   promoterChargePerDay: { type: Number, default: 0 },
   rtoCharges: { type: Number, default: 0 },
+  // Only ever set on a Hybrid vehicle's package — a one-time flat charge
+  // per vehicle-type slot, same pattern as rtoCost below.
+  brandingCost: { type: Number, default: 0 },
   additionalHourCharges: { type: Number, default: 0 },
   dailyKmcharges: { type: Number, default: 0 },
   campaignImages: [String],

@@ -1,5 +1,6 @@
 const Package = require('../../Models/PackageManagementModel/packagemanagement');
 const VehicleType = require('../../Models/VehicleTypeSchema');
+const VehicleMaster = require('../../Models/vehicleDetails');
 const { successResponse, errorResponse } = require('../../Utils/response');
 const mongoose = require('mongoose');
 
@@ -9,16 +10,32 @@ const toObjectId = (id) => {
   return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
 };
 
+// A vehicle type is "Hybrid" when its onboarded vehicle group's techSpecs
+// screenType was saved as "Hybrid" — Package Management itself has no
+// screen-type concept, so this looks the same group up the way onboarding
+// and getVehicleGroupByType do (basicInfo.vehicleType === the VehicleType ID).
+const isHybridVehicleType = async (vehicleTypeId) => {
+  const group = await VehicleMaster.findOne(
+    { "basicInfo.vehicleType": vehicleTypeId },
+    "techSpecs.screenType"
+  ).lean();
+  return group?.techSpecs?.screenType === "Hybrid";
+};
+
 exports.addPackage = async (req, res) => {
   try {
     const { vehicleType, vehicleModel, ...rest } = req.body;
-    
+
     // Validate vehicleType ID
     if (!mongoose.Types.ObjectId.isValid(vehicleType)) {
       return errorResponse(res, 'Invalid vehicle type ID', null, 400);
     }
-    
-    const existingPackage = await Package.findOne({ 
+
+    if (await isHybridVehicleType(vehicleType) && !(Number(rest.brandingCost) > 0)) {
+      return errorResponse(res, 'Branding Cost is required for a Hybrid vehicle package', null, 400);
+    }
+
+    const existingPackage = await Package.findOne({
       vehicleType: toObjectId(vehicleType), 
       vehicleModel 
     });
@@ -64,11 +81,15 @@ exports.updatePackage = async (req, res) => {
   try {
     const { id } = req.params;
     const { vehicleType, vehicleModel, ...rest } = req.body;
-    
+
     if (!mongoose.Types.ObjectId.isValid(vehicleType)) {
       return errorResponse(res, 'Invalid vehicle type ID', null, 400);
     }
-    
+
+    if (await isHybridVehicleType(vehicleType) && !(Number(rest.brandingCost) > 0)) {
+      return errorResponse(res, 'Branding Cost is required for a Hybrid vehicle package', null, 400);
+    }
+
     const pkg = await Package.findByIdAndUpdate(
       id, 
       { vehicleType: toObjectId(vehicleType), vehicleModel, ...rest }, 

@@ -85,16 +85,28 @@ function calcPricingBackend(pkg, v) {
   const driverCost = pkg.driverCharges * totalDays * quantity;
    const promoterChargePerDay = parseFloat(process.env.DEFAULT_PROMOTER_CHARGE || "1000");
 
-  //  promoter charges default data 
+  //  promoter charges default data
+  // Promoter is priced only for the selected Promoter From/To days
+  // (inclusive) — falls back to the full campaign totalDays when no
+  // promoter date range was sent (keeps older clients/saved orders working).
+  let promoterDays = totalDays;
+  if (v.promoterFromDate && v.promoterToDate) {
+    const pFrom = new Date(v.promoterFromDate);
+    const pTo = new Date(v.promoterToDate);
+    if (pFrom <= pTo) {
+      promoterDays = Math.ceil((pTo - pFrom) / 86400000) + 1;
+    }
+  }
   const promoterCost = needPromoter
     // ? (pkg.promoterChargePerDay || 0) * totalDays * promoterQuantity
-       ? (promoterChargePerDay || 0) * totalDays * promoterQuantity
+       ? (promoterChargePerDay || 0) * promoterDays * promoterQuantity
     : 0;
-  /* RTO charges are not priced for now — kept at 0 rather than removed
-     from the pricing shape, so every screen that reads rtoCost still
-     works unchanged. rtoCharges (the package's configured rate) is still
-     returned below for reference; it just isn't multiplied into cost. */
-  const rtoCost = 0;
+  // RTO is a one-time flat charge per vehicle-type slot (from the selected
+  // package), applied once regardless of totalDays.
+  const rtoCost = (pkg.rtoCharges || 0) * quantity;
+  // Branding Cost — only ever set on a Hybrid vehicle's package; same
+  // one-time-per-vehicle-slot pattern as RTO.
+  const brandingCost = (pkg.brandingCost || 0) * quantity;
   const extraKmCost = extraKm > 0 ? (pkg.perKmCharge || 0) * extraKm : 0;
   const extraHourCost = extraHours > 0 ? pkg.additionalHourCharges * extraHours : 0;
 
@@ -105,7 +117,7 @@ function calcPricingBackend(pkg, v) {
   }, 0);
 
   const subtotal =
-    rentalCost + promoterCost + rtoCost + extraKmCost + extraHourCost + additionalAdds;
+    rentalCost + promoterCost + rtoCost + brandingCost + extraKmCost + extraHourCost + additionalAdds;
 
   const MAX_DISCOUNT_PCT = parseFloat(process.env.MAX_DISCOUNT_PERCENT || "15");
   const maxDiscountAmount = Math.floor(subtotal * (MAX_DISCOUNT_PCT / 100));
@@ -127,7 +139,9 @@ function calcPricingBackend(pkg, v) {
     driverCharges: pkg.driverCharges,
     // promoterChargePerDay: needPromoter ? pkg.promoterChargePerDay : 0,
      promoterChargePerDay: needPromoter ? promoterChargePerDay : 0,
+    promoterDays,
     rtoCharges: pkg.rtoCharges,
+    brandingCost,
     additionalHourCharges: pkg.additionalHourCharges,
     dailyKmLimit: pkg.dailyKmLimit,
     dailyKmcharges: pkg.perKmCharge,
@@ -355,6 +369,8 @@ exports.createAdminOrder = async (req, res) => {
         extraDays: Number(v.extraDays) || 0,
         extraHours: Number(v.extraHours) || 0,
         needPromoter: !!v.needPromoter,
+        promoterFromDate: v.needPromoter && v.promoterFromDate ? new Date(v.promoterFromDate) : null,
+        promoterToDate: v.needPromoter && v.promoterToDate ? new Date(v.promoterToDate) : null,
         promoterType: v.needPromoter ? v.promoterType : "",
         otherPromoterType: v.needPromoter && v.promoterType === "Other" ? v.otherPromoterType : "",
         campaignImages,
@@ -363,7 +379,9 @@ exports.createAdminOrder = async (req, res) => {
         perDayRentalCost: fp.perDayRentalCost,
         driverCharges: fp.driverCharges,
         promoterChargePerDay: fp.promoterChargePerDay,
+        promoterDays: fp.promoterDays,
         rtoCharges: fp.rtoCharges,
+        brandingCost: fp.brandingCost,
         additionalHourCharges: fp.additionalHourCharges,
         dailyKmcharges: fp.dailyKmcharges,
         dailyKmLimit: fp.dailyKmLimit,
@@ -634,6 +652,8 @@ exports.updateAdminOrder = async (req, res) => {
         extraDays: Number(v.extraDays) || 0,
         extraHours: Number(v.extraHours) || 0,
         needPromoter: !!v.needPromoter,
+        promoterFromDate: v.needPromoter && v.promoterFromDate ? new Date(v.promoterFromDate) : null,
+        promoterToDate: v.needPromoter && v.promoterToDate ? new Date(v.promoterToDate) : null,
         promoterType: v.needPromoter ? v.promoterType : "",
         otherPromoterType: v.needPromoter && v.promoterType === "Other" ? v.otherPromoterType : "",
         campaignImages: [...existingImages, ...newImages],
@@ -642,7 +662,9 @@ exports.updateAdminOrder = async (req, res) => {
         perDayRentalCost: fp.perDayRentalCost,
         driverCharges: fp.driverCharges,
         promoterChargePerDay: fp.promoterChargePerDay,
+        promoterDays: fp.promoterDays,
         rtoCharges: fp.rtoCharges,
+        brandingCost: fp.brandingCost,
         additionalHourCharges: fp.additionalHourCharges,
         dailyKmcharges: fp.dailyKmcharges,
         dailyKmLimit: fp.dailyKmLimit,
@@ -1691,9 +1713,9 @@ exports.replaceOnRoadVehicle = async (req, res) => {
     const newReg = newVehicleRegistrationNumber.trim().toUpperCase().replace(/\s+/g, "");
     const oldReg = (oldEntry.vehicleRegistrationNumber || "").trim().toUpperCase().replace(/\s+/g, "");
 
-    if (newReg === oldReg) {
-      return errorResponse(res, "Replacement vehicle must be different from the current vehicle", null, 400);
-    }
+    // if (newReg === oldReg) {
+    //   return errorResponse(res, "Replacement vehicle must be different from the current vehicle", null, 400);
+    // }
 
     const alreadyActive = order.onRoadExecutionArray.some(
       (e) => e.entryStatus !== "removed" && !e.unavailableStatus && e.vehicleRegistrationNumber === newReg
@@ -3913,6 +3935,7 @@ exports.getCampaignCalculator = async (req, res) => {
         perDayRentalCost: b.perDayRentalCost || 0,
         driverCharges: b.driverCharges || 0,
         rtoCost: b.rtoCost || 0,
+        brandingCost: b.brandingCost || 0,
         needPromoter: !!b.needPromoter,
         promoterCost: b.promoterCost || 0,
         estimatedRentalCost: (b.rentalCost || 0) + (b.driverCost || 0),
@@ -4183,16 +4206,30 @@ exports.getCampaignCalculator = async (req, res) => {
         // applied once on the campaign's first day, same pattern as RTO/extra-km pool fee.
         const additionalChargesToday = dayKey === itemFrom ? (item.additionalNet || 0) : 0;
 
-        // RTO is no longer billed through Campaign Calculator (business
-        // change) — kept as a hardcoded 0 rather than deleted from the
-        // day-total formula below, so every downstream read of
-        // rtoAppliedToday still works unchanged.
-        let rtoAppliedToday = 0;
+        // RTO is a one-time flat charge for the vehicle-type slot, applied
+        // once on the campaign's first day (same pattern as the extra-KM
+        // pool fee / additional charges below).
+        let rtoAppliedToday = dayKey === itemFrom ? (item.rtoCost || 0) : 0;
+        // Branding Cost — same one-time-on-first-day pattern as RTO.
+        let brandingAppliedToday = dayKey === itemFrom ? (item.brandingCost || 0) : 0;
 
-        let promoterAmountToday =
-          item.needPromoter && item.totalDays
-            ? Math.round(((item.promoterCost || 0) / item.totalDays) * 100) / 100
-            : 0;
+        // Promoter cost is only spread across the promoter's own selected
+        // days (item.promoterFromDate → item.promoterToDate), not the full
+        // campaign span — falls back to totalDays when no promoter date
+        // range was saved (older orders, created before this field existed).
+        let promoterAmountToday = 0;
+        if (item.needPromoter) {
+          if (item.promoterFromDate && item.promoterToDate) {
+            const pFrom = dateKey(item.promoterFromDate);
+            const pTo = dateKey(item.promoterToDate);
+            const pDays = item.promoterDays || (daysBetweenInclusive(pFrom, pTo));
+            if (dayKey >= pFrom && dayKey <= pTo && pDays) {
+              promoterAmountToday = Math.round(((item.promoterCost || 0) / pDays) * 100) / 100;
+            }
+          } else if (item.totalDays) {
+            promoterAmountToday = Math.round(((item.promoterCost || 0) / item.totalDays) * 100) / 100;
+          }
+        }
 
 
         if (activeEntries.length) {
@@ -4207,6 +4244,7 @@ exports.getCampaignCalculator = async (req, res) => {
           const avgBillingFactor =
             billingFactors.reduce((s, f) => s + f, 0) / billingFactors.length;
           rtoAppliedToday = Math.round(rtoAppliedToday * avgBillingFactor * 100) / 100;
+          brandingAppliedToday = Math.round(brandingAppliedToday * avgBillingFactor * 100) / 100;
           promoterAmountToday = Math.round(promoterAmountToday * avgBillingFactor * 100) / 100;
         }
 
@@ -4215,6 +4253,7 @@ exports.getCampaignCalculator = async (req, res) => {
           extraKmCost +
           extraHourCost +
           rtoAppliedToday +
+          brandingAppliedToday +
           promoterAmountToday +
           additionalChargesToday -
           compensationToday;
@@ -4316,6 +4355,7 @@ exports.getCampaignCalculator = async (req, res) => {
           extraHourPoolFeeToday,
           extraDetailsToday,
           rtoAppliedToday,
+          brandingAppliedToday,
           promoterAmountToday,
           additionalChargesToday,
           compensationToday: Math.round(compensationToday * 100) / 100,
@@ -4353,6 +4393,7 @@ exports.getCampaignCalculator = async (req, res) => {
     const actualExtraKm = allVehicles.reduce((s, v) => s + (v.extraKmCost || 0), 0);
     const actualExtraHours = allVehicles.reduce((s, v) => s + (v.extraHourCost || 0), 0);
     const actualRto = allVehicles.reduce((s, v) => s + (v.rtoAppliedToday || 0), 0);
+    const actualBranding = allVehicles.reduce((s, v) => s + (v.brandingAppliedToday || 0), 0);
     const actualPromoter = allVehicles.reduce((s, v) => s + (v.promoterAmountToday || 0), 0);
     const actualAdditionalCharges = allVehicles.reduce((s, v) => s + (v.additionalChargesToday || 0), 0);
     const totalCompensation = Math.round(cumulativeCompensation * 100) / 100;
@@ -4371,8 +4412,8 @@ exports.getCampaignCalculator = async (req, res) => {
     const finalInvoiceAmount = Math.round((finalAmountBeforeGst + gstAmount) * 100) / 100;
 
     const estimatedRental = bookingItemsMeta.reduce((s, b) => s + (b.estimatedRentalCost || 0), 0);
-    // RTO is no longer billed through Campaign Calculator — see rtoAppliedToday above.
-    const estimatedRto = 0;
+    const estimatedRto = bookingItemsMeta.reduce((s, b) => s + (b.rtoCost || 0), 0);
+    const estimatedBranding = bookingItemsMeta.reduce((s, b) => s + (b.brandingCost || 0), 0);
     const estimatedPromoter = bookingItemsMeta.reduce((s, b) => s + (b.promoterCost || 0), 0);
     const estimatedExtraKm = bookingItemsMeta.reduce((s, b) => s + (b.estimatedExtraKmCost || 0), 0);
     const estimatedExtraHours = bookingItemsMeta.reduce((s, b) => s + (b.estimatedExtraHourCost || 0), 0);
@@ -4382,6 +4423,7 @@ exports.getCampaignCalculator = async (req, res) => {
       estimatedAmount: orderTaxableAmount,
       estimatedRental: Math.round(estimatedRental * 100) / 100,
       estimatedRto: Math.round(estimatedRto * 100) / 100,
+      estimatedBranding: Math.round(estimatedBranding * 100) / 100,
       estimatedPromoter: Math.round(estimatedPromoter * 100) / 100,
       estimatedExtraKm: Math.round(estimatedExtraKm * 100) / 100,
       estimatedExtraHours: Math.round(estimatedExtraHours * 100) / 100,
@@ -4390,6 +4432,7 @@ exports.getCampaignCalculator = async (req, res) => {
       actualExtraKm: Math.round(actualExtraKm * 100) / 100,
       actualExtraHours: Math.round(actualExtraHours * 100) / 100,
       actualRto: Math.round(actualRto * 100) / 100,
+      actualBranding: Math.round(actualBranding * 100) / 100,
       actualPromoter: Math.round(actualPromoter * 100) / 100,
       actualAdditionalCharges: Math.round(actualAdditionalCharges * 100) / 100,
       totalCompensation,

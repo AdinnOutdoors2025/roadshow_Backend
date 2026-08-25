@@ -463,11 +463,9 @@ const priceBookingItemFromPackage = (pkg, line) => {
     ? promoterChargePerDay * totalDays * promoterQuantity
     : 0;
 
-  /* RTO charges are not priced for now — kept at 0 rather than removed
-     from the pricing shape, mirroring calcPricingBackend in the admin
-     order controller. rtoCharges (the package's configured rate) is
-     still returned below for reference; it just isn't multiplied in. */
-  const rtoCost = 0;
+  // RTO is a one-time flat charge per vehicle-type slot, mirroring
+  // calcPricingBackend in the admin order controller.
+  const rtoCost = (pkg.rtoCharges || 0) * quantity;
 
   const subtotal = rentalCost + promoterCost + rtoCost;
 
