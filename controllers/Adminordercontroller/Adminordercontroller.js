@@ -83,7 +83,7 @@ function calcPricingBackend(pkg, v) {
 
   const rentalCost = pkg.perDayRentalCost * totalDays * quantity;
   const driverCost = pkg.driverCharges * totalDays * quantity;
-   const promoterChargePerDay = parseFloat(process.env.DEFAULT_PROMOTER_CHARGE || "1000");
+   const promoterChargePerDay = parseFloat(process.env.DEFAULT_PROMOTER_CHARGE_PER_DAY || "1000");
 
   //  promoter charges default data
   // Promoter is priced only for the selected Promoter From/To days
