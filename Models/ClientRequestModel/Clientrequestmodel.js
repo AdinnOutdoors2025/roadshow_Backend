@@ -124,6 +124,23 @@ const vehicleTypeQuantitySchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    /* Only the promoter's own required days within the campaign window —
+       pricing uses these (falling back to the full campaign span when
+       unset). Mirrors Adminorder Model's bookingItems fields of the same
+       name. */
+    promoterFromDate: {
+      type: Date,
+      default: null,
+    },
+    promoterToDate: {
+      type: Date,
+      default: null,
+    },
+    promoterDays: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     /* Snapshot of the rate used, so a later change to the configured
        promoter charge cannot silently re-price a submitted request. */
     promoterChargePerDay: {
@@ -144,6 +161,14 @@ const vehicleTypeQuantitySchema = new mongoose.Schema(
       min: 0,
     },
     rtoCost: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    /* Only ever set on a Hybrid vehicle's package — a one-time flat charge
+       per vehicle-type slot, same pattern as rtoCost above. Mirrors
+       Adminorder Model's bookingItems.brandingCost. */
+    brandingCost: {
       type: Number,
       default: 0,
       min: 0,
