@@ -736,6 +736,8 @@ const orderSchema = new mongoose.Schema(
     isAdminCreated: { type: Boolean, default: false },
     bookingItems: [bookingItemSchema],
 
+    bookingSummaryPdfUrl: { type: String, default: "" },
+
     grandGst: { type: Number, default: 0 },
     grandTotal: { type: Number, required: true },
     orderStatus: {
