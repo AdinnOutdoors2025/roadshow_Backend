@@ -228,6 +228,20 @@ const normalizeVehicleTypes = (vehicleTypes, files) => {
       promoterQuantity: needPromoter
         ? Math.floor(toNonNegativeNumber(vehicle.promoterQuantity))
         : 0,
+      /* Same trust-the-client pattern as promoterCost below — the
+         authoritative recompute happens server-side in
+         priceBookingItemFromPackage() when the Order is raised. */
+      promoterFromDate:
+        needPromoter && vehicle.promoterFromDate
+          ? new Date(vehicle.promoterFromDate)
+          : null,
+      promoterToDate:
+        needPromoter && vehicle.promoterToDate
+          ? new Date(vehicle.promoterToDate)
+          : null,
+      promoterDays: needPromoter
+        ? Math.floor(toNonNegativeNumber(vehicle.promoterDays))
+        : 0,
       promoterChargePerDay: needPromoter
         ? toNonNegativeNumber(vehicle.promoterChargePerDay)
         : 0,
@@ -237,6 +251,7 @@ const normalizeVehicleTypes = (vehicleTypes, files) => {
 
       rentalCost: toNonNegativeNumber(vehicle.rentalCost),
       rtoCost: toNonNegativeNumber(vehicle.rtoCost),
+      brandingCost: toNonNegativeNumber(vehicle.brandingCost),
 
       campaignImages: media.campaignImages.length
         ? media.campaignImages
@@ -459,22 +474,41 @@ const priceBookingItemFromPackage = (pkg, line) => {
   const rentalCost = (pkg.perDayRentalCost || 0) * totalDays * quantity;
   const driverCost = (pkg.driverCharges || 0) * totalDays * quantity;
 
+  /* Promoter is priced only for the selected Promoter From/To days
+     (inclusive) — falls back to the full campaign totalDays when no
+     promoter date range was sent, mirroring calcPricingBackend in the
+     admin order controller. */
+  let promoterDays = totalDays;
+  if (line.promoterFromDate && line.promoterToDate) {
+    const pFrom = new Date(line.promoterFromDate);
+    const pTo = new Date(line.promoterToDate);
+    if (pFrom <= pTo) {
+      promoterDays = Math.ceil((pTo - pFrom) / 86400000) + 1;
+    }
+  }
+
   const promoterCost = needPromoter
-    ? promoterChargePerDay * totalDays * promoterQuantity
+    ? promoterChargePerDay * promoterDays * promoterQuantity
     : 0;
 
   // RTO is a one-time flat charge per vehicle-type slot, mirroring
   // calcPricingBackend in the admin order controller.
   const rtoCost = (pkg.rtoCharges || 0) * quantity;
 
-  const subtotal = rentalCost + promoterCost + rtoCost;
+  // Branding Cost — only ever set on a Hybrid vehicle's package; same
+  // one-time-per-vehicle-slot pattern as RTO, mirroring calcPricingBackend.
+  const brandingCost = (pkg.brandingCost || 0) * quantity;
+
+  const subtotal = rentalCost + promoterCost + rtoCost + brandingCost;
 
   return {
     totalDays,
     perDayRentalCost: pkg.perDayRentalCost || 0,
     driverCharges: pkg.driverCharges || 0,
     promoterChargePerDay: needPromoter ? promoterChargePerDay : 0,
+    promoterDays,
     rtoCharges: pkg.rtoCharges || 0,
+    brandingCost,
     additionalHourCharges: pkg.additionalHourCharges || 0,
     dailyKmLimit: pkg.dailyKmLimit || 0,
     dailyKmcharges: pkg.perKmCharge || 0,
@@ -574,6 +608,14 @@ const createOrderForClientRequest = async (clientRequest) => {
       quantity: Math.max(Number(line.quantity) || 1, 1),
 
       needPromoter: Boolean(line.needPromoter),
+      promoterFromDate:
+        line.needPromoter && line.promoterFromDate
+          ? new Date(line.promoterFromDate)
+          : null,
+      promoterToDate:
+        line.needPromoter && line.promoterToDate
+          ? new Date(line.promoterToDate)
+          : null,
       promoterType: line.needPromoter ? line.promoterType || "" : "",
       otherPromoterType: line.needPromoter
         ? line.otherPromoterType || ""
@@ -590,7 +632,9 @@ const createOrderForClientRequest = async (clientRequest) => {
       perDayRentalCost: pricing.perDayRentalCost,
       driverCharges: pricing.driverCharges,
       promoterChargePerDay: pricing.promoterChargePerDay,
+      promoterDays: pricing.promoterDays,
       rtoCharges: pricing.rtoCharges,
+      brandingCost: pricing.brandingCost,
       additionalHourCharges: pricing.additionalHourCharges,
       dailyKmcharges: pricing.dailyKmcharges,
       dailyKmLimit: pricing.dailyKmLimit,
