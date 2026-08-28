@@ -33,6 +33,10 @@ const {
   resolveHistoryRange,
 } = require("../../Utils/vamosysHistoryClient");
 const { sendCampaignRequestMail } = require("../../Utils/campaignMailer");
+const {
+  saveAgencyPoDocument,
+  deleteAgencyPoDocument,
+} = require("../../Utils/agencyPoDocumentUpload");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -1799,6 +1803,143 @@ exports.getClientRequestVehicleHistory = async (req, res) => {
       message:
         error.message ||
         "Unable to load vehicle history",
+    });
+  }
+};
+
+/* =========================================================
+   AGENCY PO DOCUMENT (optional, Agency accounts only)
+========================================================= */
+/*  Its own small pair of handlers rather than folding into                    */
+/*  createClientRequest/updateClientRequest — the PO document is uploaded      */
+/*  after the booking already exists (see agencyPoDocumentUpload.js for why    */
+/*  it isn't mixed into the campaign-media multer pipeline), so it needs its   */
+/*  own request/response cycle either way. */
+
+exports.uploadAgencyPoDocument = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    if (!req.clientUser || req.clientUser.accountType !== "agency") {
+      return res.status(403).json({
+        success: false,
+        message: "PO document upload is only available for Agency accounts.",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No file uploaded.",
+      });
+    }
+
+    const clientRequest = await ClientRequest.findById(req.params.id);
+
+    if (!clientRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    if (String(clientRequest.userId) !== String(req.clientUser._id)) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    /* Replacing an existing document: save the new one, then clean up the
+       old physical/Spaces file. Saved first so a failed upload never costs
+       the customer their existing document. */
+    const nextDocument = await saveAgencyPoDocument(req.file);
+    const previousDocument = clientRequest.agencyPODocument;
+
+    clientRequest.agencyPODocument = {
+      ...nextDocument,
+      uploadedAt: new Date(),
+    };
+
+    await clientRequest.save();
+
+    if (previousDocument && previousDocument.url) {
+      await deleteAgencyPoDocument(previousDocument);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "PO document uploaded successfully.",
+      data: clientRequest.agencyPODocument,
+    });
+  } catch (error) {
+    console.error("uploadAgencyPoDocument error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Unable to upload the PO document",
+    });
+  }
+};
+
+exports.removeAgencyPoDocument = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid client request ID",
+      });
+    }
+
+    if (!req.clientUser || req.clientUser.accountType !== "agency") {
+      return res.status(403).json({
+        success: false,
+        message: "PO document upload is only available for Agency accounts.",
+      });
+    }
+
+    const clientRequest = await ClientRequest.findById(req.params.id);
+
+    if (!clientRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    if (String(clientRequest.userId) !== String(req.clientUser._id)) {
+      return res.status(404).json({
+        success: false,
+        message: "Client request not found",
+      });
+    }
+
+    const existingDocument = clientRequest.agencyPODocument;
+
+    /* Idempotent — removing when there is nothing to remove is still success,
+       so the frontend never has to special-case "already empty". */
+    if (existingDocument && existingDocument.url) {
+      await deleteAgencyPoDocument(existingDocument);
+    }
+
+    clientRequest.agencyPODocument = undefined;
+    await clientRequest.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "PO document removed successfully.",
+    });
+  } catch (error) {
+    console.error("removeAgencyPoDocument error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Unable to remove the PO document",
     });
   }
 };
