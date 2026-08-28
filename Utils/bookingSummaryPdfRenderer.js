@@ -39,7 +39,7 @@ async function renderAndUploadBookingSummaryPdf(order) {
     buffer: pdfBuffer,
   };
 
-  return uploadToSpaces(pdfFile, "Roadshows/booking-summaries");
+  return uploadToSpaces(pdfFile, "Roadshows/bookingsummary");
 }
 
 module.exports = { renderAndUploadBookingSummaryPdf };

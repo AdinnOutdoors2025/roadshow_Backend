@@ -9,7 +9,10 @@ const router = express.Router();
 
 const ctrl = require("../../controllers/Salesordercontroller/Salesordercontroller");
 const { protect } = require("../../Middleware/rolemiddleware");
-const spacesClient = require("../../config/spaces"); 
+const spacesClient = require("../../config/spaces");
+const {
+  agencyPoDocumentUpload,
+} = require("../../Utils/agencyPoDocumentUpload");
 
 const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
 const BUCKET_NAME = process.env.DO_SPACES_BUCKET || "adinn-space";
@@ -104,6 +107,17 @@ router.patch(
   protect,
   salesUpload,
   ctrl.updatePODocument
+);
+
+/* Separate from the sales PO document above — this corrects the AGENCY's
+   own self-uploaded PO document (agencyPODocument), reusing the same
+   local/Spaces-capable upload used by that customer-facing endpoint rather
+   than salesUpload (local-only). */
+router.patch(
+  "/pipeline/:id/agency-po-document",
+  protect,
+  agencyPoDocumentUpload,
+  ctrl.replaceAgencyPoDocument
 );
 
 module.exports = router;

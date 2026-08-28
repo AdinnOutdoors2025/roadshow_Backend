@@ -5,9 +5,14 @@ const path = require("path");
 const fs = require("fs");
 const FormData = require("form-data");
 const Order = require("../../Models/AdminorderModel/Adminorder");
+const ClientRequest = require("../../Models/ClientRequestModel/Clientrequestmodel");
 const vehicletypes = require("../../Models/VehicleTypeSchema");
 const { successResponse, errorResponse } = require("../../Utils/response");
 const { findDateConflictsForOrder } = require("../../Utils/dateConflictChecker");
+const {
+  saveAgencyPoDocument,
+  deleteAgencyPoDocument,
+} = require("../../Utils/agencyPoDocumentUpload");
 
 const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
 const CDN_BASE_URL =
@@ -1153,6 +1158,84 @@ exports.updatePODocument = async (req, res) => {
     return successResponse(res, "PO document updated successfully", {
       closedWonArray: order.closedWonArray,
       poDocumentEditHistory: order.poDocumentEditHistory,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, null, 500);
+  }
+};
+
+/**
+ * Admin replaces the AGENCY's own self-uploaded PO document (agencyPODocument
+ * — set via ClientRequestController's uploadAgencyPoDocument, a completely
+ * separate document from the sales-side closedWonArray.salesPoDocument
+ * above). Every replacement is versioned into agencyPODocumentHistory —
+ * the old document is never silently overwritten — and the physical/Spaces
+ * file behind the previous version is deleted only after the new one and
+ * the history entry are both saved.
+ *
+ * req.file comes from Utils/agencyPoDocumentUpload's multer middleware
+ * (same one the agency's own upload endpoint uses), so the same extension/
+ * size limits and local-vs-Spaces storage switch apply here too — no
+ * separate upload config to keep in sync.
+ */
+exports.replaceAgencyPoDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason?.trim())
+      return errorResponse(res, "Reason for correction is required", null, 400);
+
+    if (!req.file)
+      return errorResponse(res, "PO document file is required", null, 400);
+
+    const order = await Order.findById(id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    /* Snapshot, not a reference — see the matching comment in
+       ClientRequestController's uploadAgencyPoDocument. order.agencyPODocument
+       is a single nested Mongoose subdocument; assigning a new object to it
+       below mutates this same reference, so a bare read here would end up
+       holding the NEW values by the time deleteAgencyPoDocument runs. */
+    const previousDocument = { ...order.agencyPODocument };
+    const nextDocument = await saveAgencyPoDocument(req.file);
+    const editedBy = req.user?.username || order.salesHandlerName || "Admin";
+    const editedAt = new Date();
+
+    order.agencyPODocumentHistory.push({
+      previousDocument: previousDocument || {},
+      newDocument: nextDocument,
+      reason: reason.trim(),
+      editedBy,
+      editedAt,
+    });
+
+    order.agencyPODocument = { ...nextDocument, uploadedAt: editedAt };
+
+    await order.save();
+
+    /* Keep the customer's own booking view in sync — non-fatal, the
+       correction on the order (what this endpoint promises) already
+       succeeded either way. */
+    try {
+      await ClientRequest.updateOne(
+        { orderRef: order._id },
+        { $set: { agencyPODocument: order.agencyPODocument } }
+      );
+    } catch (mirrorError) {
+      console.error(
+        `Order ${order.orderId}: failed to mirror agency PO document correction back to client request —`,
+        mirrorError.message
+      );
+    }
+
+    if (previousDocument && previousDocument.url) {
+      await deleteAgencyPoDocument(previousDocument);
+    }
+
+    return successResponse(res, "Agency PO document updated successfully", {
+      agencyPODocument: order.agencyPODocument,
+      agencyPODocumentHistory: order.agencyPODocumentHistory,
     });
   } catch (error) {
     return errorResponse(res, error.message, null, 500);

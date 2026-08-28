@@ -37,6 +37,7 @@ const {
   saveAgencyPoDocument,
   deleteAgencyPoDocument,
 } = require("../../Utils/agencyPoDocumentUpload");
+const { resolveVehicleSlots } = require("../../Utils/vehicleAssignmentResolver");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -718,6 +719,11 @@ const createOrderForClientRequest = async (clientRequest) => {
     panNumber: isOrganization ? clientRequest.panNumber || "" : "",
     gstVerifyDetails,
 
+    /* Almost always empty at this point — the PO document is uploaded via
+       a separate follow-up request after the booking already exists (see
+       uploadAgencyPoDocument, which mirrors it here too once it's set). */
+    agencyPODocument: clientRequest.agencyPODocument,
+
     /* The one field that tells the two apart downstream */
     isAdminCreated: false,
 
@@ -862,23 +868,34 @@ exports.createClientRequest = async (req, res) => {
     try {
       const order = await createOrderForClientRequest(clientRequest);
 
-      if (order) {
-        clientRequest.orderRef = order._id;
-        clientRequest.orderId = order.orderId;
+     if (order) {
+  clientRequest.orderRef = order._id;
+  clientRequest.orderId = order.orderId;
 
-        await clientRequest.save();
+  await clientRequest.save();
 
-        /* Same non-fatal contract as the order mirror above — the
-           customer's request is already saved either way. */
-        try {
-          await sendCampaignRequestMail(order);
-        } catch (mailError) {
-          console.error(
-            `Client request ${clientRequest.clientOrderId}: campaign request mail not sent —`,
-            mailError.message
-          );
-        }
-      }
+  /*
+   If PO is selected then sent mail with PO document 
+   */
+  const hasPendingAgencyPo =
+    body.hasAgencyPoDocument === true ||
+    body.hasAgencyPoDocument === "true";
+
+  if (!hasPendingAgencyPo) {
+    try {
+      await sendCampaignRequestMail(order);
+    } catch (mailError) {
+      console.error(
+        `Client request ${clientRequest.clientOrderId}: campaign request mail not sent —`,
+        mailError.message
+      );
+    }
+  } else {
+    console.log(
+      `Client request ${clientRequest.clientOrderId}: PO selected, campaign mail will be sent after PO upload.`
+    );
+  }
+}
     } catch (orderError) {
       console.error(
         `Client request ${clientRequest.clientOrderId}: order not raised —`,
@@ -1153,16 +1170,28 @@ exports.getClientRequestLiveLocation = async (req, res) => {
       });
     }
 
-    const activeEntries = (order.onRoadExecutionArray || []).filter(
-      (e) => e.entryStatus !== "removed" && e.vehicleRegistrationNumber
-    );
+    /* One resolved slot per currently-occupied vehicleIndex slot — a
+       replaced vehicle's old entry is folded into its replacement's chain
+       here instead of surfacing as a second active row. See
+       Utils/vehicleAssignmentResolver.js. */
+    const slotsByIndex = new Map();
+
+    (order.bookingItems || []).forEach((_item, vehicleIndex) => {
+      slotsByIndex.set(
+        vehicleIndex,
+        resolveVehicleSlots(order.onRoadExecutionArray, vehicleIndex)
+      );
+    });
 
     /* A vehicle marked unavailable by operations must still be reported to
        the client — just as "unavailable", not silently dropped. Only the
        still-available registrations are worth a Vamosys lookup. */
-    const availableRegistrationNumbers = activeEntries
-      .filter((e) => !e.unavailableStatus)
-      .map((e) => e.vehicleRegistrationNumber);
+    const availableRegistrationNumbers = Array.from(
+      slotsByIndex.values()
+    )
+      .flat()
+      .filter((slot) => slot.currentStatus !== "unavailable")
+      .map((slot) => slot.currentVehicle);
 
     const liveVehicleData = await getLiveLocationsForRegistrationNumbers(
       availableRegistrationNumbers
@@ -1177,7 +1206,7 @@ exports.getClientRequestLiveLocation = async (req, res) => {
        has already assigned a driver + registration number to. A booking
        line with quantity 2 is 2 slots; onRoadExecutionArray only grows an
        entry per slot as admin fills it in (submitOnRoadDetails), so any
-       slot with no matching entry yet is reported "pending" instead of
+       slot with no resolved entry yet is reported "pending" instead of
        being silently omitted — otherwise a customer who booked 2 vehicle
        types but only has 1 assigned sees just 1 vehicle card with no
        indication the 2nd one even exists. */
@@ -1190,14 +1219,12 @@ exports.getClientRequestLiveLocation = async (req, res) => {
         "Vehicle";
 
       const slots = Math.max(Number(item.quantity) || 1, 1);
-      const entriesForLine = activeEntries.filter(
-        (e) => e.vehicleIndex === vehicleIndex
-      );
+      const resolvedSlots = slotsByIndex.get(vehicleIndex) || [];
 
       for (let slot = 0; slot < slots; slot += 1) {
-        const entry = entriesForLine[slot];
+        const resolved = resolvedSlots[slot];
 
-        if (!entry) {
+        if (!resolved) {
           vehicles.push({
             vehicleIndex,
             vehicleName,
@@ -1209,25 +1236,35 @@ exports.getClientRequestLiveLocation = async (req, res) => {
           continue;
         }
 
-        if (entry.unavailableStatus) {
+        /* Additive chain fields — existing consumers reading only
+           registrationNumber/pending/unavailable are unaffected. */
+        const chainFields = {
+          originalVehicle: resolved.originalVehicle,
+          registrationChain: resolved.registrationChain,
+          wasReplaced: resolved.wasReplaced,
+        };
+
+        if (resolved.currentStatus === "unavailable") {
           vehicles.push({
             vehicleIndex,
             vehicleName,
-            registrationNumber: entry.vehicleRegistrationNumber,
+            registrationNumber: resolved.currentVehicle,
             pending: false,
             unavailable: true,
+            ...chainFields,
           });
           continue;
         }
 
-        const live = liveByReg.get(entry.vehicleRegistrationNumber);
+        const live = liveByReg.get(resolved.currentVehicle);
 
         vehicles.push({
           vehicleIndex,
           vehicleName,
           pending: false,
           unavailable: false,
-          registrationNumber: entry.vehicleRegistrationNumber,
+          registrationNumber: resolved.currentVehicle,
+          ...chainFields,
           ...(live || {}),
         });
       }
@@ -1647,6 +1684,22 @@ exports.getClientRequestVehicleHistory = async (req, res) => {
         entry.vehicleRegistrationNumber
     );
 
+    /* Chain metadata (2345 → 7852) per active entry, so a replaced slot
+       shows one logical vehicle with its history instead of the old and
+       new registrations as two unrelated rows. See
+       Utils/vehicleAssignmentResolver.js. */
+    const resolvedByEntryId = new Map();
+
+    Array.from(new Set(activeEntries.map((e) => e.vehicleIndex))).forEach(
+      (vehicleIndex) => {
+        resolveVehicleSlots(order.onRoadExecutionArray, vehicleIndex).forEach(
+          (resolved) => {
+            resolvedByEntryId.set(String(resolved.entry._id), resolved);
+          }
+        );
+      }
+    );
+
     /* =====================================================
        OPTIONAL VEHICLE FILTER
 
@@ -1704,6 +1757,17 @@ exports.getClientRequestVehicleHistory = async (req, res) => {
           .replace(/\s+/g, "")
           .toUpperCase();
 
+        /* Additive chain fields (2345 → 7852) — existing consumers reading
+           only registrationNumber/unavailable/rows/summary are unaffected. */
+        const resolved = resolvedByEntryId.get(String(entry._id));
+        const chainFields = resolved
+          ? {
+              originalVehicle: resolved.originalVehicle,
+              registrationChain: resolved.registrationChain,
+              wasReplaced: resolved.wasReplaced,
+            }
+          : {};
+
         /* -----------------------------------------------
            VEHICLE MARKED UNAVAILABLE BY OPERATIONS
         ------------------------------------------------ */
@@ -1730,6 +1794,8 @@ exports.getClientRequestVehicleHistory = async (req, res) => {
               startAddress: "",
               endAddress: "",
             },
+
+            ...chainFields,
           };
         }
 
@@ -1738,10 +1804,12 @@ exports.getClientRequestVehicleHistory = async (req, res) => {
         ------------------------------------------------ */
 
         try {
-          return await getVehicleHistory(
+          const history = await getVehicleHistory(
             registrationNumber,
             range
           );
+
+          return { ...history, ...chainFields };
         } catch (historyError) {
           console.error(
             `Vehicle history failed for ${registrationNumber}:`,
@@ -1774,6 +1842,8 @@ exports.getClientRequestVehicleHistory = async (req, res) => {
               startAddress: "",
               endAddress: "",
             },
+
+            ...chainFields,
           };
         }
       })
@@ -1855,28 +1925,101 @@ exports.uploadAgencyPoDocument = async (req, res) => {
       });
     }
 
-    /* Replacing an existing document: save the new one, then clean up the
-       old physical/Spaces file. Saved first so a failed upload never costs
-       the customer their existing document. */
-    const nextDocument = await saveAgencyPoDocument(req.file);
-    const previousDocument = clientRequest.agencyPODocument;
+    const nextDocument =
+  await saveAgencyPoDocument(req.file);
 
-    clientRequest.agencyPODocument = {
-      ...nextDocument,
-      uploadedAt: new Date(),
-    };
+const previousDocument = {
+  ...clientRequest.agencyPODocument,
+};
 
-    await clientRequest.save();
+clientRequest.agencyPODocument = {
+  ...nextDocument,
+  uploadedAt: new Date(),
+};
 
-    if (previousDocument && previousDocument.url) {
-      await deleteAgencyPoDocument(previousDocument);
+await clientRequest.save();
+
+
+/* =========================================================
+   MIRROR PO TO ORDER + SEND CAMPAIGN MAIL
+========================================================= */
+
+if (clientRequest.orderRef) {
+  try {
+
+    const updatedOrder =
+      await Order.findByIdAndUpdate(
+        clientRequest.orderRef,
+
+        {
+          $set: {
+            agencyPODocument:
+              clientRequest.agencyPODocument,
+          },
+        },
+
+        {
+          new: true,
+        }
+      );
+
+
+    /*
+     * Send mail only after PO is present
+     * in the Order document.
+     */
+    if (updatedOrder) {
+      try {
+
+        await sendCampaignRequestMail(
+          updatedOrder
+        );
+
+        console.log(
+          `Client request ${clientRequest.clientOrderId}: campaign mail sent with Agency PO.`
+        );
+
+      } catch (mailError) {
+
+        console.error(
+          `Client request ${clientRequest.clientOrderId}: PO uploaded but campaign mail failed —`,
+          mailError.message
+        );
+      }
     }
 
-    return res.status(200).json({
-      success: true,
-      message: "PO document uploaded successfully.",
-      data: clientRequest.agencyPODocument,
-    });
+  } catch (mirrorError) {
+
+    console.error(
+      `Client request ${clientRequest.clientOrderId}: failed to mirror PO document onto order —`,
+      mirrorError.message
+    );
+  }
+}
+
+
+/*
+ * Delete old file only after new PO is safely stored.
+ */
+if (
+  previousDocument &&
+  previousDocument.url
+) {
+  await deleteAgencyPoDocument(
+    previousDocument
+  );
+}
+
+
+return res.status(200).json({
+  success: true,
+  message:
+    "PO document uploaded successfully.",
+
+  data:
+    clientRequest.agencyPODocument,
+});
+
   } catch (error) {
     console.error("uploadAgencyPoDocument error:", error);
 
@@ -1929,6 +2072,20 @@ exports.removeAgencyPoDocument = async (req, res) => {
 
     clientRequest.agencyPODocument = undefined;
     await clientRequest.save();
+
+    if (clientRequest.orderRef) {
+      try {
+        await Order.updateOne(
+          { _id: clientRequest.orderRef },
+          { $unset: { agencyPODocument: "" } }
+        );
+      } catch (mirrorError) {
+        console.error(
+          `Client request ${clientRequest.clientOrderId}: failed to clear mirrored PO document on order —`,
+          mirrorError.message
+        );
+      }
+    }
 
     return res.status(200).json({
       success: true,

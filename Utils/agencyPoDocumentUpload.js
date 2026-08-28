@@ -27,7 +27,12 @@ const deleteFromSpaces = require("./deleteFromSpaces");
 
 const STORAGE_TYPE = process.env.CLIENT_AGENCY_PO_DOCUMENTS_STORAGE || "local";
 
-const PO_DOCUMENT_FOLDER = "client_agency_PO_documents";
+/* Nested under Roadshows/ to sit alongside Roadshows/bookingsummary (see
+   bookingSummaryPdfRenderer.js) instead of a top-level bucket prefix.
+   Existing objects already uploaded under the old "client_agency_PO_documents"
+   prefix keep working — their stored URL doesn't change — only new uploads
+   use this path. */
+const PO_DOCUMENT_FOLDER = "Roadshows/client_po_document";
 
 const IMAGE_EXTENSIONS = /^(jpe?g|png|webp)$/i;
 const DOCUMENT_EXTENSIONS = /^(pdf|docx?)$/i;
@@ -101,7 +106,9 @@ const agencyPoDocumentUpload = (req, res, next) => {
       });
     }
 
-    if (req.file && req.file.size > maxBytesFor(req.file.originalname)) {
+    /* >= not > — "10MB" is the largest size still rejected, not the last
+       size still allowed. */
+    if (req.file && req.file.size >= maxBytesFor(req.file.originalname)) {
       const isImage = IMAGE_EXTENSIONS.test(
         getExtension(req.file.originalname)
       );
