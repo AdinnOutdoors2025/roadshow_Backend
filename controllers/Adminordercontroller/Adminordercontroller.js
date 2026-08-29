@@ -911,17 +911,18 @@ exports.getAllOrders = async (req, res) => {
 
 
     if (durationFrom || durationTo) {
+      const durationFilter = {};
       if (durationFrom) {
-        filter["bookingItems.toDate"] = {
+        durationFilter.fromDate = {
           $gte: new Date(durationFrom + "T00:00:00.000Z"),
         };
       }
       if (durationTo) {
-        filter["bookingItems.fromDate"] = {
-          ...filter["bookingItems.fromDate"],
+        durationFilter.toDate = {
           $lte: new Date(durationTo + "T23:59:59.999Z"),
         };
       }
+      filter.bookingItems = { $elemMatch: durationFilter };
     }
 
 
