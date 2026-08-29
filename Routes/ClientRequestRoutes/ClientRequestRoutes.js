@@ -14,6 +14,8 @@ const {
   updateClientRequest,
   updateStatus,
   deleteClientRequest,
+  uploadAgencyPoDocument,
+  removeAgencyPoDocument,
 } = require("../../controllers/ClientRequestController/ClientRequestController");
 
 /* Campaign media (images + videos) now rides along with a client request, so
@@ -28,6 +30,13 @@ const {
 const {
   adminOrderUpload,
 } = require("../../Middleware/orderImageupload");
+
+/* Agency PO document (optional, Agency accounts only) — a separate multer
+   pipeline from adminOrderUpload above, see Utils/agencyPoDocumentUpload.js
+   for why it can't share that one. */
+const {
+  agencyPoDocumentUpload,
+} = require("../../Utils/agencyPoDocumentUpload");
 
 /* A client request carries the customer's contact details, GSTIN, PAN,
    company, every campaign they booked and the full price breakdown. None of
@@ -57,6 +66,23 @@ router.get(
   "/mine",
   protectClient,
   getMyClientRequests
+);
+
+/* Optional PO document, Agency accounts only — uploaded after the booking
+   already exists rather than riding along with adminOrderUpload above (see
+   Utils/agencyPoDocumentUpload.js). Both routes are ownership- and
+   account-type-checked in the controller. */
+router.post(
+  "/:id/po-document",
+  protectClient,
+  agencyPoDocumentUpload,
+  uploadAgencyPoDocument
+);
+
+router.delete(
+  "/:id/po-document",
+  protectClient,
+  removeAgencyPoDocument
 );
 
 /* =========================================================

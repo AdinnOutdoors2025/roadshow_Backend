@@ -19,7 +19,7 @@ const ROADSHOW_CAMPAIGN_MAIL_TO =
 
 const ROADSHOW_CAMPAIGN_MAIL_CC =
   process.env.ROADSHOW_CAMPAIGN_MAIL_CC ||
-  "smm@adinn.co.in,2002karthikatg@gmail.com,srbedev@adinn.co.in";
+  "smm@adinn.co.in,2002karthikatg@gmail.com";
 
 const normalizeEmailCsv = (value = "") =>
   String(value || "")
@@ -34,6 +34,43 @@ const fmtDate = (d) => {
 
 const frontendBaseUrl = () =>
   (process.env.FRONTEND_BASE_URL || "").replace(/\/$/, "");
+
+/* This mailer's own base URL, for turning a locally-stored PO document's
+   relative "/uploads/..." path into a link the mail recipient can actually
+   open — a Spaces-stored document is already a full CDN URL and passes
+   through untouched. Mirrors Middleware/spaceUpload.js's getLocalBaseUrl. */
+const backendBaseUrl = () => {
+  const url =
+    process.env.NODE_ENV === "production"
+      ? process.env.PRODUCTION_BASE_URL || ""
+      : process.env.LOCAL_BASE_URL || "";
+
+  return url.replace(/\/$/, "");
+};
+
+/**
+ * The agency PO document, in mail-payload shape, or null when the order
+ * has none (every non-agency booking, and any agency booking where the PO
+ * document hasn't been uploaded yet — see uploadAgencyPoDocument, which
+ * always happens after the order/mail already exist).
+ */
+const buildPoDocumentMailData = (order) => {
+  const doc = order.agencyPODocument;
+
+  if (!doc || !doc.url) return null;
+
+  const url = /^https?:\/\//i.test(doc.url)
+    ? doc.url
+    : `${backendBaseUrl()}${doc.url}`;
+
+  return {
+    originalName: doc.originalName || "",
+    url,
+    mimeType: doc.mimeType || "",
+    size: doc.size || 0,
+    storageType: doc.storageType || "local",
+  };
+};
 
 /**
  * bookingItems.vehicleType is an ObjectId ref into VehicleType, whose
@@ -148,6 +185,9 @@ const buildCampaignMailData = async (order) => {
 
     vehicles: (order.bookingItems || []).map((item) => buildVehicleLine(item, typeNameMap)),
     pricing: buildPricing(order),
+
+    /* null when there is no PO document — see buildPoDocumentMailData. */
+    poDocument: buildPoDocumentMailData(order),
   };
 };
 

@@ -251,6 +251,35 @@ const poDocumentEditSchema = new mongoose.Schema(
   { _id: true }
 );
 
+/* Same versioned-correction pattern as poDocumentEditSchema above, but for
+   the agency's own self-uploaded PO document (agencyPODocument) rather than
+   the sales-side Closed Won PO — a different document entirely. Embeds the
+   full before/after metadata object (not just a URL string) since
+   agencyPODocument itself already carries originalName/mimeType/size/
+   storageType alongside the url. */
+const agencyPODocumentSnapshotSchema = new mongoose.Schema(
+  {
+    originalName: { type: String, trim: true, default: "" },
+    fileName: { type: String, trim: true, default: "" },
+    mimeType: { type: String, trim: true, default: "" },
+    size: { type: Number, default: 0, min: 0 },
+    url: { type: String, trim: true, default: "" },
+    storageType: { type: String, enum: ["local", "space"], default: "local" },
+  },
+  { _id: false }
+);
+
+const agencyPODocumentEditSchema = new mongoose.Schema(
+  {
+    previousDocument: { type: agencyPODocumentSnapshotSchema, default: () => ({}) },
+    newDocument: { type: agencyPODocumentSnapshotSchema, required: true },
+    reason: { type: String, required: true },
+    editedBy: { type: String, default: "" },
+    editedAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 const handlerAssignmentSchema = new mongoose.Schema(
   {
     previousHandler: { type: String, default: "" },
@@ -824,10 +853,39 @@ const orderSchema = new mongoose.Schema(
     removedBy: { type: String, default: "" },
     removalReason: { type: String, default: "" },
      removalStatus: { type: String, default: "" },
+
+    /* Links a replacement entry back to the entry it replaced (see
+       replaceOnRoadVehicle) so the full original→replacement→... chain for
+       one booked slot can be reconstructed without guessing from timestamps.
+       Null for an originally-assigned entry. */
+    replacesEntryId: { type: mongoose.Schema.Types.ObjectId, default: null },
   }
 ],
 
-orderEditHistory: { type: [orderEditHistorySchema], default: [] },
+/* ── Agency PO Document (optional) ──────────────────────────────────────
+   Mirrored from ClientRequestOrder.agencyPODocument (see
+   Utils/agencyPoDocumentUpload.js and ClientRequestController's
+   createOrderForClientRequest / uploadAgencyPoDocument) so the mail
+   payload built from this Order can reference it without a second lookup
+   into the client-requests collection. Only ever set for an agency
+   booking; never populated for an admin-created order. */
+    agencyPODocument: {
+      originalName: { type: String, trim: true, default: "" },
+      fileName: { type: String, trim: true, default: "" },
+      mimeType: { type: String, trim: true, default: "" },
+      size: { type: Number, default: 0, min: 0 },
+      url: { type: String, trim: true, default: "" },
+      storageType: { type: String, enum: ["local", "space"], default: "local" },
+      uploadedAt: { type: Date, default: null },
+    },
+    /* Versioned corrections to agencyPODocument above — see
+       agencyPODocumentEditSchema and Salesordercontroller's
+       replaceAgencyPoDocument. Never touched by the agency's own upload
+       (uploadAgencyPoDocument on ClientRequestController); only admin
+       corrections append here. */
+    agencyPODocumentHistory: { type: [agencyPODocumentEditSchema], default: [] },
+
+    orderEditHistory: { type: [orderEditHistorySchema], default: [] },
     onRoadUnavailableHistory: { type: [onRoadUnavailableHistorySchema], default: [] },
     
     onRoadHistory: { type: [onRoadHistorySchema], default: [] },

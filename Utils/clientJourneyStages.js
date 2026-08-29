@@ -44,6 +44,7 @@ const TRACKING_ORDER_SELECT =
 const LIVE_LOCATION_ORDER_SELECT =
   "pipelineStatus onRoadExecutionArray.vehicleIndex onRoadExecutionArray.vehicleRegistrationNumber " +
   "onRoadExecutionArray.entryStatus onRoadExecutionArray.unavailableStatus " +
+  "onRoadExecutionArray.replacesEntryId " +
   "bookingItems.vehicleType bookingItems.vehicleModel bookingItems.quantity";
 
 const SALES_TIER = {

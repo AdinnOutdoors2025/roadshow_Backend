@@ -377,6 +377,46 @@ const clientRequestSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+
+    /* ── Agency PO Document (optional) ────────────────────────────────────
+       Only ever set for an "agency" ClientUser — see Utils/agencyPoDocumentUpload.js.
+       Individual customers never populate this. */
+    agencyPODocument: {
+      originalName: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      fileName: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      mimeType: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      size: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      url: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      storageType: {
+        type: String,
+        enum: ["local", "space"],
+        default: "local",
+      },
+      uploadedAt: {
+        type: Date,
+        default: null,
+      },
+    },
   },
   { timestamps: true }
 );

@@ -1751,11 +1751,25 @@ exports.replaceOnRoadVehicle = async (req, res) => {
     const reasonTrim = reason.trim();
     const wasAlreadyUnavailable = !!oldEntry.unavailableStatus;
 
-   
+
     oldEntry.unavailableStatus = true;
     oldEntry.unavailableReason = reasonTrim;
 
-   
+    /* The old entry must stop being "active" the moment a replacement is
+       assigned — otherwise it and the new entry both read as current for
+       the same slot (entryStatus !== "removed"), which is what made the
+       Live Vehicle / GPS Movement Report screens show the unavailable
+       vehicle AND its replacement as two separate active rows instead of
+       one "2345 → 7852" slot. Full history is preserved: the entry itself,
+       and everything already pushed to onRoadUnavailableHistory /
+       onRoadDriverHistory below, are untouched — only entryStatus flips,
+       exactly like releaseOnRoadVehicle already does for a plain release. */
+    oldEntry.entryStatus = "removed";
+    oldEntry.removedAt = now;
+    oldEntry.removedBy = performedBy;
+    oldEntry.removalReason = reasonTrim;
+
+
     order.onRoadExecutionArray.push({
       vehicleIndex: oldEntry.vehicleIndex,
       driverName: driverName.trim(),
@@ -1765,6 +1779,9 @@ exports.replaceOnRoadVehicle = async (req, res) => {
       uploadedBy: performedBy,
       uploadedAt: now,
       entryStatus: "active",
+      /* Chain link back to the entry this replaces — see the schema
+         comment and Utils/vehicleAssignmentResolver.js. */
+      replacesEntryId: oldEntry._id,
     });
     const newEntry = order.onRoadExecutionArray[order.onRoadExecutionArray.length - 1];
 
