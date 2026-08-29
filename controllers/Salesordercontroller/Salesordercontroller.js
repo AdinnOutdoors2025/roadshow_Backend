@@ -476,6 +476,96 @@ exports.updateSalesPipeline = async (req, res) => {
   }
 };
 
+/**
+ * Resolves whichever PO document — the Agency's own upload, or the
+ * Admin/Sales upload from Order Confirmation — is currently active and most
+ * recently uploaded/replaced, normalized to one shape. This is the single
+ * place that decides "the current active PO"; sendProjectCreationMail below
+ * is the only caller, so the selection logic never needs to be duplicated.
+ *
+ * - Sales/Admin PO: the latest closedWonArray entry that actually HAS a
+ *   salesPoDocument (never assume the last array item has one — a
+ *   closedWon transition can be recorded with only salesPoNotes and no
+ *   file). Its real "last touched" timestamp is the latest
+ *   poDocumentEditHistory correction's editedAt if it's ever been edited
+ *   (updatePODocument mutates the entry's file in place but leaves its own
+ *   uploadedAt as the original upload time), else the entry's own
+ *   uploadedAt.
+ * - Agency PO: order.agencyPODocument is the canonical current document.
+ *   agencyPODocumentHistory's latest entry's `newDocument` is consulted only
+ *   as a data-consistency fallback, and only if its editedAt is strictly
+ *   newer than agencyPODocument's own uploadedAt — `previousDocument` is
+ *   never read here, at any point, by design.
+ *
+ * Returns null when there is no PO of either kind.
+ */
+function resolveLatestActivePO(order) {
+  const toPlain = (v) => (v && typeof v.toObject === "function" ? v.toObject() : v);
+
+  // ── Sales/Admin PO (Order Confirmation upload) ──────────────────────────
+  const closedWonArray = order.closedWonArray || [];
+  let latestSalesEntry = null;
+  for (let i = closedWonArray.length - 1; i >= 0; i--) {
+    if (closedWonArray[i]?.salesPoDocument) {
+      latestSalesEntry = closedWonArray[i];
+      break;
+    }
+  }
+
+  let latestSalesPO = null;
+  if (latestSalesEntry) {
+    const poDocumentEditHistory = order.poDocumentEditHistory || [];
+    const lastEdit =
+      poDocumentEditHistory.length > 0
+        ? poDocumentEditHistory[poDocumentEditHistory.length - 1]
+        : null;
+    const documentPath = lastEdit ? lastEdit.document : latestSalesEntry.salesPoDocument;
+    const uploadedAt = lastEdit ? lastEdit.editedAt : latestSalesEntry.uploadedAt;
+
+    latestSalesPO = {
+      originalName: documentPath ? path.basename(documentPath) : "",
+      fileName: documentPath ? path.basename(documentPath) : "",
+      url: documentPath || "",
+      mimeType: "",
+      size: 0,
+      storageType: documentPath && documentPath.startsWith("http") ? "space" : "local",
+      uploadedAt: uploadedAt || null,
+      source: "sales",
+    };
+  }
+
+  // ── Agency PO (client's own upload, or a staff replacement of it) ──────
+  let latestAgencyPO = null;
+  const agencyPODocument = toPlain(order.agencyPODocument);
+  if (agencyPODocument && agencyPODocument.url) {
+    latestAgencyPO = { ...agencyPODocument, source: "agency" };
+
+    const agencyPODocumentHistory = order.agencyPODocumentHistory || [];
+    const lastCorrection =
+      agencyPODocumentHistory.length > 0
+        ? agencyPODocumentHistory[agencyPODocumentHistory.length - 1]
+        : null;
+    const latestHistoryNew = lastCorrection ? toPlain(lastCorrection.newDocument) : null;
+
+    if (latestHistoryNew && latestHistoryNew.url) {
+      const currentAt = latestAgencyPO.uploadedAt ? new Date(latestAgencyPO.uploadedAt).getTime() : 0;
+      const historyAt = lastCorrection.editedAt ? new Date(lastCorrection.editedAt).getTime() : 0;
+      if (historyAt > currentAt) {
+        latestAgencyPO = { ...latestHistoryNew, uploadedAt: lastCorrection.editedAt, source: "agency" };
+      }
+    }
+  }
+
+  // ── Compare by actual timestamp, not array position ─────────────────────
+  if (!latestSalesPO && !latestAgencyPO) return null;
+  if (!latestAgencyPO) return latestSalesPO;
+  if (!latestSalesPO) return latestAgencyPO;
+
+  const salesAt = latestSalesPO.uploadedAt ? new Date(latestSalesPO.uploadedAt).getTime() : 0;
+  const agencyAt = latestAgencyPO.uploadedAt ? new Date(latestAgencyPO.uploadedAt).getTime() : 0;
+  return agencyAt >= salesAt ? latestAgencyPO : latestSalesPO;
+}
+
 // Builds the Zoho project-code creation mail payload and posts it to the
 // mail service. Used both by the manual "Raise Project Creation Mail"
 // button and by the automatic mail fired when an order moves from
@@ -493,12 +583,8 @@ async function sendProjectCreationMail({ order, to, cc, subject, additionalNotes
   const gstAmt = Math.floor(taxable * 0.18);
   const finalAmt = taxable + gstAmt;
 
-  const latestPoEntry =
-    order.closedWonArray && order.closedWonArray.length > 0
-      ? order.closedWonArray[order.closedWonArray.length - 1]
-      : null;
-
-  const poDocumentPath = latestPoEntry?.salesPoDocument || "";
+  const activePO = resolveLatestActivePO(order);
+  const poDocumentPath = activePO?.url || "";
 
   const vehicleTypeIds = [
     ...new Set(
