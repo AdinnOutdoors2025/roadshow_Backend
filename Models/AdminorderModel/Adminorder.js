@@ -246,6 +246,7 @@ const poDocumentEditSchema = new mongoose.Schema(
     previousDocument: { type: String, default: "" },
     reason: { type: String, required: true },
     editedBy: { type: String, default: "" },
+    editedByRole: { type: String, default: "" },
     editedAt: { type: Date, default: Date.now },
   },
   { _id: true }
@@ -265,6 +266,13 @@ const agencyPODocumentSnapshotSchema = new mongoose.Schema(
     size: { type: Number, default: 0, min: 0 },
     url: { type: String, trim: true, default: "" },
     storageType: { type: String, enum: ["local", "space"], default: "local" },
+    uploadedAt: { type: Date, default: null },
+    // Who actually produced this version — "agency" for the client's own
+    // upload (uploadAgencyPoDocument), "admin"/"sales"/"operation" for a
+    // staff replacement (replaceAgencyPoDocument). Drives the drawer's
+    // "Uploaded by Agency/Client" vs "Replaced by <name> (<role>)" labels.
+    uploadedBy: { type: String, trim: true, default: "" },
+    source: { type: String, enum: ["agency", "admin", "sales", "operation"], default: "agency" },
   },
   { _id: false }
 );
@@ -275,6 +283,7 @@ const agencyPODocumentEditSchema = new mongoose.Schema(
     newDocument: { type: agencyPODocumentSnapshotSchema, required: true },
     reason: { type: String, required: true },
     editedBy: { type: String, default: "" },
+    editedByRole: { type: String, default: "" },
     editedAt: { type: Date, default: Date.now },
   },
   { _id: true }
@@ -569,6 +578,7 @@ const closedWonDocSchema = new mongoose.Schema(
     salesPoDocument: { type: String, default: "" },
     salesPoNotes: { type: String, default: "" },
     uploadedBy: { type: String, default: "" },
+    uploadedByRole: { type: String, default: "" },
     uploadedAt: { type: Date, default: Date.now },
   },
   { _id: true }
@@ -877,6 +887,10 @@ const orderSchema = new mongoose.Schema(
       url: { type: String, trim: true, default: "" },
       storageType: { type: String, enum: ["local", "space"], default: "local" },
       uploadedAt: { type: Date, default: null },
+      // "agency" = client's own upload; "admin"/"sales"/"operation" once a
+      // staff replacement has run — see agencyPODocumentSnapshotSchema above.
+      uploadedBy: { type: String, trim: true, default: "" },
+      source: { type: String, enum: ["agency", "admin", "sales", "operation"], default: "agency" },
     },
     /* Versioned corrections to agencyPODocument above — see
        agencyPODocumentEditSchema and Salesordercontroller's

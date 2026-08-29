@@ -416,6 +416,16 @@ const clientRequestSchema = new mongoose.Schema(
         type: Date,
         default: null,
       },
+      uploadedBy: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      source: {
+        type: String,
+        enum: ["agency", "admin", "sales", "operation"],
+        default: "agency",
+      },
     },
   },
   { timestamps: true }

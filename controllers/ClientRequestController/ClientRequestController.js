@@ -1935,6 +1935,8 @@ const previousDocument = {
 clientRequest.agencyPODocument = {
   ...nextDocument,
   uploadedAt: new Date(),
+  uploadedBy: req.clientUser?.name || "Agency/Client",
+  source: "agency",
 };
 
 await clientRequest.save();

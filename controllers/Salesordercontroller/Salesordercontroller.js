@@ -376,7 +376,8 @@ exports.updateSalesPipeline = async (req, res) => {
         order.closedWonArray.push({
           salesPoDocument: poFile ? getFilePath(poFile) : "",
           salesPoNotes: (salesPoNotes || "").trim(),
-          uploadedBy: order.salesHandlerName,
+          uploadedBy: req.user?.username || order.salesHandlerName || "Sales",
+          uploadedByRole: req.user?.role || "sales",
           uploadedAt: new Date(),
         });
       }
@@ -1141,6 +1142,7 @@ exports.updatePODocument = async (req, res) => {
 
     const newDocPath = getFilePath(poFile);
     const editedBy = req.user?.username || order.salesHandlerName || "Admin";
+    const editedByRole = req.user?.role || "admin";
     const editedAt = new Date();
 
     order.poDocumentEditHistory.push({
@@ -1148,6 +1150,7 @@ exports.updatePODocument = async (req, res) => {
       previousDocument,
       reason: reason.trim(),
       editedBy,
+      editedByRole,
       editedAt,
     });
 
@@ -1192,25 +1195,32 @@ exports.replaceAgencyPoDocument = async (req, res) => {
     const order = await Order.findById(id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
 
-    /* Snapshot, not a reference — see the matching comment in
-       ClientRequestController's uploadAgencyPoDocument. order.agencyPODocument
-       is a single nested Mongoose subdocument; assigning a new object to it
-       below mutates this same reference, so a bare read here would end up
-       holding the NEW values by the time deleteAgencyPoDocument runs. */
+    /* Snapshot, not a reference — order.agencyPODocument is a single nested
+       Mongoose subdocument; assigning a new object to it below mutates this
+       same reference, so a bare read here would end up holding the NEW
+       values by the time this snapshot is pushed into history below. */
     const previousDocument = { ...order.agencyPODocument };
     const nextDocument = await saveAgencyPoDocument(req.file);
     const editedBy = req.user?.username || order.salesHandlerName || "Admin";
+    const editedByRole = ["admin", "sales", "operation"].includes(req.user?.role)
+      ? req.user.role
+      : "admin";
     const editedAt = new Date();
+
+    nextDocument.uploadedBy = editedBy;
+    nextDocument.source = editedByRole;
+    nextDocument.uploadedAt = editedAt;
 
     order.agencyPODocumentHistory.push({
       previousDocument: previousDocument || {},
       newDocument: nextDocument,
       reason: reason.trim(),
       editedBy,
+      editedByRole,
       editedAt,
     });
 
-    order.agencyPODocument = { ...nextDocument, uploadedAt: editedAt };
+    order.agencyPODocument = { ...nextDocument };
 
     await order.save();
 
@@ -1229,9 +1239,11 @@ exports.replaceAgencyPoDocument = async (req, res) => {
       );
     }
 
-    if (previousDocument && previousDocument.url) {
-      await deleteAgencyPoDocument(previousDocument);
-    }
+    // Do NOT delete the previous physical/Spaces file here — it's now
+    // permanently referenced as `previousDocument` inside the history entry
+    // just pushed above, and every earlier correction's `newDocument` also
+    // still points at it. Deleting it would break Preview/Download for that
+    // history entry (and for the correction before it, if any).
 
     return successResponse(res, "Agency PO document updated successfully", {
       agencyPODocument: order.agencyPODocument,
