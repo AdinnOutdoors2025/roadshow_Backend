@@ -24,7 +24,8 @@ const CANCELLED_STEP = { key: "cancelled", label: "Cancelled" };
    completedAt date per milestone without a second, heavier query. */
 const LIST_ORDER_SELECT =
   "salesPipelineStatus pipelineStatus onRoadExecutionArray.unavailableStatus onRoadExecutionArray.entryStatus " +
-  "salesPipelineLogs.toStage salesPipelineLogs.movedAt pipelineLogs.toStage pipelineLogs.movedAt";
+  "salesPipelineLogs.toStage salesPipelineLogs.movedAt pipelineLogs.toStage pipelineLogs.movedAt " +
+  "bookingItems.fromDate bookingItems.toDate bookingItems.totalDays";
 
 /* Adds history-log fields (stage + timestamp only — never movedBy/handlerName/notes) and the
    day-wise campaign metrics (never driver contact/remarks/billing fields) for the tracking console */
@@ -33,7 +34,8 @@ const TRACKING_ORDER_SELECT =
   "salesPipelineLogs.toStage salesPipelineLogs.movedAt pipelineLogs.toStage pipelineLogs.movedAt updatedAt " +
   "dailyHoursLogArray.day dailyHoursLogArray.distanceCoveredKm dailyHoursLogArray.activationsCount " +
   "dailyHoursLogArray.leadsCollected dailyHoursLogArray.peopleEngaged dailyHoursLogArray.routeNote " +
-  "dailyHoursLogArray.photos dailyHoursLogArray.isAbsentDay";
+  "dailyHoursLogArray.photos dailyHoursLogArray.isAbsentDay " +
+  "bookingItems.fromDate bookingItems.toDate bookingItems.totalDays";
 
 /* Fields safe to select for the lightweight, frequently-polled live-location
    lookup — just enough to resolve which vehicles belong to this order.
@@ -220,6 +222,36 @@ function deriveOnRoadDay(order, vehicleTypes) {
   return { day, totalDays: first.totalDays };
 }
 
+/**
+ * Overlays booking-line date fields from the linked Order onto the
+ * client's own vehicleTypes copy, matched by array index — bookingItems is
+ * built by iterating vehicleTypes in that same order (see
+ * createOrderForClientRequest), so index-matching is safe.
+ *
+ * Once an order exists, admin can edit its dates independently (e.g.
+ * updateAdminOrder) without ever touching the originating ClientRequest —
+ * those edits must be what the customer sees, not the copy frozen at
+ * submission time. Only fromDate/toDate/totalDays are overlaid; everything
+ * else on the line (media, campaign details, promoter info) still comes
+ * from the client's own request.
+ */
+function applyOrderDateOverrides(vehicleTypes, order) {
+  const bookingItems = order?.bookingItems || [];
+  if (!bookingItems.length) return vehicleTypes || [];
+
+  return (vehicleTypes || []).map((vehicle, index) => {
+    const item = bookingItems[index];
+    if (!item) return vehicle;
+
+    return {
+      ...vehicle,
+      fromDate: item.fromDate ?? vehicle.fromDate,
+      toDate: item.toDate ?? vehicle.toDate,
+      totalDays: item.totalDays ?? vehicle.totalDays,
+    };
+  });
+}
+
 function toDateKey(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -356,6 +388,7 @@ module.exports = {
   TRACKING_ORDER_SELECT,
   LIVE_LOCATION_ORDER_SELECT,
   deriveJourneyStage,
+  applyOrderDateOverrides,
   buildSteps,
   buildActivity,
   deriveOnRoadDay,

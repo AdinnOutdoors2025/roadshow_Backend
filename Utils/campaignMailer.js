@@ -19,7 +19,7 @@ const ROADSHOW_CAMPAIGN_MAIL_TO =
 
 const ROADSHOW_CAMPAIGN_MAIL_CC =
   process.env.ROADSHOW_CAMPAIGN_MAIL_CC ||
-  "smm@adinn.co.in,2002karthikatg@gmail.com";
+  "smm@adinn.co.in,2002karthikatg@gmail.com,srbedev@adinn.co.in";
 
 const normalizeEmailCsv = (value = "") =>
   String(value || "")
@@ -234,10 +234,22 @@ const buildBookingSummaryPdfData = async (order) => {
  * public booking's mirrored order (createOrderForClientRequest), since
  * both write the same Order shape.
  *
+ * Guarded by order.campaignMailSent so this can only ever fire once per
+ * order no matter how many call sites reach it — in particular, an Agency
+ * uploading/replacing its PO document after the initial (no-PO) mail has
+ * already gone out must not trigger a second campaign-request email.
+ *
  * Throws on failure; every call site wraps this in its own try/catch so a
  * mail outage never blocks the order that already exists.
  */
 async function sendCampaignRequestMail(order) {
+  if (order.campaignMailSent) {
+    console.log(
+      `Order ${order.orderId}: roadshowCampaignRequest mail already sent — skipping duplicate send.`
+    );
+    return { status: "skipped", message: "Campaign request mail already sent for this order." };
+  }
+
   const base = frontendBaseUrl();
   const mailData = await buildCampaignMailData(order);
 
@@ -297,6 +309,9 @@ async function sendCampaignRequestMail(order) {
   if (!data || data.status !== "success") {
     throw new Error(`Roadshow campaign mail API did not confirm success: ${data?.message || "unknown error"}`);
   }
+
+  order.campaignMailSent = true;
+  await order.save();
 
   return data;
 }

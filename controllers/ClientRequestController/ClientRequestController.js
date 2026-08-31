@@ -16,6 +16,7 @@ const {
   TRACKING_ORDER_SELECT,
   LIVE_LOCATION_ORDER_SELECT,
   deriveJourneyStage,
+  applyOrderDateOverrides,
   buildSteps,
   buildActivity,
   deriveOnRoadDay,
@@ -347,10 +348,17 @@ const resolveVehicleTypeNames = async (bookingItems) => {
    request. Purely additive — never removes/changes an existing field. */
 const attachTrackingSummary = (request) => {
   const { stageIndex, isCancelled, vehicleUnavailable } = deriveJourneyStage(request.orderRef);
-  const onRoad = deriveOnRoadDay(request.orderRef, request.vehicleTypes);
+
+  /* Admin can edit a vehicle line's dates on the Order after the booking is
+     raised (e.g. updateAdminOrder) without ever touching this ClientRequest
+     — overlay those live dates onto the client's own copy so an admin edit
+     is reflected here instead of the value frozen at submission time. */
+  const vehicleTypes = applyOrderDateOverrides(request.vehicleTypes, request.orderRef);
+  const onRoad = deriveOnRoadDay(request.orderRef, vehicleTypes);
 
   return {
     ...request,
+    vehicleTypes,
     journeyStage: { index: stageIndex, key: JOURNEY_STEPS[stageIndex].key },
     /* Per-milestone status + completedAt (null when not yet reached/logged —
        see buildSteps' own "never fabricates history" contract) so the
@@ -1082,8 +1090,13 @@ exports.getClientRequestTracking = async (req, res) => {
     const submittedAt = request.createdAt;
     const { stageIndex, isCancelled, vehicleUnavailable } = deriveJourneyStage(order);
 
-    const campaignStart = request.vehicleTypes?.[0]?.fromDate || null;
-    const campaignEnd = request.vehicleTypes?.[0]?.toDate || null;
+    /* See attachTrackingSummary — admin can edit a booked vehicle's dates on
+       the Order after this request was submitted; the tracking console must
+       reflect that live value, not the one frozen at submission. */
+    const vehicleTypes = applyOrderDateOverrides(request.vehicleTypes, order);
+
+    const campaignStart = vehicleTypes?.[0]?.fromDate || null;
+    const campaignEnd = vehicleTypes?.[0]?.toDate || null;
     const dayWiseReport = buildDayWiseReport(order, campaignStart, campaignEnd, stageIndex);
 
     return res.status(200).json({
@@ -1091,13 +1104,13 @@ exports.getClientRequestTracking = async (req, res) => {
       data: {
         clientOrderId: request.clientOrderId,
         bookingSummary: {
-          campaignName: request.vehicleTypes?.[0]?.campaignName || "",
-          location: request.location || request.vehicleTypes?.[0]?.campaignLocation || "",
+          campaignName: vehicleTypes?.[0]?.campaignName || "",
+          location: request.location || vehicleTypes?.[0]?.campaignLocation || "",
           startDate: campaignStart,
           endDate: campaignEnd,
-          totalDays: request.vehicleTypes?.[0]?.totalDays || null,
-          vehicleTypeCount: request.vehicleTypes?.length || 0,
-          vehicleCount: (request.vehicleTypes || []).reduce(
+          totalDays: vehicleTypes?.[0]?.totalDays || null,
+          vehicleTypeCount: vehicleTypes?.length || 0,
+          vehicleCount: (vehicleTypes || []).reduce(
             (sum, v) => sum + (v.quantity || 0),
             0
           ),
@@ -1105,7 +1118,7 @@ exports.getClientRequestTracking = async (req, res) => {
         journeyStage: { index: stageIndex, key: JOURNEY_STEPS[stageIndex].key },
         isCancelled,
         vehicleUnavailable,
-        onRoad: deriveOnRoadDay(order, request.vehicleTypes),
+        onRoad: deriveOnRoadDay(order, vehicleTypes),
         steps: buildSteps(order, submittedAt),
         activity: buildActivity(order, submittedAt),
         dayWiseReport,
