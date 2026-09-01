@@ -91,6 +91,21 @@ const getLocalDestination = (fieldname) => {
 const localStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     const destinationPath = getLocalDestination(file.fieldname);
+
+    /* Defensive, not just the one-time createUploadDirs() call above — if
+       this folder is ever missing at actual upload time (deleted after
+       boot, wiped by tooling, etc.) multer's diskStorage throws ENOENT with
+       no way to recover short of a server restart. Same self-healing
+       pattern Utils/agencyPoDocumentUpload.js and orderImageupload.js's
+       destination callback already use. */
+    try {
+      if (!fs.existsSync(destinationPath)) {
+        fs.mkdirSync(destinationPath, { recursive: true });
+      }
+    } catch (dirError) {
+      return cb(dirError);
+    }
+
     cb(null, destinationPath);
   },
   filename: function (req, file, cb) {

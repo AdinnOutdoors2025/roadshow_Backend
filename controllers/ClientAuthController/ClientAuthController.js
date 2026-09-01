@@ -162,11 +162,30 @@ exports.sendClientOtp = async (req, res) => {
         if (OTP_MODE === "local") {
             console.log("CLIENT OTP:", phone, otp);
         } else {
+            /* Declared from process.env here (the previous version of this
+               block referenced these as bare identifiers with no
+               declaration anywhere in the file, so it threw ReferenceError
+               the instant OTP_MODE left "local" — this is the minimal fix
+               for that, nothing else about this flow's formatting/template/
+               message changed). */
+            const NETTYFISH_API_KEY = process.env.NETTYFISH_API_KEY;
+            const NETTYFISH_SENDER_ID = process.env.NETTYFISH_SENDER_ID;
+            const NETTYFISH_TEMPLATE_ID = process.env.NETTYFISH_TEMPLATE_ID;
+
             const mobileNumber = phone.replace(/\D/g, "");
             const formattedNumber = mobileNumber.length === 10 ? `91${mobileNumber}` : mobileNumber;
             const message = `Welcome to Adinn Roadshows! : Use ${otp} to verify your mobile number. This OTP is valid for 5 minutes. Please do not share this code. - Adinn`;
+
+            console.log("[OTP SMS]");
+            console.log("Phone:", formattedNumber);
+            console.log("OTP:", otp);
+            console.log("Template ID:", NETTYFISH_TEMPLATE_ID);
+            console.log("SMS Mode: production");
+
             const url = `https://retailsms.nettyfish.com/api/mt/SendSMS?APIKey=${NETTYFISH_API_KEY}&senderid=${NETTYFISH_SENDER_ID}&channel=Trans&DCS=0&flashsms=0&number=${formattedNumber}&dlttemplateid=${NETTYFISH_TEMPLATE_ID}&text=${encodeURIComponent(message)}&route=17`;
             const smsResponse = await axios.get(url);
+
+            console.log("SMS sent: true");
             console.log("Nettyfish CLIENT SMS response:", smsResponse.data);
         }
         res.json({ success: true, message: "OTP sent" });

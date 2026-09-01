@@ -34,6 +34,7 @@ const {
   resolveHistoryRange,
 } = require("../../Utils/vamosysHistoryClient");
 const { sendCampaignRequestMail } = require("../../Utils/campaignMailer");
+const { sendOrderCreatedSms } = require("../../Utils/orderSms");
 const {
   saveAgencyPoDocument,
   deleteAgencyPoDocument,
@@ -883,7 +884,23 @@ exports.createClientRequest = async (req, res) => {
   await clientRequest.save();
 
   /*
-   If PO is selected then sent mail with PO document 
+   Order-created SMS fires exactly once, here, regardless of whether an
+   Agency PO is still pending — unlike the campaign email below, SMS must
+   not wait for the optional PO upload. Never repeated by the PO upload/
+   replace/remove flow, booking summary PDF generation, or a campaign-mail
+   retry — those never call sendOrderCreatedSms.
+   */
+  try {
+    await sendOrderCreatedSms({ orderId: order.orderId, customerPhone: order.phone });
+  } catch (smsError) {
+    console.error(
+      `Client request ${clientRequest.clientOrderId}: order-created SMS not sent —`,
+      smsError.message
+    );
+  }
+
+  /*
+   If PO is selected then sent mail with PO document
    */
   const hasPendingAgencyPo =
     body.hasAgencyPoDocument === true ||
