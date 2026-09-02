@@ -1,6 +1,10 @@
 require('dotenv').config();
 const axios = require("axios");
 const Enquiry = require("../../Models/Enquiry/enquirymodel");
+const {
+  findExistingToday,
+  ALREADY_ENQUIRED_MESSAGE,
+} = require("../../Utils/enquiryDedup");
 
 const sendRoadshowEnquiry = async (req, res) => {
   try {
@@ -29,6 +33,19 @@ const sendRoadshowEnquiry = async (req, res) => {
       return res.status(400).json({
         status: "error",
         message: "All required fields must be provided",
+      });
+    }
+
+    // Daily dedup: block a second enquiry from the same phone/email today.
+    const existingToday = await findExistingToday(Enquiry, {
+      phone: userContactNumber,
+      email: userEnquiryEmail,
+    });
+
+    if (existingToday) {
+      return res.status(409).json({
+        status: "error",
+        message: ALREADY_ENQUIRED_MESSAGE,
       });
     }
 

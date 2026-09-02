@@ -1,4 +1,8 @@
 const Enquiry = require("../../Models/Productenquiry/enquiry");
+const {
+  findExistingToday,
+  ALREADY_ENQUIRED_MESSAGE,
+} = require("../../Utils/enquiryDedup");
 
 // CREATE (POST)
 exports.createEnquiry = async (req, res) => {
@@ -7,6 +11,16 @@ exports.createEnquiry = async (req, res) => {
 
     if (!phoneNumber) {
       return res.status(400).json({ message: "Phone number is required" });
+    }
+
+    // Daily dedup: block a second product enquiry from the same phone today.
+    const existingToday = await findExistingToday(Enquiry, {
+      phone: phoneNumber,
+      phoneField: "phoneNumber",
+    });
+
+    if (existingToday) {
+      return res.status(409).json({ message: ALREADY_ENQUIRED_MESSAGE });
     }
 
     const enquiry = new Enquiry({ phoneNumber });

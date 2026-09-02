@@ -18,6 +18,14 @@ const contactEnquirySchema = new mongoose.Schema(
       match: [/^$|^\S+@\S+\.\S+$/, "Please use a valid email address"],
     },
     userEnquiryMessage: { type: String, default: "" },
+
+    userPreferredLocation: { type: String, default: "" },
+    userStartDate: { type: String, default: "" },
+    userEndDate: { type: String, default: "" },
+    userPreferredVehicle: { type: String, default: "" },
+    userPreferredVehicleImage: { type: String, default: "" },
+    source: { type: String, default: "" },
+
     apiStatus: { type: String, default: "success" },
   },
   {
