@@ -28,6 +28,7 @@ if (STORAGE_TYPE === "space") {
     s3: spacesClient,
     bucket: BUCKET_NAME,
     acl: "public-read",
+    contentType: multerS3.AUTO_CONTENT_TYPE,
     metadata: (req, file, cb) => {
       cb(null, { fieldname: file.fieldname });
     },

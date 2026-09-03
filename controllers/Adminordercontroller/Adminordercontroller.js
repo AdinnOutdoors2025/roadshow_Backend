@@ -200,10 +200,10 @@ const STAGE_ORDER = [
 ];
 
 // ── Helper: file URL ───────────────────────────────────────────────────────
+const { resolveStoredUrl } = require("../../Utils/spaceUrl");
 function getFileUrl(file) {
   if (!file) return null;
-  if (file.location) return file.location;
-  return `/uploads/${path.basename(file.path)}`;
+  return resolveStoredUrl(file) || null;
 }
 
 

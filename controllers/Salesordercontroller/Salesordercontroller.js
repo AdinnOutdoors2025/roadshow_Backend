@@ -14,11 +14,6 @@ const {
   deleteAgencyPoDocument,
 } = require("../../Utils/agencyPoDocumentUpload");
 
-const STORAGE_TYPE = process.env.STORAGE_TYPE || "local";
-const CDN_BASE_URL =
-  process.env.DO_SPACES_CDN_BASE ||
-  "https://adinn-space.sgp1.digitaloceanspaces.com";
-
 const SALES_STAGE_ORDER = [
   "enquiry",
   "proposalPriceQuote",
@@ -28,12 +23,11 @@ const SALES_STAGE_ORDER = [
   "closedLost",
 ];
 
+const { resolveStoredUrl } = require("../../Utils/spaceUrl");
+
 const getFilePath = (file) => {
   if (!file) return "";
-  if (STORAGE_TYPE === "space") {
-    return file.location || "";
-  }
-  return `/uploads/${path.basename(file.path)}`;
+  return resolveStoredUrl(file);
 };
 
 const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
