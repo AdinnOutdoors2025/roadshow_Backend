@@ -23,19 +23,21 @@ const parseAdminSmsNumbers = () =>
     .filter(Boolean);
 
 /* Must match the approved DLT content verbatim except for the order id:
-   "Adinn Outdoors - New order received! Order ID: {#alphanumeric#}. Please
-   review the order details and take action in the admin panel." */
+   "{#alphanumeric#} - New order received! Order ID: {#alphanumeric#}. Please
+   review the order details and take the necessary action. - Adinn." — this
+   single template is shared by admin-created orders and client-request
+   orders alike, since the order id is passed through as-is. */
 const buildAdminOrderMessage = (orderId) =>
-  `Adinn Outdoors - New order received! Order ID: ${orderId}. Please review the order details and take action in the admin panel.`;
+  `Adinn Roadshows! - New order received! Order ID: ${orderId}. Please review the order details and take the necessary action. - Adinn.`;
 
 /* Must match the approved DLT content verbatim: "Thank you for your order
-   with Adinn Outdoors! We've received it successfully. Your order ID is
-   US{#var#}." — the {#var#} placeholder is filled with the order id AS-IS
-   (e.g. "20260831CRO#4"); "US" is part of the fixed template text, not a
-   prefix to add to the id before interpolating, or the result doubles into
-   "USUS20260831CRO#4". */
+   with {#alphanumeric#}. We've received it successfully. Your order ID is
+   {#alphanumeric#}. - Adinn." — the order id is filled in AS-IS (e.g.
+   "20260831CRO#4"), with no "US" prefix (that was specific to the old,
+   now-retired Adinn Outdoors template). Shared by admin-created and
+   client-request orders alike. */
 const buildCustomerOrderMessage = (orderId) =>
-  `Thank you for your order with Adinn Outdoors! We've received it successfully. Your order ID is US${orderId}.`;
+  `Thank you for your order with Adinn Roadshows!. We've received it successfully. Your order ID is ${orderId}. - Adinn.`;
 
 /**
  * Sends the order-created SMS to every configured admin number and to the
