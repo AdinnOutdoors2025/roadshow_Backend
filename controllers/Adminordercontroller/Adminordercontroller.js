@@ -754,6 +754,14 @@ exports.updateAdminOrder = async (req, res) => {
 
     const customerChanges = [];
     Object.keys(FIELD_LABELS).forEach((key) => {
+      // For an organization order, `order.name` is always set to the same
+      // value as `order.clientName` (see the customer-fields update above)
+      // — it's a mirror for display purposes, not an independently edited
+      // field. Reporting both would show the identical name change twice
+      // ("Customer Name" and "Client Name"), so only clientName's own entry
+      // is kept here.
+      if (key === "name" && category === "organization") return;
+
       const oldVal = oldCustomerSnapshot[key] || "";
       const newVal = order[key] || "";
       if (String(oldVal) !== String(newVal)) {
@@ -787,6 +795,8 @@ exports.updateAdminOrder = async (req, res) => {
       promoterType: "Promoter Type",
       promoterGender: "Promoter Gender",
       promoterQuantity: "Promoter Quantity",
+      promoterFromDate: "Promoter From Date",
+      promoterToDate: "Promoter To Date",
       gstNumber: "GST Number",
       totalAmount: "Total Amount",
     };

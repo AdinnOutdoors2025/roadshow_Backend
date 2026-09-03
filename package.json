@@ -23,7 +23,7 @@
     "nanoid": "^5.1.15",
     "nodemailer": "^9.0.5",
     "path": "^0.12.7",
-    "puppeteer": "^25.8.0",
+    "puppeteer": "^25.9.0",
     "request": "^2.88.2"
   }
 }
