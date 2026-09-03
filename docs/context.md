@@ -64,6 +64,9 @@ Admin/sales pipeline hardening — three modules landed in the last week:
 | 7 | **No tests, no linter, no build step.** | Verification is manual only — run the server, exercise the route. |
 | 8 | **`CLAUDE.md` §9/§10 tables are out of date** — missing RolePermission, ProjectSetting, CityRoutes, VehicleModelRoutes, Employeeauthroutes, EnquiryRoutes, ContactEnquiryRoute, Productenquiry, and the Election routes. | Route lookups from the table alone will miss these. |
 | 9 | **`CLAUDE.md` is 37 KB and contains two merged copies** of the same architecture doc. | Consumes context every session. |
+| 10 | **Fresh code-verified overview available** — `docs/OVERVIEW.md` (2026-08-28) newly documents client-request→order auto-raise, client tracking journey (vamosys GPS, day-wise reports, agency PO docs), campaign mailers, booking-summary PDF, invoice multi-discounts, FOC chat, role/user permissions. Older docs here and `CLAUDE.md` under-report these. | Read OVERVIEW.md before `architecture.md`/`business-rules.md` for the current tree. |
+| 11 | **CORS configured 3×** in `VehicleMain.js` (line 117 `origin:true`, allowlist 141–162 as the gate, trailing bare `cors()` at 384). | Confirm which should survive; the allowlist is the stated intent. |
+| 12 | **Some sales routes unguarded** — `POST /sales/pipeline/:id/send-project-mail`, `save-project-code`, `getDateConflicts` have no `protect`. | Confirm intent; may rely on sessions. |
 
 ---
 
