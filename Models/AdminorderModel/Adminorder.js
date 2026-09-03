@@ -777,6 +777,12 @@ const orderSchema = new mongoose.Schema(
 
     bookingSummaryPdfUrl: { type: String, default: "" },
 
+    /* Set once sendCampaignRequestMail actually completes for this order —
+       see Utils/campaignMailer.js. Guards against the roadshowCampaignRequest
+       mail firing twice: once immediately (no PO selected) and again after
+       an Agency uploads/replaces its PO document later. */
+    campaignMailSent: { type: Boolean, default: false },
+
     grandGst: { type: Number, default: 0 },
     grandTotal: { type: Number, required: true },
     orderStatus: {

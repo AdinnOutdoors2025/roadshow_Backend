@@ -9,6 +9,7 @@ const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const { successResponse, errorResponse } = require("../../Utils/response");
 const { sendFocMail, getActiveAdminEmails, getEmailByUsername } = require('../../Utils/focMailer');
 const { sendCampaignRequestMail, buildBookingSummaryPdfData } = require('../../Utils/campaignMailer');
+const { sendOrderCreatedSms } = require('../../Utils/orderSms');
 const VehicleMaster = require("../../Models/vehicleDetails");
 const VehicleType = require("../../Models/VehicleTypeSchema");
 const { checkVehicleAvailability } = require("../../Utils/vehicleAvailability");
@@ -452,6 +453,17 @@ exports.createAdminOrder = async (req, res) => {
       console.error(
         `Admin order ${order.orderId}: campaign request mail not sent —`,
         mailError.message
+      );
+    }
+
+    /* Same non-fatal contract as the mail above — an already-saved order
+       must never fail because Nettyfish is unavailable. */
+    try {
+      await sendOrderCreatedSms({ orderId: order.orderId, customerPhone: order.phone });
+    } catch (smsError) {
+      console.error(
+        `Admin order ${order.orderId}: order-created SMS not sent —`,
+        smsError.message
       );
     }
 

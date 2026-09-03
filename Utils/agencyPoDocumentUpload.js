@@ -34,6 +34,23 @@ const STORAGE_TYPE = process.env.CLIENT_AGENCY_PO_DOCUMENTS_STORAGE || "local";
    use this path. */
 const PO_DOCUMENT_FOLDER = "Roadshows/client_po_document";
 
+/* Local-disk destination — its own dedicated top-level folder (not nested
+   under public/uploads) so PO documents are easy to find/back up/clean up
+   separately from every other local upload type. Must stay under public/:
+   VehicleMain.js statically serves the whole public/ directory from the
+   site root (`app.use(express.static(path.join(__dirname, "public")))`),
+   which is what makes any public/<anything> path downloadable without
+   further route wiring. Only affects new uploads — files already saved
+   under the old public/uploads/Roadshows/client_po_document path keep
+   working as-is (see deleteAgencyPoDocument, which reconstructs a file's
+   disk path generically from its stored url rather than from this
+   constant, so it doesn't care which of the two layouts produced it). */
+const PO_DOCUMENT_LOCAL_PATH = (
+  process.env.PO_DOCUMENT_LOCAL_PATH || "public/po_doc_uploads"
+).replace(/[\\/]+$/, "");
+
+const PO_DOCUMENT_URL_PREFIX = `/${PO_DOCUMENT_LOCAL_PATH.replace(/^public[\\/]/, "")}`;
+
 const IMAGE_EXTENSIONS = /^(jpe?g|png|webp)$/i;
 const DOCUMENT_EXTENSIONS = /^(pdf|docx?)$/i;
 
@@ -144,7 +161,7 @@ const saveAgencyPoDocument = async (file) => {
     };
   }
 
-  const uploadDir = path.join(__dirname, "../public/uploads", PO_DOCUMENT_FOLDER);
+  const uploadDir = path.join(__dirname, "..", PO_DOCUMENT_LOCAL_PATH);
 
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -159,7 +176,7 @@ const saveAgencyPoDocument = async (file) => {
     fileName,
     mimeType: file.mimetype,
     size: file.size,
-    url: `/uploads/${PO_DOCUMENT_FOLDER}/${fileName}`,
+    url: `${PO_DOCUMENT_URL_PREFIX}/${fileName}`,
     storageType: "local",
   };
 };
