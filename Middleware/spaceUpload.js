@@ -136,6 +136,7 @@ if (STORAGE_TYPE === "space") {
     metadata: function (req, file, cb) {
       cb(null, { fieldname: file.fieldname });
     },
+    contentType: multerS3.AUTO_CONTENT_TYPE,
     key: function (req, file, cb) {
       const isVideo = file.mimetype.startsWith("video/");
       let folder = "vehicles";
