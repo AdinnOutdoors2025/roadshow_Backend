@@ -78,7 +78,7 @@ const OPS_TIER = {
 const salesTierOf = (stage) => SALES_TIER[stage];
 const opsTierOf = (stage) => OPS_TIER[stage];
 
-const isActiveOnRoadEntry = (entry) => entry && entry.entryStatus !== "removed";
+const isActiveOnRoadEntry = (entry) => entry && entry.entryStatus === "active";
 
 /**
  * Current position in the client journey, derived from the Order's LIVE
