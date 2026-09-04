@@ -263,115 +263,115 @@ cloudinary.config({
 const vehicleUpload = require("./Middleware/vehicleDetailsUpload");
 //ORDER MANAGEMENT AND ADD TO CART , ORDER CREATION CODES
 
-// Configure storage for main image upload
-const imageStorage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: async (req, file) => {
-    return {
-      folder: "VehicleMainImage",
-      allowed_formats: ["jpg", "jpeg", "png"],
-      // transformation: [
-      //     { width: 1600, height: 1200, crop: 'limit', quality: 'auto' }
-      // ]
-    };
-  },
-});
+// // Configure storage for main image upload
+// const imageStorage = new CloudinaryStorage({
+//   cloudinary: cloudinary,
+//   params: async (req, file) => {
+//     return {
+//       folder: "VehicleMainImage",
+//       allowed_formats: ["jpg", "jpeg", "png"],
+//       // transformation: [
+//       //     { width: 1600, height: 1200, crop: 'limit', quality: 'auto' }
+//       // ]
+//     };
+//   },
+// });
 
-const imageUpload = multer({
-  storage: imageStorage,
-  // limits: {
-  //     fileSize: 5 * 1024 * 1024 // 5MB limit
-  // }
-});
+// const imageUpload = multer({
+//   storage: imageStorage,
+//   // limits: {
+//   //     fileSize: 5 * 1024 * 1024 // 5MB limit
+//   // }
+// });
 
-app.post("/upload", imageUpload.single("file"), (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No file uploaded" });
-    }
-    console.log("Main image URL:", req.file.path);
-    console.log("Main image public_id:", req.file.filename);
-    res.status(200).json({
-      message: "Upload successful",
-      imageUrl: req.file.path,
-      public_id: req.file.filename,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Upload failed" });
-  }
-});
+// app.post("/upload", imageUpload.single("file"), (req, res) => {
+//   try {
+//     if (!req.file) {
+//       return res.status(400).json({ error: "No file uploaded" });
+//     }
+//     console.log("Main image URL:", req.file.path);
+//     console.log("Main image public_id:", req.file.filename);
+//     res.status(200).json({
+//       message: "Upload successful",
+//       imageUrl: req.file.path,
+//       public_id: req.file.filename,
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: "Upload failed" });
+//   }
+// });
 
-// Configure storage for additional files
-const additionalFileStorage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: async (req, file) => {
-    const isVideo = file.mimetype.startsWith("video/");
-    return {
-      folder: isVideo ? "VehicleAddedVideos" : "VehicleAddedImages",
-      resource_type: isVideo ? "video" : "image",
-      allowed_formats: isVideo
-        ? ["mp4", "mov", "avi", "mkv", "webm"]
-        : ["jpg", "jpeg", "png", "gif"],
-      // format: isVideo ? 'mp4' : 'jpg',
-      // transformation: isVideo ? [] : [{ width: 800, height: 800, crop: 'limit' }]
-      // transformation: isVideo ?
-      //     { quality: 'auto', fetch_format: 'auto' } :
-      //     { width: 800, height: 600, crop: 'limit', quality: 'auto' }
-    };
-  },
-});
+// // Configure storage for additional files
+// const additionalFileStorage = new CloudinaryStorage({
+//   cloudinary: cloudinary,
+//   params: async (req, file) => {
+//     const isVideo = file.mimetype.startsWith("video/");
+//     return {
+//       folder: isVideo ? "VehicleAddedVideos" : "VehicleAddedImages",
+//       resource_type: isVideo ? "video" : "image",
+//       allowed_formats: isVideo
+//         ? ["mp4", "mov", "avi", "mkv", "webm"]
+//         : ["jpg", "jpeg", "png", "gif"],
+//       // format: isVideo ? 'mp4' : 'jpg',
+//       // transformation: isVideo ? [] : [{ width: 800, height: 800, crop: 'limit' }]
+//       // transformation: isVideo ?
+//       //     { quality: 'auto', fetch_format: 'auto' } :
+//       //     { width: 800, height: 600, crop: 'limit', quality: 'auto' }
+//     };
+//   },
+// });
 
-const additionalFileUpload = multer({
-  storage: additionalFileStorage,
-});
+// const additionalFileUpload = multer({
+//   storage: additionalFileStorage,
+// });
 
-// Save files endpoint
-app.post(
-  "/save-videos",
-  additionalFileUpload.array("files", 5),
-  async (req, res) => {
-    try {
-      if (!req.files || req.files.length === 0) {
-        return res.status(400).json({ error: "No files uploaded" });
-      }
-      const savedFiles = req.files.map((file) => ({
-        url: file.path,
-        public_id: file.filename,
-        type: file.mimetype.startsWith("video/") ? "video" : "image",
-      }));
-      console.log("Saved files:", savedFiles);
-      res.status(200).json(savedFiles);
-    } catch (err) {
-      console.error("Error uploading additional files:", err);
-      res.status(500).json({ error: "File save failed" });
-    }
-  },
-);
+// // Save files endpoint
+// app.post(
+//   "/save-videos",
+//   additionalFileUpload.array("files", 5),
+//   async (req, res) => {
+//     try {
+//       if (!req.files || req.files.length === 0) {
+//         return res.status(400).json({ error: "No files uploaded" });
+//       }
+//       const savedFiles = req.files.map((file) => ({
+//         url: file.path,
+//         public_id: file.filename,
+//         type: file.mimetype.startsWith("video/") ? "video" : "image",
+//       }));
+//       console.log("Saved files:", savedFiles);
+//       res.status(200).json(savedFiles);
+//     } catch (err) {
+//       console.error("Error uploading additional files:", err);
+//       res.status(500).json({ error: "File save failed" });
+//     }
+//   },
+// );
 
-// Delete endpoint
-app.post("/delete-video", async (req, res) => {
-  try {
-    const { public_id, resource_type } = req.body;
+// // Delete endpoint
+// app.post("/delete-video", async (req, res) => {
+//   try {
+//     const { public_id, resource_type } = req.body;
 
-    if (!public_id || !resource_type) {
-      return res.status(400).json({ error: "Missing parameters" });
-    }
+//     if (!public_id || !resource_type) {
+//       return res.status(400).json({ error: "Missing parameters" });
+//     }
 
-    const result = await cloudinary.uploader.destroy(public_id, {
-      resource_type: resource_type,
-    });
+//     const result = await cloudinary.uploader.destroy(public_id, {
+//       resource_type: resource_type,
+//     });
 
-    if (result.result === "ok") {
-      res.status(200).json({ message: "File deleted successfully" });
-    } else {
-      res.status(400).json({ error: "File deletion failed" });
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error during file deletion" });
-  }
-});
+//     if (result.result === "ok") {
+//       res.status(200).json({ message: "File deleted successfully" });
+//     } else {
+//       res.status(400).json({ error: "File deletion failed" });
+//     }
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: "Server error during file deletion" });
+//   }
+// });
 
 
 // ===================== Update order pipeline status
