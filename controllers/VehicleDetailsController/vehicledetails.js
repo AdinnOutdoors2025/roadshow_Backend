@@ -2870,11 +2870,11 @@ const updateRegistrationVehicle = async (req, res) => {
           const cleanOld = cleanRegistrationNumber(oldRegNoForRelease);
           const entry = linkedOrder.onRoadExecutionArray.find(
             (e) =>
-              e.entryStatus !== "removed" &&
+              e.entryStatus === "active" &&
               cleanRegistrationNumber(e.vehicleRegistrationNumber) === cleanOld
           );
 
-          if (entry && !entry.unavailableStatus && entry.entryStatus !== "removed") {
+          if (entry && !entry.unavailableStatus && entry.entryStatus === "active") {
             const reportedBy = req.user?.username || "System (Inventory)";
             const reasonText =
               `Vehicle marked "${updateData.currentStatus}" from Vehicle Inventory` +
@@ -3678,11 +3678,11 @@ const updateRegistrationVehicleByRegNo = async (req, res) => {
           const cleanOld = cleanRegistrationNumber(oldRegNoForRelease);
           const entry = linkedOrder.onRoadExecutionArray.find(
             (e) =>
-              e.entryStatus !== "removed" &&
+              e.entryStatus === "active" &&
               cleanRegistrationNumber(e.vehicleRegistrationNumber) === cleanOld
           );
 
-          if (entry && !entry.unavailableStatus && entry.entryStatus !== "removed") {
+          if (entry && !entry.unavailableStatus && entry.entryStatus === "active") {
             const reportedBy = req.user?.username || "System (Inventory)";
             const reasonText =
               `Vehicle marked "${updateData.currentStatus}" from Vehicle Inventory` +

@@ -1361,7 +1361,7 @@ exports.getClientRequestDrivingSummary = async (req, res) => {
     }
 
     const activeEntries = (order.onRoadExecutionArray || []).filter(
-      (e) => e.entryStatus !== "removed" && e.vehicleRegistrationNumber
+      (e) => e.entryStatus === "active" && e.vehicleRegistrationNumber
     );
 
     /* Frontend (useDrivingSummary.ts) already sends ?day=YYYY-MM-DD when the
@@ -1451,7 +1451,7 @@ exports.getClientRequestRouteTrack = async (req, res) => {
     }
 
     const activeEntries = (order.onRoadExecutionArray || []).filter(
-      (e) => e.entryStatus !== "removed" && e.vehicleRegistrationNumber
+      (e) => e.entryStatus === "active" && e.vehicleRegistrationNumber
     );
 
     const vehicles = await Promise.all(
@@ -1710,7 +1710,7 @@ exports.getClientRequestVehicleHistory = async (req, res) => {
       order.onRoadExecutionArray || []
     ).filter(
       (entry) =>
-        entry.entryStatus !== "removed" &&
+        entry.entryStatus === "active" &&
         entry.vehicleRegistrationNumber
     );
 

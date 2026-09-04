@@ -1659,12 +1659,17 @@ exports.markVehicleUnavailable = async (req, res) => {
       : order.onRoadExecutionArray.find(
           (e) =>
             e.vehicleRegistrationNumber === regNoUpper &&
-            e.entryStatus !== "removed" &&
+            e.entryStatus === "active" &&
             !e.unavailableStatus
         );
     if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
-    if (entry.entryStatus === "removed")
-      return errorResponse(res, "This vehicle entry has already been released", null, 400);
+    if (entry.entryStatus !== "active") {
+      const msg =
+        entry.entryStatus === "replaced"
+          ? "This vehicle has already been replaced"
+          : "This vehicle entry has already been released";
+      return errorResponse(res, msg, null, 400);
+    }
     if (entry.unavailableStatus)
       return errorResponse(res, "This vehicle is already marked unavailable", null, 400);
 
@@ -1745,10 +1750,14 @@ exports.replaceOnRoadVehicle = async (req, res) => {
 
     const oldEntry = order.onRoadExecutionArray.id(entryId);
     if (!oldEntry) return errorResponse(res, "Vehicle entry not found", null, 404);
-    if (oldEntry.entryStatus === "removed") {
-      return errorResponse(res, "This vehicle has already been released", null, 400);
+    if (oldEntry.entryStatus !== "active") {
+      const msg =
+        oldEntry.entryStatus === "replaced"
+          ? "This vehicle has already been replaced"
+          : "This vehicle has already been released";
+      return errorResponse(res, msg, null, 400);
     }
-  
+
     const newReg = newVehicleRegistrationNumber.trim().toUpperCase().replace(/\s+/g, "");
     const oldReg = (oldEntry.vehicleRegistrationNumber || "").trim().toUpperCase().replace(/\s+/g, "");
 
@@ -1757,7 +1766,7 @@ exports.replaceOnRoadVehicle = async (req, res) => {
     // }
 
     const alreadyActive = order.onRoadExecutionArray.some(
-      (e) => e.entryStatus !== "removed" && !e.unavailableStatus && e.vehicleRegistrationNumber === newReg
+      (e) => e.entryStatus === "active" && !e.unavailableStatus && e.vehicleRegistrationNumber === newReg
     );
     if (alreadyActive) {
       return errorResponse(res, "That vehicle is already assigned on this order", null, 400);
@@ -1779,14 +1788,15 @@ exports.replaceOnRoadVehicle = async (req, res) => {
 
     /* The old entry must stop being "active" the moment a replacement is
        assigned — otherwise it and the new entry both read as current for
-       the same slot (entryStatus !== "removed"), which is what made the
-       Live Vehicle / GPS Movement Report screens show the unavailable
-       vehicle AND its replacement as two separate active rows instead of
-       one "2345 → 7852" slot. Full history is preserved: the entry itself,
-       and everything already pushed to onRoadUnavailableHistory /
-       onRoadDriverHistory below, are untouched — only entryStatus flips,
-       exactly like releaseOnRoadVehicle already does for a plain release. */
-    oldEntry.entryStatus = "removed";
+       the same slot, which is what made the Live Vehicle / GPS Movement
+       Report screens show the unavailable vehicle AND its replacement as
+       two separate active rows instead of one "2345 → 7852" slot.
+       "replaced" (not "removed") — a replacement is NOT a withdrawal, so it
+       must never count toward Released Vehicles or look identical to an
+       explicit Withdraw Vehicle action. Full history is preserved: the
+       entry itself, and everything already pushed to onRoadUnavailableHistory /
+       onRoadDriverHistory below, are untouched — only entryStatus flips. */
+    oldEntry.entryStatus = "replaced";
     oldEntry.removedAt = now;
     oldEntry.removedBy = performedBy;
     oldEntry.removalReason = reasonTrim;
@@ -2420,7 +2430,7 @@ exports.submitOrderClosedWon = async (req, res) => {
 
     if (RELEASE_VEHICLE_FROM_STAGES.includes(oldStage)) {
       const regNumbers = (order.onRoadExecutionArray || [])
-        .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
+        .filter((e) => e.entryStatus === "active" && !e.unavailableStatus)
         .map((e) => e.vehicleRegistrationNumber)
         .filter(Boolean);
 
@@ -2493,7 +2503,7 @@ exports.submitOrderClosedLost = async (req, res) => {
 
     if (RELEASE_VEHICLE_FROM_STAGES.includes(oldStage)) {
       const regNumbers = (order.onRoadExecutionArray || [])
-        .filter((e) => e.entryStatus !== "removed" && !e.unavailableStatus)
+        .filter((e) => e.entryStatus === "active" && !e.unavailableStatus)
         .map((e) => e.vehicleRegistrationNumber)
         .filter(Boolean);
 
@@ -3159,8 +3169,12 @@ exports.releaseOnRoadVehicle = async (req, res) => {
     const entry = order.onRoadExecutionArray.id(entryId);
     if (!entry) return errorResponse(res, "Vehicle entry not found", null, 404);
 
-    if (entry.entryStatus === "removed") {
-      return errorResponse(res, "This vehicle is already released", null, 400);
+    if (entry.entryStatus !== "active") {
+      const msg =
+        entry.entryStatus === "replaced"
+          ? "This vehicle has already been replaced and is no longer active"
+          : "This vehicle is already released";
+      return errorResponse(res, msg, null, 400);
     }
 
     const releasedBy =
@@ -4580,6 +4594,7 @@ exports.getDayByDayHistory = async (req, res) => {
         let status = "Historical";
         if (latest) {
           if (latest.entryStatus === "removed") status = "Released";
+          else if (latest.entryStatus === "replaced") status = "Replaced";
           else if (latest.unavailableStatus) status = "Unavailable";
           else if (latest.onRoadStatus === 1) status = "On Road";
           else status = "Assigned";

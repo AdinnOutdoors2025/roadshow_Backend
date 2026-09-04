@@ -37,7 +37,7 @@ async function findDateConflictsForOrder(order) {
     const currentReserved = orderFinished
       ? []
       : (order.onRoadExecutionArray || [])
-          .filter((e) => e.vehicleIndex === i && e.entryStatus !== "removed")
+          .filter((e) => e.vehicleIndex === i && e.entryStatus === "active")
           .map((e) => ({
             driverName: e.driverName,
             driverPhone: e.driverPhone,
@@ -87,7 +87,7 @@ async function findDateConflictsForOrder(order) {
         const reservedVehicles = otherFinished
           ? []
           : (otherOrder.onRoadExecutionArray || [])
-              .filter((e) => e.vehicleIndex === otherIdx && e.entryStatus !== "removed")
+              .filter((e) => e.vehicleIndex === otherIdx && e.entryStatus === "active")
               .map((e) => ({
                 driverName: e.driverName,
                 driverPhone: e.driverPhone,

@@ -864,7 +864,11 @@ const orderSchema = new mongoose.Schema(
     inventoryStatus: { type: String, enum: ["Unavailable", "Damaged", "Under Maintenance"], default: "Unavailable" },
 
     // ── NEW: for release/remove feature ──
-    entryStatus: { type: String, enum: ["active", "removed"], default: "active" },
+    // "replaced" = superseded by a replacement entry (replaceOnRoadVehicle) —
+    // distinct from "removed" (an explicit Withdraw Vehicle), so a replaced
+    // vehicle is never mistaken for a withdrawn one in Released Vehicles /
+    // active-slot counts. See replaceOnRoadVehicle in Adminordercontroller.js.
+    entryStatus: { type: String, enum: ["active", "removed", "replaced"], default: "active" },
     removedAt: { type: Date, default: null },
     removedBy: { type: String, default: "" },
     removalReason: { type: String, default: "" },
