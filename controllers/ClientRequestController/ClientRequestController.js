@@ -16,7 +16,8 @@ const {
   TRACKING_ORDER_SELECT,
   LIVE_LOCATION_ORDER_SELECT,
   deriveJourneyStage,
-  applyOrderDateOverrides,
+  applyOrderFieldOverrides,
+  applyOrderTotalsOverride,
   buildSteps,
   buildActivity,
   deriveOnRoadDay,
@@ -40,6 +41,7 @@ const {
   deleteAgencyPoDocument,
 } = require("../../Utils/agencyPoDocumentUpload");
 const { resolveVehicleSlots } = require("../../Utils/vehicleAssignmentResolver");
+const { deleteManyFromSpaces } = require("../../Utils/deleteFromSpaces");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -346,20 +348,26 @@ const resolveVehicleTypeNames = async (bookingItems) => {
 };
 
 /* Attaches the derived journey stage to a plain (toObject()'d) client
-   request. Purely additive — never removes/changes an existing field. */
-const attachTrackingSummary = (request) => {
+   request. Purely additive — never removes/changes an existing field.
+   vehicleTypeNameById is the Map<typeId, typeName> built by
+   resolveVehicleTypeNames() — callers batch that lookup once (per request or
+   across a whole list) rather than this function querying per row. */
+const attachTrackingSummary = (request, vehicleTypeNameById) => {
   const { stageIndex, isCancelled, vehicleUnavailable } = deriveJourneyStage(request.orderRef);
 
-  /* Admin can edit a vehicle line's dates on the Order after the booking is
-     raised (e.g. updateAdminOrder) without ever touching this ClientRequest
-     — overlay those live dates onto the client's own copy so an admin edit
-     is reflected here instead of the value frozen at submission time. */
-  const vehicleTypes = applyOrderDateOverrides(request.vehicleTypes, request.orderRef);
+  /* Admin can edit a vehicle line's dates/model/quantity/pricing on the
+     Order after the booking is raised (e.g. updateAdminOrder) without ever
+     touching this ClientRequest — overlay those live fields onto the
+     client's own copy so an admin edit is reflected here instead of the
+     value frozen at submission time. */
+  const vehicleTypes = applyOrderFieldOverrides(request.vehicleTypes, request.orderRef, vehicleTypeNameById);
+  const totals = applyOrderTotalsOverride(request, request.orderRef);
   const onRoad = deriveOnRoadDay(request.orderRef, vehicleTypes);
 
   return {
     ...request,
     vehicleTypes,
+    ...totals,
     journeyStage: { index: stageIndex, key: JOURNEY_STEPS[stageIndex].key },
     /* Per-milestone status + completedAt (null when not yet reached/logged —
        see buildSteps' own "never fabricates history" contract) so the
@@ -998,9 +1006,15 @@ exports.getMyClientRequests = async (req, res) => {
     const plain = requests.map((request) => request.toObject());
     await attachVehicleTypeImages(plain);
 
+    /* One batched VehicleType lookup across every order in this list, not
+       one query per row — see resolveVehicleTypeNames' own comment. */
+    const vehicleTypeNameById = await resolveVehicleTypeNames(
+      plain.flatMap((request) => request.orderRef?.bookingItems || [])
+    );
+
     return res.status(200).json({
       success: true,
-      data: plain.map((request) => attachTrackingSummary(request)),
+      data: plain.map((request) => attachTrackingSummary(request, vehicleTypeNameById)),
       count: requests.length,
     });
   } catch (error) {
@@ -1049,10 +1063,13 @@ exports.getClientRequestById = async (req, res) => {
 
     const plain = request.toObject();
     await attachVehicleTypeImages([plain]);
+    const vehicleTypeNameById = await resolveVehicleTypeNames(
+      plain.orderRef?.bookingItems || []
+    );
 
     return res.status(200).json({
       success: true,
-      data: attachTrackingSummary(plain),
+      data: attachTrackingSummary(plain, vehicleTypeNameById),
     });
   } catch (error) {
     return res.status(500).json({
@@ -1107,10 +1124,11 @@ exports.getClientRequestTracking = async (req, res) => {
     const submittedAt = request.createdAt;
     const { stageIndex, isCancelled, vehicleUnavailable } = deriveJourneyStage(order);
 
-    /* See attachTrackingSummary — admin can edit a booked vehicle's dates on
+    /* See attachTrackingSummary — admin can edit a booked vehicle's fields on
        the Order after this request was submitted; the tracking console must
        reflect that live value, not the one frozen at submission. */
-    const vehicleTypes = applyOrderDateOverrides(request.vehicleTypes, order);
+    const vehicleTypeNameById = await resolveVehicleTypeNames(order?.bookingItems || []);
+    const vehicleTypes = applyOrderFieldOverrides(request.vehicleTypes, order, vehicleTypeNameById);
 
     const campaignStart = vehicleTypes?.[0]?.fromDate || null;
     const campaignEnd = vehicleTypes?.[0]?.toDate || null;
@@ -1595,6 +1613,19 @@ exports.deleteClientRequest = async (req, res) => {
         message: 'Client request not found'
       });
     }
+
+    /* Best-effort — the request is already gone from the DB either way; a
+       storage failure here must not turn into a 500 for a delete that
+       already succeeded. deleteAgencyPoDocument already knows whether the
+       PO document lives in Spaces or on local disk (document.storageType). */
+    await deleteAgencyPoDocument(deleted.agencyPODocument);
+    await deleteManyFromSpaces(
+      (deleted.vehicleTypes || []).flatMap((vehicle) => [
+        ...(vehicle.campaignImages || []),
+        ...(vehicle.campaignVideos || []),
+      ])
+    );
+
     res.status(200).json({
       success: true,
       message: 'Deleted successfully'
