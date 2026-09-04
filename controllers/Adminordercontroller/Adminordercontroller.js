@@ -4621,7 +4621,12 @@ exports.getDayByDayHistory = async (req, res) => {
         driverPhone: h.driverPhone,
         changedBy: h.changedBy,
         changedAt: h.changedAt,
-        comments: h.changedFields?.reason || "",
+        // The Update Driver endpoint stores the edit reason as its own
+        // top-level `reason` field, not inside `changedFields` — other
+        // event types (e.g. vehicle replacement) instead nest it as
+        // `changedFields.reason`. Check both so the Timeline's "Reason"
+        // line actually shows it for either shape.
+        comments: h.reason || h.changedFields?.reason || "",
       };
       driverChangeHistory.push({
         ...base,
@@ -4670,6 +4675,11 @@ exports.getDayByDayHistory = async (req, res) => {
     }
 
     // ── 2.2 Issue / Escalation History ──
+    // One entry per issue — its full lifecycle (report + resolution, when
+    // resolved) grouped into a single card, always bucketed under the day
+    // it was REPORTED (not split into separate "Reported"/"Resolved" day
+    // entries — that made it impossible to tell which resolution belonged
+    // to which issue when several were open on the same day).
     const issueHistory = [];
     for (const iss of onRoadIssues) {
       issueHistory.push({
@@ -4681,31 +4691,13 @@ exports.getDayByDayHistory = async (req, res) => {
         issueDescription: iss.issueDescription,
         issuePhoto: iss.issuePhoto,
         status: iss.status,
-        resolveDescription: iss.resolveDescription,
-        resolvePhoto: iss.resolvePhoto,
+        resolveDescription: iss.status === "resolved" ? iss.resolveDescription : "",
+        resolvePhoto: iss.status === "resolved" ? iss.resolvePhoto : "",
         createdBy: iss.reportedBy,
         createdAt: iss.reportedAt,
-        resolvedBy: iss.resolvedBy,
-        resolvedAt: iss.resolvedAt,
+        resolvedBy: iss.status === "resolved" ? iss.resolvedBy : "",
+        resolvedAt: iss.status === "resolved" ? iss.resolvedAt : "",
       });
-      if (iss.status === "resolved" && iss.resolvedAt && dateKey(iss.resolvedAt) !== dateKey(iss.reportedAt)) {
-        issueHistory.push({
-          day: dateKey(iss.resolvedAt),
-          vehicleIndex: iss.vehicleIndex,
-          entryId: iss.entryId ? String(iss.entryId) : null,
-          vehicleRegistrationNumber: iss.vehicleRegNo,
-          driverName: iss.driverName,
-          issueDescription: iss.issueDescription,
-          issuePhoto: iss.issuePhoto,
-          status: "resolved-today",
-          resolveDescription: iss.resolveDescription,
-          resolvePhoto: iss.resolvePhoto,
-          createdBy: iss.reportedBy,
-          createdAt: iss.reportedAt,
-          resolvedBy: iss.resolvedBy,
-          resolvedAt: iss.resolvedAt,
-        });
-      }
     }
 
     // ── 2.3 Extra KM History ──
