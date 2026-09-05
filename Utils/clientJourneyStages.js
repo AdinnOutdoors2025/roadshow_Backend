@@ -237,9 +237,30 @@ function deriveOnRoadDay(order, vehicleTypes) {
  * vehicleTypes copy, matched by array index — bookingItems is built by
  * iterating vehicleTypes in that same order (see createOrderForClientRequest),
  * so index-matching is safe. A vehicleTypes[i] with no matching bookingItems[i]
- * (admin removed that line) keeps its last-known frozen values untouched,
- * same as an order with no bookingItems at all — never crashes, never nulls
- * out real data.
+ * (admin removed that line) is DROPPED from the result — the customer should
+ * see it gone, not a stale ghost entry for a vehicle no longer on the order.
+ * An order with no bookingItems AT ALL is a different case (no order info to
+ * overlay from yet, e.g. a request not converted to an order) and is handled
+ * separately below by returning the client's own list untouched.
+ *
+ * The reverse case — admin ADDS a whole new vehicle line to the Order that
+ * the client never submitted (e.g. a second vehicle type on an existing
+ * booking) — is handled below the main map: a bookingItems entry beyond the
+ * client's original array length has no vehicleTypes[i] to overlay onto, so
+ * it's synthesized as a new line instead. Without this, that line stayed
+ * invisible everywhere reading vehicleTypes (My Bookings' vehicle list,
+ * live-vehicle cards) even though the order total already accounted for it
+ * (applyOrderTotalsOverride copies Order.grandTotal directly, independent of
+ * vehicleTypes' own length) — the exact split reported: total looked right,
+ * the added vehicle didn't show up.
+ *
+ * A synthesized line only has what the Order actually carries: pricing,
+ * dates, model. campaignLocation/campaignType/campaignName are inherited
+ * from the client's first submitted line (a newly added vehicle almost
+ * always belongs to the same campaign, not a separate one); promoter
+ * details and uploaded media have no Order-side or inheritable source and
+ * are left at their schema defaults — the client never provided them for a
+ * line they didn't submit.
  *
  * Once an order exists, admin can edit it independently (e.g. updateAdminOrder)
  * without ever touching the originating ClientRequest — those edits must be
@@ -272,13 +293,21 @@ function applyOrderFieldOverrides(vehicleTypes, order, vehicleTypeNameById) {
   const bookingItems = order?.bookingItems || [];
   if (!bookingItems.length) return vehicleTypes || [];
 
-  return (vehicleTypes || []).map((vehicle, index) => {
-    const item = bookingItems[index];
-    if (!item) return vehicle;
+  const existing = vehicleTypes || [];
 
-    const resolvedVehicleName = item.vehicleType
-      ? vehicleTypeNameById?.get(String(item.vehicleType))
-      : null;
+  const resolveVehicleName = (item) =>
+    (item.vehicleType && vehicleTypeNameById?.get(String(item.vehicleType))) ||
+    null;
+
+  const overlaid = existing.flatMap((vehicle, index) => {
+    const item = bookingItems[index];
+    /* Admin removed this line entirely — drop it from the client-facing
+       view too rather than leaving a stale ghost entry the customer never
+       sees reflected as removed. Only reachable when the order DOES have
+       bookingItems (the early return above already handles "no order info
+       at all", which must keep showing the client's own submitted list
+       untouched — this is specifically "order exists but is now shorter"). */
+    if (!item) return [];
 
     return {
       ...vehicle,
@@ -286,7 +315,7 @@ function applyOrderFieldOverrides(vehicleTypes, order, vehicleTypeNameById) {
       toDate: item.toDate ?? vehicle.toDate,
       totalDays: item.totalDays ?? vehicle.totalDays,
       vehicleModel: item.vehicleModel ?? vehicle.vehicleModel,
-      vehicleName: resolvedVehicleName ?? vehicle.vehicleName,
+      vehicleName: resolveVehicleName(item) ?? vehicle.vehicleName,
       quantity: item.quantity ?? vehicle.quantity,
       pricePerDay: item.perDayRentalCost ?? vehicle.pricePerDay,
       lineTotal: item.totalAmount ?? vehicle.lineTotal,
@@ -297,6 +326,44 @@ function applyOrderFieldOverrides(vehicleTypes, order, vehicleTypeNameById) {
       promoterChargePerDay: item.promoterChargePerDay ?? vehicle.promoterChargePerDay,
     };
   });
+
+  const template = existing[0];
+
+  const synthesized = bookingItems.slice(existing.length).map((item) => ({
+    vehicleId: "",
+    vehicleType: null,
+    vehicleName: resolveVehicleName(item) || item.vehicleModel || "",
+    packageId: item.packageId ?? null,
+    vehicleModel: item.vehicleModel ?? "",
+    quantity: item.quantity ?? 1,
+    campaignLocation: template?.campaignLocation ?? "",
+    fromDate: item.fromDate ?? null,
+    toDate: item.toDate ?? null,
+    totalDays: item.totalDays ?? 0,
+    pricePerDay: item.perDayRentalCost ?? 0,
+    lineTotal: item.totalAmount ?? 0,
+    campaignType: template?.campaignType ?? "",
+    otherCampaignType: template?.otherCampaignType ?? "",
+    campaignName: template?.campaignName ?? "",
+    needPromoter: false,
+    promoterType: "",
+    otherPromoterType: "",
+    promoterGender: "",
+    promoterLanguage: [],
+    promoterQuantity: 0,
+    promoterFromDate: null,
+    promoterToDate: null,
+    promoterDays: 0,
+    promoterChargePerDay: item.promoterChargePerDay ?? 0,
+    promoterCost: item.promoterCost ?? 0,
+    rentalCost: item.rentalCost ?? 0,
+    rtoCost: item.rtoCost ?? 0,
+    brandingCost: item.brandingCost ?? 0,
+    campaignImages: [],
+    campaignVideos: [],
+  }));
+
+  return [...overlaid, ...synthesized];
 }
 
 /**
