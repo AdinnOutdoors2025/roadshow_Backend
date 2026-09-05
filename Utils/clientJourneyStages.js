@@ -18,6 +18,16 @@ const JOURNEY_STEPS = [
 
 const CANCELLED_STEP = { key: "cancelled", label: "Cancelled" };
 
+/* Booking-line + order-total fields needed by applyOrderFieldOverrides /
+   applyOrderTotalsOverride below — shared by both selects so the overlay
+   never silently no-ops on one read path but not the other. */
+const OVERLAY_ORDER_FIELDS =
+  "bookingItems.fromDate bookingItems.toDate bookingItems.totalDays " +
+  "bookingItems.vehicleType bookingItems.vehicleModel bookingItems.quantity bookingItems.perDayRentalCost " +
+  "bookingItems.rentalCost bookingItems.rtoCost bookingItems.brandingCost " +
+  "bookingItems.promoterCost bookingItems.promoterChargePerDay bookingItems.totalAmount " +
+  "grandGst grandTotal";
+
 /* Fields safe to pull from Order for the lightweight list view (booking row).
    Includes the same stage + timestamp only log fields TRACKING_ORDER_SELECT
    allows (never movedBy/handlerName/notes) so buildSteps() can attach a real
@@ -25,7 +35,7 @@ const CANCELLED_STEP = { key: "cancelled", label: "Cancelled" };
 const LIST_ORDER_SELECT =
   "salesPipelineStatus pipelineStatus onRoadExecutionArray.unavailableStatus onRoadExecutionArray.entryStatus " +
   "salesPipelineLogs.toStage salesPipelineLogs.movedAt pipelineLogs.toStage pipelineLogs.movedAt " +
-  "bookingItems.fromDate bookingItems.toDate bookingItems.totalDays";
+  OVERLAY_ORDER_FIELDS;
 
 /* Adds history-log fields (stage + timestamp only — never movedBy/handlerName/notes) and the
    day-wise campaign metrics (never driver contact/remarks/billing fields) for the tracking console */
@@ -35,7 +45,7 @@ const TRACKING_ORDER_SELECT =
   "dailyHoursLogArray.day dailyHoursLogArray.distanceCoveredKm dailyHoursLogArray.activationsCount " +
   "dailyHoursLogArray.leadsCollected dailyHoursLogArray.peopleEngaged dailyHoursLogArray.routeNote " +
   "dailyHoursLogArray.photos dailyHoursLogArray.isAbsentDay " +
-  "bookingItems.fromDate bookingItems.toDate bookingItems.totalDays";
+  OVERLAY_ORDER_FIELDS;
 
 /* Fields safe to select for the lightweight, frequently-polled live-location
    lookup — just enough to resolve which vehicles belong to this order.
@@ -223,19 +233,42 @@ function deriveOnRoadDay(order, vehicleTypes) {
 }
 
 /**
- * Overlays booking-line date fields from the linked Order onto the
- * client's own vehicleTypes copy, matched by array index — bookingItems is
- * built by iterating vehicleTypes in that same order (see
- * createOrderForClientRequest), so index-matching is safe.
+ * Overlays booking-line fields from the linked Order onto the client's own
+ * vehicleTypes copy, matched by array index — bookingItems is built by
+ * iterating vehicleTypes in that same order (see createOrderForClientRequest),
+ * so index-matching is safe. A vehicleTypes[i] with no matching bookingItems[i]
+ * (admin removed that line) keeps its last-known frozen values untouched,
+ * same as an order with no bookingItems at all — never crashes, never nulls
+ * out real data.
  *
- * Once an order exists, admin can edit its dates independently (e.g.
- * updateAdminOrder) without ever touching the originating ClientRequest —
- * those edits must be what the customer sees, not the copy frozen at
- * submission time. Only fromDate/toDate/totalDays are overlaid; everything
- * else on the line (media, campaign details, promoter info) still comes
- * from the client's own request.
+ * Once an order exists, admin can edit it independently (e.g. updateAdminOrder)
+ * without ever touching the originating ClientRequest — those edits must be
+ * what the customer sees, not the copy frozen at submission time. Everything
+ * overlaid here has a live counterpart on the Order; things that don't
+ * (media, campaign details, promoter contact info) still come from the
+ * client's own request.
+ *
+ * vehicleType is deliberately NOT overlaid as a field itself: on ClientRequest
+ * it's a populated {_id, name} object (ref VehicleType), on Order it's a raw
+ * stringified ObjectId — overlaying it directly would replace the populated
+ * object the frontend reads (vehicle.vehicleType?.name) with a bare id string.
+ * It IS used, indirectly, to resolve vehicleName — see below.
+ *
+ * vehicleName is overlaid from the Order line's VehicleType typeName (via
+ * vehicleTypeNameById, a Map<string typeId, string typeName> the caller
+ * builds with resolveVehicleTypeNames() before calling this), NOT from
+ * Order's own vehicleModel field. Package.vehicleModel is unreliable — the
+ * admin Package Management form's "Vehicle Model" input is currently
+ * disabled/commented out, so every package's vehicleModel is stuck at the
+ * literal placeholder "Non-Customizable Vehicle" regardless of the real
+ * vehicle. VehicleType.typeName (e.g. "2 Sided", "3 Sided") is the real,
+ * human-readable identifier admin actually picks when editing an order, and
+ * is the same source getClientRequestLiveLocation already uses for this.
+ *
+ * lineTotal maps from Order's totalAmount, not subtotal: subtotal is
+ * pre-discount/pre-extras, totalAmount is the final saved line charge.
  */
-function applyOrderDateOverrides(vehicleTypes, order) {
+function applyOrderFieldOverrides(vehicleTypes, order, vehicleTypeNameById) {
   const bookingItems = order?.bookingItems || [];
   if (!bookingItems.length) return vehicleTypes || [];
 
@@ -243,13 +276,58 @@ function applyOrderDateOverrides(vehicleTypes, order) {
     const item = bookingItems[index];
     if (!item) return vehicle;
 
+    const resolvedVehicleName = item.vehicleType
+      ? vehicleTypeNameById?.get(String(item.vehicleType))
+      : null;
+
     return {
       ...vehicle,
       fromDate: item.fromDate ?? vehicle.fromDate,
       toDate: item.toDate ?? vehicle.toDate,
       totalDays: item.totalDays ?? vehicle.totalDays,
+      vehicleModel: item.vehicleModel ?? vehicle.vehicleModel,
+      vehicleName: resolvedVehicleName ?? vehicle.vehicleName,
+      quantity: item.quantity ?? vehicle.quantity,
+      pricePerDay: item.perDayRentalCost ?? vehicle.pricePerDay,
+      lineTotal: item.totalAmount ?? vehicle.lineTotal,
+      rentalCost: item.rentalCost ?? vehicle.rentalCost,
+      rtoCost: item.rtoCost ?? vehicle.rtoCost,
+      brandingCost: item.brandingCost ?? vehicle.brandingCost,
+      promoterCost: item.promoterCost ?? vehicle.promoterCost,
+      promoterChargePerDay: item.promoterChargePerDay ?? vehicle.promoterChargePerDay,
     };
   });
+}
+
+/**
+ * Overlays order-level pricing totals onto the client's own ClientRequest
+ * totals, sourced from the same grandTotal/grandGst that updateAdminOrder
+ * already recalculates and saves — no GST-rate logic is duplicated here.
+ * cgstAmount/sgstAmount/igstAmount have no live Order-level equivalent (they'd
+ * need re-deriving the customer's GST state split) and are intentionally left
+ * un-synced; estimatedTotal/gstAmount/subtotal (the figures that actually
+ * drive what the customer is shown as owing) are what this corrects.
+ */
+function applyOrderTotalsOverride(clientRequest, order) {
+  if (!order?.bookingItems?.length) {
+    return {
+      subtotal: clientRequest?.subtotal,
+      gstAmount: clientRequest?.gstAmount,
+      estimatedTotal: clientRequest?.estimatedTotal,
+    };
+  }
+
+  const estimatedTotal = order.grandTotal ?? clientRequest?.estimatedTotal;
+  const gstAmount = order.grandGst ?? clientRequest?.gstAmount;
+
+  return {
+    subtotal:
+      typeof estimatedTotal === "number" && typeof gstAmount === "number"
+        ? estimatedTotal - gstAmount
+        : clientRequest?.subtotal,
+    gstAmount,
+    estimatedTotal,
+  };
 }
 
 function toDateKey(value) {
@@ -388,7 +466,8 @@ module.exports = {
   TRACKING_ORDER_SELECT,
   LIVE_LOCATION_ORDER_SELECT,
   deriveJourneyStage,
-  applyOrderDateOverrides,
+  applyOrderFieldOverrides,
+  applyOrderTotalsOverride,
   buildSteps,
   buildActivity,
   deriveOnRoadDay,

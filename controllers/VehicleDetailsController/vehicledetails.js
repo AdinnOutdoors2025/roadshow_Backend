@@ -1607,6 +1607,7 @@ const mongoose = require("mongoose");
 const path = require("path");
 const fs = require("fs");
 const Order = require("../../Models/AdminorderModel/Adminorder");
+const { deleteManyFromSpaces } = require("../../Utils/deleteFromSpaces");
 const RELEASE_TRIGGER_STATUSES = ["Unavailable", "Maintenance", "Damaged"];
 
 // Generate unique vehicle ID (ddmmyyyy001 format)
@@ -2946,6 +2947,18 @@ const deleteVehicle = async (req, res) => {
         message: "Vehicle not found",
       });
     }
+
+    /* Best-effort — the vehicle group is already gone from the DB either
+       way; a Spaces failure here must not turn into a 500 for a delete that
+       already succeeded. */
+    await deleteManyFromSpaces([
+      vehicle.mediaFiles?.frontViewImage,
+      vehicle.mediaFiles?.leftSideImage,
+      vehicle.mediaFiles?.rightSideImage,
+      vehicle.mediaFiles?.rearViewImage,
+      vehicle.mediaFiles?.interiorImage,
+      vehicle.mediaFiles?.demoVideo,
+    ]);
 
     res.status(200).json({
       success: true,
