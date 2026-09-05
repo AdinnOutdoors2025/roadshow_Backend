@@ -41,7 +41,7 @@ const {
   deleteAgencyPoDocument,
 } = require("../../Utils/agencyPoDocumentUpload");
 const { resolveVehicleSlots } = require("../../Utils/vehicleAssignmentResolver");
-const { deleteManyFromSpaces } = require("../../Utils/deleteFromSpaces");
+const { deleteManyFromSpaces, collectSpaceUrls } = require("../../Utils/deleteFromSpaces");
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -1614,17 +1614,30 @@ exports.deleteClientRequest = async (req, res) => {
       });
     }
 
-    /* Best-effort — the request is already gone from the DB either way; a
+    /* The linked Order (if any) belongs entirely to this booking — it only
+       ever exists because this request was raised into one (see
+       createOrderForClientRequest) and nothing else references it. Deleting
+       the request deletes the whole booking, Order included, so nothing is
+       left half-referencing a request that no longer exists. */
+    const deletedOrder = deleted.orderRef
+      ? await Order.findByIdAndDelete(deleted.orderRef)
+      : null;
+
+    /* Best-effort — the records are already gone from the DB either way; a
        storage failure here must not turn into a 500 for a delete that
        already succeeded. deleteAgencyPoDocument already knows whether the
-       PO document lives in Spaces or on local disk (document.storageType). */
+       PO document lives in Spaces or on local disk (document.storageType).
+       collectSpaceUrls sweeps every file field on the Order itself (booking
+       media, gatepass/issue/resolve photos, PO document snapshots/history,
+       the booking-summary PDF, ...) without needing each one hand-listed. */
     await deleteAgencyPoDocument(deleted.agencyPODocument);
-    await deleteManyFromSpaces(
-      (deleted.vehicleTypes || []).flatMap((vehicle) => [
+    await deleteManyFromSpaces([
+      ...(deleted.vehicleTypes || []).flatMap((vehicle) => [
         ...(vehicle.campaignImages || []),
         ...(vehicle.campaignVideos || []),
-      ])
-    );
+      ]),
+      ...collectSpaceUrls(deletedOrder),
+    ]);
 
     res.status(200).json({
       success: true,

@@ -57,5 +57,61 @@ const deleteManyFromSpaces = async (fileUrls) => {
   );
 };
 
+const isSpaceUrl = (value) => {
+  const bucketBase = process.env.DO_SPACES_CDN_BASE;
+  return typeof value === 'string' && !!bucketBase && value.startsWith(bucketBase);
+};
+
+/*
+ * Recursively walks any value (a Mongoose document, a plain object/array,
+ * anything) and collects every string that points at this Space bucket.
+ * A record like Order has 15+ file-bearing fields scattered across deeply
+ * nested sub-schemas and arrays (booking media, gatepass/issue/resolve
+ * photos, PO document snapshots/history, the booking-summary PDF, ...) —
+ * hand-listing every path is fragile and silently goes stale the moment a
+ * new one is added later. Matching on the URL shape itself instead stays
+ * correct as the schema grows, at the cost of being unable to tell "this
+ * was a file field" from "this string coincidentally looks like one" — in
+ * practice nothing but an actual Space upload URL ever starts with
+ * DO_SPACES_CDN_BASE, so that's not a real risk in this codebase.
+ */
+const collectSpaceUrls = (value, seen = new Set()) => {
+  if (value == null) return [];
+
+  if (typeof value === 'string') {
+    return isSpaceUrl(value) ? [value] : [];
+  }
+
+  if (typeof value !== 'object') return [];
+
+  /* Normalizes Mongoose documents/subdocuments, ObjectIds, Dates, etc. to
+     their plain JSON form before walking — a raw Mongoose document's own
+     enumerable properties include internal bookkeeping (_doc, $__, ...)
+     that isn't worth (and isn't safe to) walk directly. An ObjectId/Date's
+     toJSON() collapses it to a plain string, which the check above already
+     handles on the next call. */
+  if (typeof value.toJSON === 'function') {
+    value = value.toJSON();
+  }
+
+  if (typeof value === 'string') {
+    return isSpaceUrl(value) ? [value] : [];
+  }
+
+  if (typeof value !== 'object' || value === null) return [];
+
+  // Guards against circular references (Mongoose documents can have them
+  // via populated back-references) rather than actually expecting any here.
+  if (seen.has(value)) return [];
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectSpaceUrls(item, seen));
+  }
+
+  return Object.values(value).flatMap((item) => collectSpaceUrls(item, seen));
+};
+
 module.exports = deleteFromSpaces;
 module.exports.deleteManyFromSpaces = deleteManyFromSpaces;
+module.exports.collectSpaceUrls = collectSpaceUrls;
