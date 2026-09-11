@@ -207,7 +207,12 @@ function buildActivity(order, submittedAt) {
   return buildSteps(order, submittedAt)
     .filter((s) => s.status === "done" || s.status === "current")
     .map((s) => ({ label: ACTIVITY_LABEL[s.key] || s.label, at: s.completedAt }))
-    .filter((entry) => entry.at);
+    .filter((entry) => entry.at)
+    // Milestone timestamps come from independent log sources per stage
+    // (salesPipelineLogs vs pipelineLogs) and can be logged out of sync
+    // with each other, so the fixed funnel order above isn't guaranteed to
+    // match actual chronology — sort by the real timestamp before display.
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 }
 
 /**
