@@ -14,6 +14,8 @@ const VehicleMaster = require("../../Models/vehicleDetails");
 const VehicleType = require("../../Models/VehicleTypeSchema");
 const { checkVehicleAvailability } = require("../../Utils/vehicleAvailability");
 const { fetchVamosysApiKey, fetchAllVehicleLocations } = require("../../Utils/vamosysClient");
+const { deleteAgencyPoDocument } = require("../../Utils/agencyPoDocumentUpload");
+const { deleteManyFromSpaces, collectSpaceUrls } = require("../../Utils/deleteFromSpaces");
 
 
 async function generateAdminOrderId() {
@@ -1027,6 +1029,44 @@ exports.getOrderByMongoId = async (req, res) => {
     const order = await Order.findById(req.params.id);
     if (!order) return errorResponse(res, "Order not found", null, 404);
     return successResponse(res, "Order fetched successfully", { order });
+  } catch (error) {
+    return errorResponse(res, error.message);
+  }
+};
+
+/* Only allowed before real operational work has started on an order —
+   past this point (onRoad, invoicing, closedWon, ...) the order should be
+   closed (closedLost/closedWon), not deleted, so its audit trail survives. */
+const ORDER_DELETE_ALLOWED_STAGES = ["todo", "projectCodeCreation"];
+
+exports.deleteAdminOrder = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return errorResponse(res, "Order not found", null, 404);
+
+    if (!ORDER_DELETE_ALLOWED_STAGES.includes(order.pipelineStatus)) {
+      return errorResponse(
+        res,
+        `Cannot delete an order once it has moved past ${ORDER_DELETE_ALLOWED_STAGES.join("/")} (current stage: ${order.pipelineStatus}). Close it instead.`,
+        null,
+        400
+      );
+    }
+
+    const deleted = await Order.findByIdAndDelete(req.params.id);
+
+    /* Best-effort — the order is already gone from the DB either way; a
+       storage failure here must not turn into a 500 for a delete that
+       already succeeded. deleteAgencyPoDocument already knows whether the
+       PO document lives in Spaces or on local disk (document.storageType).
+       collectSpaceUrls sweeps every other file field on the order (booking
+       media, gatepass/issue/resolve photos, PO document snapshots/history,
+       the booking-summary PDF, ...) without needing each one hand-listed —
+       same pattern as ClientRequestController's deleteClientRequest. */
+    await deleteAgencyPoDocument(deleted.agencyPODocument);
+    await deleteManyFromSpaces(collectSpaceUrls(deleted));
+
+    return successResponse(res, "Order deleted successfully", null, 200);
   } catch (error) {
     return errorResponse(res, error.message);
   }

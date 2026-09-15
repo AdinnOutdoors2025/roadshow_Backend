@@ -58,8 +58,14 @@ if (STORAGE_TYPE === "space") {
       const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
       const ext = path.extname(file.originalname);
       const filename = `sales-${file.fieldname}-${uniqueSuffix}${ext}`;
-    
-      cb(null, `sales-documents/${filename}`);
+
+      /* Nested under Roadshows/ to sit alongside Roadshows/admin-orders,
+         Roadshows/admin-pipeline, Roadshows/bookingsummary and
+         Roadshows/client_po_document instead of a top-level bucket prefix.
+         Existing objects already uploaded under the old "sales-documents/"
+         prefix keep working — their stored URL doesn't change — only new
+         uploads use this path. */
+      cb(null, `Roadshows/sales-documents/${filename}`);
     },
   });
 } else {

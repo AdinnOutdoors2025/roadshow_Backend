@@ -146,14 +146,20 @@ if (STORAGE_TYPE === "space") {
     },
     key: function (req, file, cb) {
       const isVideo = file.mimetype.startsWith("video/");
-      let folder = "vehicles";
+      /* Nested under Roadshows/ to sit alongside Roadshows/bookingsummary and
+         Roadshows/client_po_document (see Utils/bookingSummaryPdfRenderer.js
+         and Utils/agencyPoDocumentUpload.js) instead of a top-level bucket
+         prefix. Existing objects already uploaded under the old "vehicles/"
+         prefix keep working — their stored URL doesn't change — only new
+         uploads use this path. */
+      let folder = "Roadshows/roadshow_vehicles_image";
 
-      if (file.fieldname === "demoVideo") folder = "vehicles/videos";
-      else if (file.fieldname === "frontViewImage") folder = "vehicles/front";
-      else if (file.fieldname === "leftSideImage") folder = "vehicles/left";
-      else if (file.fieldname === "rightSideImage") folder = "vehicles/right";
-      else if (file.fieldname === "rearViewImage") folder = "vehicles/rear";
-      else if (file.fieldname === "interiorImage") folder = "vehicles/interior";
+      if (file.fieldname === "demoVideo") folder = "Roadshows/roadshow_vehicles_image/videos";
+      else if (file.fieldname === "frontViewImage") folder = "Roadshows/roadshow_vehicles_image/front";
+      else if (file.fieldname === "leftSideImage") folder = "Roadshows/roadshow_vehicles_image/left";
+      else if (file.fieldname === "rightSideImage") folder = "Roadshows/roadshow_vehicles_image/right";
+      else if (file.fieldname === "rearViewImage") folder = "Roadshows/roadshow_vehicles_image/rear";
+      else if (file.fieldname === "interiorImage") folder = "Roadshows/roadshow_vehicles_image/interior";
 
       const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
       const ext = path.extname(file.originalname);

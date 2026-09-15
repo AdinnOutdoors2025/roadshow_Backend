@@ -66,7 +66,14 @@ if (STORAGE_TYPE === "space") {
       const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
       const ext = path.extname(file.originalname);
       const filename = `admin-${file.fieldname}-${uniqueSuffix}${ext}`;
-      cb(null, `admin-pipeline/${filename}`);
+
+      /* Nested under Roadshows/ to sit alongside Roadshows/admin-orders,
+         Roadshows/sales-documents, Roadshows/bookingsummary and
+         Roadshows/client_po_document instead of a top-level bucket prefix.
+         Existing objects already uploaded under the old "admin-pipeline/"
+         prefix keep working — their stored URL doesn't change — only new
+         uploads use this path. */
+      cb(null, `Roadshows/admin-pipeline/${filename}`);
     },
   });
 } else {
@@ -171,6 +178,7 @@ router.get("/pipeline/project-codes", protect, ctrl.getProjectCodeOrders);
 
 router.get("/orders", protect, ctrl.getAllOrders);
 router.get("/orders/by-id/:id", protect, ctrl.getOrderByMongoId);
+router.delete("/orders/by-id/:id", protect, ctrl.deleteAdminOrder);
 router.get("/internal/orders/:id/booking-summary-data", internalOnly, ctrl.getBookingSummaryPdfData);
 router.get("/orders/:orderId", protect, ctrl.getOrderById);
 router.post("/orders/create", adminOrderUpload, ctrl.createAdminOrder);
