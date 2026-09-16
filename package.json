@@ -2,7 +2,7 @@
   "scripts": {
     "start": "node VehicleMain.js",
     "dev": "nodemon VehicleMain.js",
-    "build": "ls -la && ls -la Routes/ || echo 'Routes folder not found' && npm install",
+    "build": "ls -la && ls -la Routes/ || echo 'Routes folder not found' && npm install && npx puppeteer browsers install chrome",
     "postinstall": "npx puppeteer browsers install chrome"
   },
   "dependencies": {
