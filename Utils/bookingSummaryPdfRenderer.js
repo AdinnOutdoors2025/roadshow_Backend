@@ -3,8 +3,24 @@ require("dotenv").config();
 const puppeteer = require("puppeteer");
 const uploadToSpaces = require("./uploadToSpaces");
 
-const frontendBaseUrl = () =>
-  (process.env.FRONTEND_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
+// Mirrors Utils/shortUrl.js's buildRoadshowQuotationLongUrl — fail loudly in
+// production instead of silently falling back to localhost:3000, which
+// Puppeteer cannot reach from the deployed server and previously made this
+// step fail silently (caught by sendCampaignRequestMail's try/catch), so the
+// campaign mail went out with no booking summary PDF attached and no visible
+// error beyond a console.error buried in the logs.
+const frontendBaseUrl = () => {
+  const url = process.env.FRONTEND_BASE_URL || "";
+
+  if (!url) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("FRONTEND_BASE_URL is missing in the production environment");
+    }
+    return "http://localhost:3000";
+  }
+
+  return url.replace(/\/$/, "");
+};
 
 /**
  * Renders the real BookingSummaryDocument.tsx template for `order` by
