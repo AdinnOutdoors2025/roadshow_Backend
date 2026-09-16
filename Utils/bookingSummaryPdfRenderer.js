@@ -10,11 +10,14 @@ const uploadToSpaces = require("./uploadToSpaces");
 // campaign mail went out with no booking summary PDF attached and no visible
 // error beyond a console.error buried in the logs.
 const frontendBaseUrl = () => {
-  const url = process.env.FRONTEND_BASE_URL || "";
+  const isProduction = process.env.NODE_ENV === "production";
+  const url = isProduction
+    ? process.env.FRONTEND_BASE_URL_LIVE || process.env.FRONTEND_BASE_URL || ""
+    : process.env.FRONTEND_BASE_URL || "";
 
   if (!url) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("FRONTEND_BASE_URL is missing in the production environment");
+    if (isProduction) {
+      throw new Error("FRONTEND_BASE_URL_LIVE/FRONTEND_BASE_URL is missing in the production environment");
     }
     return "http://localhost:3000";
   }

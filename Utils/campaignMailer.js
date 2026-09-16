@@ -32,8 +32,14 @@ const fmtDate = (d) => {
   return new Date(d).toISOString().split("T")[0]; // YYYY-MM-DD
 };
 
-const frontendBaseUrl = () =>
-  (process.env.FRONTEND_BASE_URL || "").replace(/\/$/, "");
+const frontendBaseUrl = () => {
+  const url =
+    process.env.NODE_ENV === "production"
+      ? process.env.FRONTEND_BASE_URL_LIVE || process.env.FRONTEND_BASE_URL || ""
+      : process.env.FRONTEND_BASE_URL || "";
+
+  return url.replace(/\/$/, "");
+};
 
 /* This mailer's own base URL, for turning a locally-stored PO document's
    relative "/uploads/..." path into a link the mail recipient can actually

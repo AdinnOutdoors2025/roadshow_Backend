@@ -19,10 +19,13 @@ const normalizeQuotationNumber = (quotationNumber = "") => {
 };
 
 export const buildRoadshowQuotationLongUrl = (quotationNumber = "") => {
-  const frontendBaseUrl = process.env.FRONTEND_BASE_URL;
+  const frontendBaseUrl =
+    process.env.NODE_ENV === "production"
+      ? process.env.FRONTEND_BASE_URL_LIVE || process.env.FRONTEND_BASE_URL
+      : process.env.FRONTEND_BASE_URL;
 
   if (!frontendBaseUrl) {
-    throw new Error("FRONTEND_BASE_URL is missing in .env");
+    throw new Error("FRONTEND_BASE_URL_LIVE/FRONTEND_BASE_URL is missing in .env");
   }
 
   const normalizedQuotationNumber = normalizeQuotationNumber(quotationNumber);

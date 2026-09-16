@@ -216,7 +216,9 @@ const normalizeEmailCsv = (value = "") =>
     .filter(Boolean);
 
 const FRONTEND_BASE_URL =
-  process.env.FRONTEND_BASE_URL ||
+  (process.env.NODE_ENV === "production"
+    ? process.env.FRONTEND_BASE_URL_LIVE || process.env.FRONTEND_BASE_URL
+    : process.env.FRONTEND_BASE_URL) ||
   "http://localhost:3000";
 
 const buildFrontendQuotationUrl = (quotationNumber = "") => {

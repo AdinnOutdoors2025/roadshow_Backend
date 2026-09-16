@@ -114,13 +114,13 @@ if (process.env.STORAGE_TYPE !== "space") {
 //   allowedHeaders: ['Content-Type', 'Authorization','X-Requested-With']
 // }));
 
-// Allow all origins for development
-app.use(cors({
-  origin: true,  // This allows any origin
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}));
+// // Allow all origins for development
+// app.use(cors({
+//   origin: true,  // This allows any origin
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+// }));
 
 const allowedOrigins = [
   "http://localhost:3000",
@@ -383,7 +383,7 @@ app.listen(PORT, () => {
 
 
 
-app.use(cors());
+// app.use(cors());
 
 
 
