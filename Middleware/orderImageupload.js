@@ -37,7 +37,13 @@ if (STORAGE_TYPE === "space") {
       const ext = path.extname(file.originalname);
       const name = path.basename(sanitizeFilename(file.originalname), ext);
       const filename = `${file.fieldname}-${uniqueSuffix}-${name}${ext}`;
-      cb(null, `admin-orders/${filename}`);
+      /* Nested under Roadshows/ to sit alongside Roadshows/bookingsummary and
+         Roadshows/client_po_document (see Utils/bookingSummaryPdfRenderer.js
+         and Utils/agencyPoDocumentUpload.js) instead of a top-level bucket
+         prefix. Existing objects already uploaded under the old
+         "admin-orders/" prefix keep working — their stored URL doesn't
+         change — only new uploads use this path. */
+      cb(null, `Roadshows/admin-orders/${filename}`);
     },
   });
 } else {

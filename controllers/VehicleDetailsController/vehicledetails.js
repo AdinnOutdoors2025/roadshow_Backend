@@ -2148,12 +2148,24 @@ const updateVehicleStep = async (req, res) => {
         message: "Invalid ID",
       });
     }
+    /* Fetched up front so replaced/removed media fields can be diffed
+       against what's already stored — needed to know which old Spaces
+       files to clean up once the update succeeds (see mediaOldUrlsToDelete
+       below). */
+    const existingVehicleForMedia = await Vehicle.findById(id);
+    if (!existingVehicleForMedia) {
+      return res.status(404).json({
+        success: false,
+        message: "Vehicle not found",
+      });
+    }
 
     const stepData = {
       ...incomingStepData,
     };
 
     const setPayload = {};
+    const mediaOldUrlsToDelete = [];
 
     if (stepData.basicInfo) {
       stepData.basicInfo = await buildSyncedBasicInfo(
@@ -2199,12 +2211,17 @@ const updateVehicleStep = async (req, res) => {
           ];
 
           mediaFields.forEach((field) => {
-            if (
-              typeof value[field] === "string" &&
-              value[field] !== ""
-            ) {
-              setPayload[`mediaFiles.${field}`] =
-                value[field];
+            if (typeof value[field] === "string") {
+              const newUrl = value[field];
+              const oldUrl = existingVehicleForMedia.mediaFiles?.[field] || "";
+
+              // Covers both "replaced with a different URL" and "explicitly
+              // cleared to empty" (a removed image) — previously an empty
+              // string was skipped entirely, so a removal never persisted.
+              if (newUrl !== oldUrl) {
+                setPayload[`mediaFiles.${field}`] = newUrl;
+                if (oldUrl) mediaOldUrlsToDelete.push(oldUrl);
+              }
             }
           });
         }
@@ -2231,9 +2248,11 @@ const updateVehicleStep = async (req, res) => {
 
       mediaFields.forEach((field) => {
         if (req.files[field]?.[0]) {
-          setPayload[`mediaFiles.${field}`] = getFileUrl(
-            req.files[field][0]
-          );
+          const newUrl = getFileUrl(req.files[field][0]);
+          const oldUrl = existingVehicleForMedia.mediaFiles?.[field] || "";
+
+          setPayload[`mediaFiles.${field}`] = newUrl;
+          if (oldUrl && oldUrl !== newUrl) mediaOldUrlsToDelete.push(oldUrl);
         }
       });
     }
@@ -2252,6 +2271,14 @@ const updateVehicleStep = async (req, res) => {
         success: false,
         message: "Vehicle not found",
       });
+    }
+
+    /* Best-effort — the update already succeeded either way; a Spaces
+       failure here must not turn into a 500 for a save that already
+       worked. Cleans up the previous file for every media field that was
+       just replaced or removed in this step. */
+    if (mediaOldUrlsToDelete.length) {
+      await deleteManyFromSpaces(mediaOldUrlsToDelete);
     }
 
     const stepsData = updated.completedSteps
@@ -2509,6 +2536,17 @@ const updateVehicle = async (req, res) => {
       });
     }
 
+    /* Fetched up front so a replaced media file can be diffed against what's
+       already stored — needed to know which old Spaces file to clean up
+       once the update succeeds (see mediaOldUrlsToDelete below). */
+    const existingVehicleForMedia = await Vehicle.findById(id);
+    if (!existingVehicleForMedia) {
+      return res.status(404).json({
+        success: false,
+        message: "Vehicle Not Found",
+      });
+    }
+
     let updateData;
     if (req.body.data) {
       updateData = JSON.parse(req.body.data);
@@ -2658,11 +2696,16 @@ const updateVehicle = async (req, res) => {
       "demoVideo",
     ];
     const mediaUpdates = {};
+    const mediaOldUrlsToDelete = [];
 
     mediaFields.forEach((field) => {
       if (req.files && req.files[field] && req.files[field][0]) {
         const file = req.files[field][0];
-        mediaUpdates[`mediaFiles.${field}`] = getFileUrl(file);
+        const newUrl = getFileUrl(file);
+        const oldUrl = existingVehicleForMedia.mediaFiles?.[field] || "";
+
+        mediaUpdates[`mediaFiles.${field}`] = newUrl;
+        if (oldUrl && oldUrl !== newUrl) mediaOldUrlsToDelete.push(oldUrl);
       }
     });
 
@@ -2688,6 +2731,13 @@ const updateVehicle = async (req, res) => {
         success: false,
         message: "Vehicle Not Found",
       });
+    }
+
+    /* Best-effort — the update already succeeded either way; a Spaces
+       failure here must not turn into a 500 for a save that already
+       worked. */
+    if (mediaOldUrlsToDelete.length) {
+      await deleteManyFromSpaces(mediaOldUrlsToDelete);
     }
 
     const responseVehicle =

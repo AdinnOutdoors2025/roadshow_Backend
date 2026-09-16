@@ -638,7 +638,10 @@ async function sendProjectCreationMail({ order, to, cc, subject, additionalNotes
     subtotal: item.subtotal || 0,
     totalAmount: item.totalAmount || 0,
     needPromoter: item.needPromoter || false,
-    promoterType: item.promoterType || "",
+    // promoterType: item.promoterType || "",
+    promoterType: item.promoterType === "Other"
+    ? item.otherPromoterType || ""
+    : item.promoterType || "",
     promoterGender: item.promoterGender || "",
     promoterLanguage: Array.isArray(item.promoterLanguage)
       ? item.promoterLanguage.join(", ")
