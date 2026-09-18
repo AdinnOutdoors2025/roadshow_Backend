@@ -25,6 +25,7 @@ const {
   flattenPhotos,
   todayIndiaDateKey,
 } = require("../../Utils/clientJourneyStages");
+const { calculateRTOCharges } = require("../../Utils/rtoCalculator");
 const {
   getLiveLocationsForRegistrationNumbers,
   getDrivingSummaryForDay,
@@ -513,12 +514,14 @@ const priceBookingItemFromPackage = (pkg, line) => {
     ? promoterChargePerDay * promoterDays * promoterQuantity
     : 0;
 
-  // RTO scales in 30-day slabs of the campaign duration (totalDays here has
-  // no extraDays folded in, unlike the admin controller's totalDays): 1-30
-  // days = 1x the package's rtoCharges rate per vehicle, 31-60 = 2x, etc.
-  // Mirrors calcPricingBackend in the admin order controller.
-  const rtoSlabMultiplier = Math.ceil(totalDays / 30);
-  const rtoCost = (pkg.rtoCharges || 0) * rtoSlabMultiplier * quantity;
+  // RTO is duration-based for the client flow: one RTO cycle per 30
+  // campaign days, charged per vehicle. Admin's calcPricingBackend
+  // intentionally keeps the old flat rtoCharges * quantity formula for now.
+  const { rtoCycles, rtoAmount: rtoCost } = calculateRTOCharges(
+    totalDays,
+    quantity,
+    pkg.rtoCharges || 0
+  );
 
   // Branding Cost — only ever set on a Hybrid vehicle's package; same
   // one-time-per-vehicle-slot pattern as RTO, mirroring calcPricingBackend.
@@ -533,6 +536,7 @@ const priceBookingItemFromPackage = (pkg, line) => {
     promoterChargePerDay: needPromoter ? promoterChargePerDay : 0,
     promoterDays,
     rtoCharges: pkg.rtoCharges || 0,
+    rtoCycles,
     brandingCost,
     additionalHourCharges: pkg.additionalHourCharges || 0,
     dailyKmLimit: pkg.dailyKmLimit || 0,
