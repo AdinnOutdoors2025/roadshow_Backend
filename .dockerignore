@@ -1,0 +1,25 @@
+node_modules
+.git
+.cache
+.env
+.env.local
+.env.development
+.env.production
+npm-debug.log*
+backend.log
+*.log
+pids
+*.pid
+dist
+build
+coverage
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Local upload artifacts — STORAGE_TYPE=space means uploads go to DigitalOcean
+# Spaces; these local dirs are dev-only leftovers, not needed in the image.
+uploads
+public/uploads
+public/po_doc_uploads
