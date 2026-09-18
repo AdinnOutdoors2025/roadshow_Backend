@@ -104,9 +104,11 @@ function calcPricingBackend(pkg, v) {
     // ? (pkg.promoterChargePerDay || 0) * totalDays * promoterQuantity
        ? (promoterChargePerDay || 0) * promoterDays * promoterQuantity
     : 0;
-  // RTO is a one-time flat charge per vehicle-type slot (from the selected
-  // package), applied once regardless of totalDays.
-  const rtoCost = (pkg.rtoCharges || 0) * quantity;
+  // RTO scales in 30-day slabs of the campaign's own duration (baseDays,
+  // not totalDays with extraDays folded in): 1-30 days = 1x the package's
+  // rtoCharges rate per vehicle, 31-60 days = 2x, 61-90 days = 3x, etc.
+  const rtoSlabMultiplier = Math.ceil(baseDays / 30);
+  const rtoCost = (pkg.rtoCharges || 0) * rtoSlabMultiplier * quantity;
   // Branding Cost — only ever set on a Hybrid vehicle's package; same
   // one-time-per-vehicle-slot pattern as RTO.
   const brandingCost = (pkg.brandingCost || 0) * quantity;

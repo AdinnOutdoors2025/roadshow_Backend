@@ -513,9 +513,12 @@ const priceBookingItemFromPackage = (pkg, line) => {
     ? promoterChargePerDay * promoterDays * promoterQuantity
     : 0;
 
-  // RTO is a one-time flat charge per vehicle-type slot, mirroring
-  // calcPricingBackend in the admin order controller.
-  const rtoCost = (pkg.rtoCharges || 0) * quantity;
+  // RTO scales in 30-day slabs of the campaign duration (totalDays here has
+  // no extraDays folded in, unlike the admin controller's totalDays): 1-30
+  // days = 1x the package's rtoCharges rate per vehicle, 31-60 = 2x, etc.
+  // Mirrors calcPricingBackend in the admin order controller.
+  const rtoSlabMultiplier = Math.ceil(totalDays / 30);
+  const rtoCost = (pkg.rtoCharges || 0) * rtoSlabMultiplier * quantity;
 
   // Branding Cost — only ever set on a Hybrid vehicle's package; same
   // one-time-per-vehicle-slot pattern as RTO, mirroring calcPricingBackend.
