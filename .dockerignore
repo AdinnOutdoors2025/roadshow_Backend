@@ -1,0 +1,27 @@
+# deps / puppeteer cache (rebuilt inside the image)
+node_modules
+.cache
+
+# env files — never baked into images (passed via env_file at runtime)
+.env
+.env.*
+
+# VCS / tooling / docs
+.git
+.gitignore
+.claude
+.vscode
+.idea
+docs
+*.md
+logs
+*.log
+
+# local uploads stay on the host / docker volume
+public/uploads
+uploads
+temp
+
+# docker
+Dockerfile
+.dockerignore
