@@ -17,6 +17,12 @@ docs
 logs
 *.log
 
+# not needed at runtime (dev config, one-off DB scripts, legacy unwired files)
+nodemon.json
+scripts
+LoginMain.js
+UserAdminLogin.js
+
 # local uploads stay on the host / docker volume
 public/uploads
 uploads
