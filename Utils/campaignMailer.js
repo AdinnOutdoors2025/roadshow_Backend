@@ -128,6 +128,7 @@ const buildVehicleLine = (item, typeNameMap) => ({
 
   pricePerDay: item.perDayRentalCost || 0,
   rentalCost: item.rentalCost || 0,
+  rtoCost: item.rtoCost || 0,
   lineTotal: item.totalAmount || 0,
 
   needPromoter: !!item.needPromoter,
@@ -145,14 +146,24 @@ const buildVehicleLine = (item, typeNameMap) => ({
  * recomputing GST here, so the mailed figures can never drift from what
  * was actually saved.
  *
+ * subtotal is rentalCost + promoterCost + rtoCost + brandingCost summed
+ * across every line — same definition calcPricingBackend/
+ * priceBookingItemFromPackage use per line — so it actually adds up to
+ * estimatedTotal (order.grandTotal) once GST is added. It previously only
+ * summed rentalCost, silently dropping promoter/RTO/branding charges from
+ * the mailed "Taxable Amount" while Grand Total stayed correct.
+ *
  * cgst/sgst are a straight 50/50 split of grandGst — the Order schema has
  * no interstate/intrastate flag to pick CGST+SGST vs IGST correctly, so
  * IGST is always reported as 0. Flagged here rather than silently guessed.
  */
 const buildPricing = (order) => {
   const items = order.bookingItems || [];
-  const subtotal = items.reduce((sum, item) => sum + (item.rentalCost || 0), 0);
+  const rentalTotal = items.reduce((sum, item) => sum + (item.rentalCost || 0), 0);
   const promoterTotal = items.reduce((sum, item) => sum + (item.promoterCost || 0), 0);
+  const rtoTotal = items.reduce((sum, item) => sum + (item.rtoCost || 0), 0);
+  const brandingTotal = items.reduce((sum, item) => sum + (item.brandingCost || 0), 0);
+  const subtotal = rentalTotal + promoterTotal + rtoTotal + brandingTotal;
   const gstAmount = order.grandGst || 0;
   const cgstAmount = Math.round(gstAmount / 2);
   const sgstAmount = gstAmount - cgstAmount;
