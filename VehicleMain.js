@@ -137,7 +137,9 @@ const allowedOrigins = [
   "https://roadshowfrontend.netlify.app/",
   "https://roadshow-backend.onrender.com/",
   "https://roadshowfrontend.netlify.app",
-  "https://roadshow-backend.onrender.com"
+  "https://roadshow-backend.onrender.com",
+  "https://adinnroadshows.com",
+  "https://www.adinnroadshows.com"
 
 ];
 
