@@ -8,7 +8,7 @@ const { successResponse, errorResponse } = require('../../Utils/response');
 const JWT_SECRET     = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN;
 
-// admin role gets full sidebar access, so no allowedMenus is embedded for it.
+// admins role gets full sidebar access, so no allowedMenus is embedded for it.
 // sales/operation roles get their currently-configured allowedMenus baked into
 // the token at login time — a permission change only takes effect on next login.
 // Per-user override (RolePermission.userId) takes priority over the
