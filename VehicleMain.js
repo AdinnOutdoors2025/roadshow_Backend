@@ -10,6 +10,21 @@ const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
 const PORT = 3001;
 
+// Optional public path prefix (live: API_PREFIX=/api behind
+// https://www.adinnroadshows.com/api/). Strips it once so every existing
+// route keeps its current path (/api/packages -> /packages,
+// /api/api/vehicle-types -> /api/vehicle-types). Unset = no change.
+const API_PREFIX = (process.env.API_PREFIX || "").replace(/\/+$/, "");
+if (API_PREFIX) {
+  app.use((req, res, next) => {
+    if (req.url === API_PREFIX || req.url.startsWith(API_PREFIX + "/") || req.url.startsWith(API_PREFIX + "?")) {
+      const rest = req.url.slice(API_PREFIX.length);
+      req.url = rest.startsWith("/") ? rest : "/" + rest;
+    }
+    next();
+  });
+}
+
 
 // Routes
 const authRoutes = require("./Routes/Userroutes/authroutes");
