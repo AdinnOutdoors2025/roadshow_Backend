@@ -19,7 +19,8 @@ const frontendBaseUrl = () => {
     if (isProduction) {
       throw new Error("FRONTEND_BASE_URL_LIVE/FRONTEND_BASE_URL is missing in the production environment");
     }
-    return "http://localhost:3000";
+    // return "http://localhost:3000";
+    return "https://www.adinnroadshows.com";
   }
 
   return url.replace(/\/$/, "");
