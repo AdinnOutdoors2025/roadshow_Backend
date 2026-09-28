@@ -112,6 +112,14 @@ const resolveVehicleTypeNames = async (bookingItems) => {
  */
 const buildVehicleLine = (item, typeNameMap) => ({
   vehicleId: item.packageId ? String(item.packageId) : "",
+  /* bookingItems is built from a Package (vehicleType + model name rate
+     card) — there is no specific vehicleDetails catalog document chosen
+     until on-road assignment, so vehicleId above (the Package id) never
+     matches the vehicleDetails catalog. These two let the frontend's
+     resolveVehicleImages() do a best-effort type+model-name match against
+     that catalog instead. */
+  vehicleTypeId: item.vehicleType ? String(item.vehicleType) : "",
+  vehicleModel: item.vehicleModel || "",
   vehicleName:
     typeNameMap.get(item.vehicleType && String(item.vehicleType)) ||
     item.vehicleModel ||
