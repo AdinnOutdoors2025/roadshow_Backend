@@ -8,7 +8,7 @@ const app = express();
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // Optional public path prefix (live: API_PREFIX=/api behind
 // https://www.adinnroadshows.com/api/). Strips it once so every existing
@@ -219,6 +219,11 @@ mongoose
 
 
 // ─── Routes ──────────────────────────────────
+// Root health check
+app.get("/", (req, res) => {
+  res.status(200).json({ message: "API is running" });
+});
+
 app.use("/api", newVehicleRoutes);
 //VEHICLE TYPE 
 app.use("/api", vehicleTypeRoutes);
