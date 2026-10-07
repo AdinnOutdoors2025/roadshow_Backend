@@ -221,7 +221,7 @@ mongoose
 // ─── Routes ──────────────────────────────────
 // Root health check
 app.get("/", (req, res) => {
-  res.status(200).json({ message: "API is running" });
+  res.status(200).json({ message: "API is running #1" });
 });
 
 app.use("/api", newVehicleRoutes);
