@@ -1787,6 +1787,17 @@ const sendVehicleControllerError = (
   error,
   fallbackMessage
 ) => {
+  // Unique-index violation (e.g. a registration number already used by
+  // another vehicle group) — friendly 409 instead of the raw Mongo text.
+  if (error?.code === 11000) {
+    const isRegistration = JSON.stringify(error?.keyPattern || error?.message || "")
+      .includes("registrationNumber");
+    const message = isRegistration
+      ? "This registration number is already assigned to another vehicle."
+      : "A record with the same unique value already exists.";
+    return res.status(409).json({ success: false, message, error: message });
+  }
+
   const statusCode = error?.statusCode || 500;
 
   return res.status(statusCode).json({
@@ -2183,6 +2194,41 @@ const updateVehicleStep = async (req, res) => {
         return res.status(400).json({
           success: false,
           message: "Duplicate registration numbers in request",
+        });
+      }
+
+      // Registration numbers are unique across ALL vehicle groups (unique
+      // index on registrationVehicles.registrationNumber). Check other groups
+      // up front so the user gets a clear 409 instead of a raw E11000 500.
+      // Space/case-insensitive, since stored numbers may contain spaces.
+      const toSpaceInsensitive = (clean) =>
+        new RegExp(
+          `^${clean
+            .split("")
+            .map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+            .join("\\s*")}$`,
+          "i"
+        );
+      const conflict = await Vehicle.findOne(
+        {
+          _id: { $ne: id },
+          "registrationVehicles.registrationNumber": {
+            $in: regNumbers.filter(Boolean).map(toSpaceInsensitive),
+          },
+        },
+        {
+          "basicInfo.vehicleName": 1,
+          "registrationVehicles.registrationNumber": 1,
+        }
+      );
+
+      if (conflict) {
+        const taken = conflict.registrationVehicles.find((r) =>
+          regNumbers.includes(cleanRegistrationNumber(r.registrationNumber))
+        );
+        return res.status(409).json({
+          success: false,
+          message: `Registration number ${taken?.registrationNumber || ""} is already assigned to "${conflict.basicInfo?.vehicleName || "another vehicle"}". Remove it there first or use a different number.`,
         });
       }
 
