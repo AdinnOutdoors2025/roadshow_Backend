@@ -32,6 +32,63 @@ const fmtDate = (d) => {
   return new Date(d).toISOString().split("T")[0]; // YYYY-MM-DD
 };
 
+/* Indian digit grouping (lakh/crore), no currency symbol:
+   102660 -> "1,02,660.00". Done by hand rather than via Intl "en-IN" so the
+   output never depends on the runtime's locale data. Same rule as the
+   frontend's formatIndianNumber (src/app/utils/currency.tsx). */
+const formatINR = (value, decimals = 2) => {
+  const amount = Number(value) || 0;
+  const [intPart, decPart] = Math.abs(amount).toFixed(decimals).split(".");
+
+  const grouped =
+    intPart.length > 3
+      ? `${intPart.slice(0, -3).replace(/\B(?=(\d{2})+$)/g, ",")},${intPart.slice(-3)}`
+      : intPart;
+
+  const sign = amount < 0 && Number(Math.abs(amount).toFixed(decimals)) !== 0 ? "-" : "";
+
+  return `${sign}${grouped}${decPart ? `.${decPart}` : ""}`;
+};
+
+const PRICING_AMOUNT_KEYS = [
+  "subtotal",
+  "promoterTotal",
+  "gstAmount",
+  "cgstAmount",
+  "sgstAmount",
+  "igstAmount",
+  "estimatedTotal",
+];
+
+const VEHICLE_AMOUNT_KEYS = [
+  "pricePerDay",
+  "rentalCost",
+  "rtoCost",
+  "lineTotal",
+  "promoterCost",
+];
+
+const addFormattedAmounts = (source, keys) => ({
+  ...source,
+  ...Object.fromEntries(
+    keys.map((key) => [`${key}Formatted`, formatINR(source[key])])
+  ),
+});
+
+/* Mail-payload only: adds "<field>Formatted" Indian-grouped strings
+   (e.g. estimatedTotalFormatted: "1,02,660.00") next to every amount, for
+   the PHP mail template to print instead of number_format() (which groups
+   the western way, "102,660.00"). The numeric fields are left untouched,
+   and buildCampaignMailData itself is not changed, because the booking
+   summary PDF data (buildBookingSummaryPdfData) reuses it and needs numbers. */
+const withFormattedAmounts = (mailData) => ({
+  ...mailData,
+  vehicles: (mailData.vehicles || []).map((line) =>
+    addFormattedAmounts(line, VEHICLE_AMOUNT_KEYS)
+  ),
+  pricing: addFormattedAmounts(mailData.pricing || {}, PRICING_AMOUNT_KEYS),
+});
+
 const frontendBaseUrl = () => {
   const url =
     process.env.NODE_ENV === "production"
@@ -313,7 +370,7 @@ async function sendCampaignRequestMail(order) {
     bookingSummaryPdf: bookingSummaryPdfUrl,
     bookingSummaryFilename: `Booking_Summary_${order.orderId}.pdf`,
 
-    data: mailData,
+    data: withFormattedAmounts(mailData),
   };
 
   console.log("Roadshow campaign request mail payload:", JSON.stringify(payload, null, 2));
