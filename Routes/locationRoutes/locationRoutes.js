@@ -6,6 +6,7 @@ const locationController = require('../../controllers/locationController/locatio
 router.get('/', locationController.getAllLocations);      
 router.get('/states', locationController.getStates);      
 router.get('/:state/cities', locationController.getCitiesByState); 
-router.post('/:state/cities', locationController.addCityToState); 
+router.post('/:state/cities', locationController.addCityToState);
+router.delete('/:state/cities', locationController.removeCityFromState);
 
 module.exports = router;
