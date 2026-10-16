@@ -28,7 +28,7 @@ import { sendOtpSms } from "../../Utils/smsServices.js";
 import axios from "axios";
 //EMAIL ADDED 
 const ROADSHOW_APPROVAL_PASSWORD =
-  process.env.ROADSHOW_QUOTATION_APPROVAL_PASSWORD || "Adinn@#123";
+  process.env.ROADSHOW_QUOTATION_APPROVAL_PASSWORD;
 
 const ALLOWED_ROADSHOW_QUOTATION_STATUSES = new Set([
   "saved",

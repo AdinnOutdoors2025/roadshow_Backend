@@ -84,7 +84,7 @@ async function resolveAgencyGst({ gstDetailId, gstNumber }) {
     return record;
 }
 // Configuration
-const NETTYFISH_API_KEY = process.env.NETTYFISH_API_KEY || 'aspv58uRbkqDbhCcCN87Mw';
+const NETTYFISH_API_KEY = process.env.NETTYFISH_API_KEY;
 const NETTYFISH_SENDER_ID = process.env.NETTYFISH_SENDER_ID || 'ADINAD';
 const NETTYFISH_TEMPLATE_ID = process.env.NETTYFISH_TEMPLATE_ID || '1007811523025425787';
 

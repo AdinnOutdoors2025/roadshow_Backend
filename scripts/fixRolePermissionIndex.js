@@ -1,10 +1,15 @@
 
 //
 // Run once: node scripts/fixRolePermissionIndex.js
+require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 const mongoose = require("mongoose");
 const RolePermission = require("../Models/RolePermissionModel");
 
-const MONGO_URI = "mongodb+srv://Vignesh:Vignesh@roadshow.0jruqnx.mongodb.net/?appName=Roadshow";
+const MONGO_URI = process.env.MONGODB_URI;
+if (!MONGO_URI) {
+  console.error("MONGODB_URI is not set in .env");
+  process.exit(1);
+}
 
 (async () => {
   await mongoose.connect(MONGO_URI);

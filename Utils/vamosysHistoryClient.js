@@ -7,8 +7,10 @@
    gpsvtsprobend.vamosys.com/getVehicleHistory is the actual stateless JSON
    API behind it — no login required. Utils/vamosysClient.js already calls
    this same host successfully for the driving-summary feature. */
-const HISTORY_URL = "https://gpsvtsprobend.vamosys.com/getVehicleHistory";
-const VAMOSYS_USER_ID = "ADINN12";
+const HISTORY_URL =
+  process.env.VAMOSYS_HISTORY_URL ||
+  "https://gpsvtsprobend.vamosys.com/getVehicleHistory";
+const VAMOSYS_USER_ID = process.env.VAMOSYS_USER_ID || "";
 
 const CACHE_TTL_MS = 60 * 1000;
 const historyCache = new Map();

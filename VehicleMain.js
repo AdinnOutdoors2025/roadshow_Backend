@@ -1,5 +1,20 @@
 require("dotenv").config();
 
+// Required settings with no hardcoded fallback (see .env.example). Logged at
+// startup so a missing value is obvious instead of failing later per request.
+const REQUIRED_ENV = [
+  "MONGODB_URI",
+  "JWT_SECRET",
+  "INTERNAL_API_SECRET",
+  "ROADSHOW_QUOTATION_APPROVAL_PASSWORD",
+  "NETTYFISH_API_KEY",
+  "VAMOSYS_USER_ID",
+];
+const missingEnv = REQUIRED_ENV.filter((name) => !process.env[name]);
+if (missingEnv.length) {
+  console.error(`❌ Missing required env vars: ${missingEnv.join(", ")}`);
+}
+
 const dns = require('dns');
 dns.setServers(['8.8.8.8', '1.1.1.1']); //Added For IP Whitelisting new11
 
@@ -139,7 +154,11 @@ if (process.env.STORAGE_TYPE !== "space") {
 //   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 // }));
 
-const allowedOrigins = [
+// Allowed CORS origins: comma-separated ALLOWED_ORIGINS in .env. When unset,
+// falls back to the list that used to be hardcoded here. Trailing slashes are
+// stripped — browsers send the Origin header without one, so "https://x.com/"
+// could never match.
+const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://localhost:3002",
   "http://localhost:5173",
@@ -147,16 +166,25 @@ const allowedOrigins = [
   "http://192.168.2.159:3000",
   "https://frontend-roadshow.vercel.app",
   "https://frontend-roadshow-97ae.vercel.app",
-  "https://frontend-roadshow-*-your-username.vercel.app",
   "https://ratecard-with-quotation-roadshow-ne.vercel.app",
-  "https://roadshowfrontend.netlify.app/",
-  "https://roadshow-backend.onrender.com/",
   "https://roadshowfrontend.netlify.app",
   "https://roadshow-backend.onrender.com",
   "https://adinnroadshows.com",
-  "https://www.adinnroadshows.com"
-
+  "https://www.adinnroadshows.com",
 ];
+
+const allowedOrigins = (
+  process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",")
+    : DEFAULT_ALLOWED_ORIGINS
+)
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+
+// Any *.vercel.app origin (preview deployments). On by default, as before;
+// set CORS_ALLOW_VERCEL_PREVIEWS=false to restrict to ALLOWED_ORIGINS only.
+const allowVercelPreviews =
+  String(process.env.CORS_ALLOW_VERCEL_PREVIEWS ?? "true").toLowerCase() !== "false";
 
 app.use(
   cors({
@@ -168,7 +196,7 @@ app.use(
         callback(null, true);
       } else {
         // Allow any vercel.app subdomain for preview deployments
-        if (origin.includes(".vercel.app")) {
+        if (allowVercelPreviews && origin.includes(".vercel.app")) {
           callback(null, true);
         } else {
           callback(new Error("Not allowed by CORS"));
@@ -197,11 +225,7 @@ app.use(
 app.use(express.static("public"));
 
 mongoose
-  .connect(
-  // "mongodb+srv://roadshowAdinn:doAztsUGMfooi5PY@roadshowadinn.sephmyg.mongodb.net/?appName=RoadshowAdinn",
-  //  "mongodb://localhost:27017/Roadshows",
-   "mongodb+srv://Vignesh:Vignesh@roadshow.0jruqnx.mongodb.net/?appName=Roadshow" // Vigesh acc db
-  )
+  .connect(   process.env.MONGODB_URI ) 
 
 // mongoose
 //   .connect("mongodb://127.0.0.1:27017/Roadshow", {
@@ -265,9 +289,9 @@ app.use( "/api/client-auth", clientAuthRoutes );
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const { v2: cloudinary } = require("cloudinary");
 cloudinary.config({
-  cloud_name: "dysuigknj",
-  api_key: "133679639417399",
-  api_secret: "i4fzWaXH_32kQYkwWb3U-pLxKd4",
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
   secure: true, // Add this for HTTPS
 });
 //ORDER MANAGEMENT AND ADD TO CART , ORDER CREATION CODES
@@ -414,7 +438,7 @@ app.listen(PORT, () => {
 
 
 app.put("/api/update-vehicles-json", async (req, res) => {
-  const bucketName = "adinn-space";
+  const bucketName = process.env.DO_SPACES_BUCKET || "adinn-space";
   const fileKey = "roadshowRateCard/vehicles.json";
 
   try {

@@ -3,6 +3,9 @@ require("dotenv").config();
 const GstDetail = require('../../Models/GstDetailsModel/gstdetails');
 const { successResponse, errorResponse } = require('../../Utils/response');
 
+// Meon GST verification API base (defaults to the previously hardcoded host).
+const MEON_BASE_URL = (process.env.MEON_BASE_URL || 'https://ocr.meon.co.in').replace(/\/+$/, '');
+
 
 const parseDate = (dateString) => {
     if (!dateString) return null;
@@ -126,7 +129,7 @@ const verifyGstNumber = async (req, res) => {
 
       
         // Token
-        const tokenRes = await fetch('https://ocr.meon.co.in/get_token', {
+        const tokenRes = await fetch(`${MEON_BASE_URL}/get_token`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -144,7 +147,7 @@ const verifyGstNumber = async (req, res) => {
         }
 
         // GST details fetch 
-        const gstRes = await fetch('https://ocr.meon.co.in/gst/search_business_name', {
+        const gstRes = await fetch(`${MEON_BASE_URL}/gst/search_business_name`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

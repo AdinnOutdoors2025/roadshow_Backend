@@ -164,7 +164,14 @@ exports.createOrder = async (req, res) => {
             vehicleType: item.vehicleModel,
             productId: item._id,
             vehicleCount: item.quantity,
-            productImage: `${process.env.MONGODB_URI}/uploads/${modelWithUnderscore}/${item.vehicleImage}`,
+            // Backend's public base URL (uploads are served at /uploads).
+            // Previously used MONGODB_URI here, which leaked the DB
+            // connection string (with credentials) into the mail payload.
+            productImage: `${(
+              (process.env.NODE_ENV === "production"
+                ? process.env.PRODUCTION_BASE_URL
+                : process.env.LOCAL_BASE_URL) || ""
+            ).replace(/\/+$/, "")}/uploads/${modelWithUnderscore}/${item.vehicleImage}`,
             pricePerDay: String(item.pricePerDay),
             location: item.city,
             startDate: new Date(item.fromDate).toISOString().split("T")[0],

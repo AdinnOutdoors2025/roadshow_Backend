@@ -11,8 +11,23 @@
    details, device/SIM identifiers, fuel/voltage/temperature telemetry and
    subscription metadata that must never reach a customer. */
 
-const VAMOSYS_USER_ID = "ADINN12";
-const VAMOSYS_GROUP_ID = "ADINN12";
+/* Account + endpoints from .env (see .env.example). The user id alone is
+   enough to mint an API key (getApiKey below), so it has no code fallback.
+   Endpoint URLs default to the values that used to be hardcoded here. */
+const VAMOSYS_USER_ID = process.env.VAMOSYS_USER_ID || "";
+const VAMOSYS_GROUP_ID = process.env.VAMOSYS_GROUP_ID || VAMOSYS_USER_ID;
+const VAMOSYS_API_BASE_URL = (
+  process.env.VAMOSYS_API_BASE_URL || "https://api.vamosys.com"
+).replace(/\/+$/, "");
+const VAMOSYS_LOCATIONS_URL =
+  process.env.VAMOSYS_LOCATIONS_URL ||
+  "http://api.vamosys.com/apiMobile/getVehicleLocations";
+const VAMOSYS_HISTORY_URL =
+  process.env.VAMOSYS_HISTORY_URL ||
+  "https://gpsvtsprobend.vamosys.com/getVehicleHistory";
+/* Contact details the getVehicleExp (public track link) API requires. */
+const VAMOSYS_CONTACT_EMAIL = process.env.VAMOSYS_CONTACT_EMAIL || "";
+const VAMOSYS_CONTACT_PHONE = process.env.VAMOSYS_CONTACT_PHONE || "";
 
 /* The key itself is valid 365 days server-side; caching an hour just avoids
    re-requesting it on every single poll. */
@@ -28,7 +43,7 @@ async function fetchVamosysApiKey() {
   }
 
   const time = Math.floor(Date.now() / 1000);
-  const url = `https://api.vamosys.com/getApiKey?userId=${VAMOSYS_USER_ID}&validDays=365&time=${time}`;
+  const url = `${VAMOSYS_API_BASE_URL}/getApiKey?userId=${VAMOSYS_USER_ID}&validDays=365&time=${time}`;
   const response = await fetch(url);
 
   if (!response.ok) {
@@ -44,7 +59,7 @@ async function fetchVamosysApiKey() {
 
 async function fetchAllVehicleLocations() {
   const apiKey = await fetchVamosysApiKey();
-  const url = `http://api.vamosys.com/apiMobile/getVehicleLocations?apiKey=${apiKey}&userId=${VAMOSYS_USER_ID}&groupId=${VAMOSYS_GROUP_ID}`;
+  const url = `${VAMOSYS_LOCATIONS_URL}?apiKey=${apiKey}&userId=${VAMOSYS_USER_ID}&groupId=${VAMOSYS_GROUP_ID}`;
   const response = await fetch(url);
 
   if (!response.ok) {
@@ -131,7 +146,7 @@ async function reverseGeocode(latLngRaw) {
 async function fetchVehicleDayHistoryRaw(registrationNumber, dayKey) {
   const { fromDateUTC, toDateUTC } = dayWindowIST(dayKey);
   const url =
-    `https://gpsvtsprobend.vamosys.com/getVehicleHistory?userId=${VAMOSYS_USER_ID}` +
+    `${VAMOSYS_HISTORY_URL}?userId=${VAMOSYS_USER_ID}` +
     `&vehicleId=${encodeURIComponent(registrationNumber)}` +
     `&fromDateUTC=${fromDateUTC}&toDateUTC=${toDateUTC}&interval=-1`;
 
@@ -212,8 +227,8 @@ async function getRouteTrackId(registrationNumber) {
   }
 
   const url =
-    `https://api.vamosys.com/getVehicleExp?vehicleId=${encodeURIComponent(registrationNumber)}` +
-    `&fcode=VAM&days=30&mailId=vignesh032rk@gmail.com&phone=9345771779&userId=${VAMOSYS_USER_ID}`;
+    `${VAMOSYS_API_BASE_URL}/getVehicleExp?vehicleId=${encodeURIComponent(registrationNumber)}` +
+    `&fcode=VAM&days=30&mailId=${VAMOSYS_CONTACT_EMAIL}&phone=${VAMOSYS_CONTACT_PHONE}&userId=${VAMOSYS_USER_ID}`;
 
   const response = await fetch(url);
 

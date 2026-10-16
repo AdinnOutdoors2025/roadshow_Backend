@@ -3,7 +3,7 @@ const OTP   = require("../../Models/otp/otpmodel");
 const jwt   = require("jsonwebtoken");
 const { sendOTP } = require("../../Utils/sendotp");
 
-const JWT_SECRET    = process.env.JWT_SECRET    || "roadshow_secret_key";
+const JWT_SECRET    = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 const OTP_EXPIRY_MIN = 30; // OTP valid for 5 minutes
 
