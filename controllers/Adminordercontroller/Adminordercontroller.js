@@ -16,6 +16,18 @@ const { checkVehicleAvailability } = require("../../Utils/vehicleAvailability");
 const { fetchVamosysApiKey, fetchAllVehicleLocations } = require("../../Utils/vamosysClient");
 const { deleteAgencyPoDocument } = require("../../Utils/agencyPoDocumentUpload");
 const { deleteManyFromSpaces, collectSpaceUrls } = require("../../Utils/deleteFromSpaces");
+const Promoter = require("../../Models/Promotermodel/Promotermodel");
+const { resolveRtoCharge, resolveBrandingCharge, resolvePromoterCharge } = require("../../Utils/locationChargeResolver");
+
+/** Builds { "tamil nadu": 1200, "kerala": 1000, ... } (keys normalized trim+lowercase) from the Promoter location-charge rows. */
+async function getPromoterChargeMap() {
+  const rows = await Promoter.find({}, "state promoterCharge").lean();
+  const map = {};
+  rows.forEach((row) => {
+    map[String(row.state || "").trim().toLowerCase()] = row.promoterCharge;
+  });
+  return map;
+}
 
 
 async function generateAdminOrderId() {
@@ -73,7 +85,9 @@ exports.createCustomer = async (req, res) => {
 
 
 // ── Pricing calculation helper ─────────────────────────────────
-function calcPricingBackend(pkg, v) {
+// `promoterChargeMap` is { "<state, lowercased/trimmed>": chargePerDay },
+// built once per request via getPromoterChargeMap() — see resolvePromoterCharge.
+function calcPricingBackend(pkg, v, promoterChargeMap) {
   const from = new Date(v.fromDate);
   const to = new Date(v.toDate);
   const baseDays = Math.ceil((to - from) / 86400000) + 1;
@@ -86,9 +100,7 @@ function calcPricingBackend(pkg, v) {
 
   const rentalCost = pkg.perDayRentalCost * totalDays * quantity;
   const driverCost = pkg.driverCharges * totalDays * quantity;
-   const promoterChargePerDay = parseFloat(process.env.DEFAULT_PROMOTER_CHARGE_PER_DAY || "1000");
 
-  //  promoter charges default data
   // Promoter is priced only for the selected Promoter From/To days
   // (inclusive) — falls back to the full campaign totalDays when no
   // promoter date range was sent (keeps older clients/saved orders working).
@@ -100,18 +112,33 @@ function calcPricingBackend(pkg, v) {
       promoterDays = Math.ceil((pTo - pFrom) / 86400000) + 1;
     }
   }
-  const promoterCost = needPromoter
-    // ? (pkg.promoterChargePerDay || 0) * totalDays * promoterQuantity
-       ? (promoterChargePerDay || 0) * promoterDays * promoterQuantity
+
+  // State/city-wise charges — resolved from Package Management (RTO,
+  // Branding) and Promoter Management (promoter/day). null means the
+  // vehicle's state/city has no configured charge; the caller must treat
+  // that as a hard error, never a silent 0/hardcoded default.
+  const resolvedRto = resolveRtoCharge(pkg, v.state, v.city);
+  const resolvedBranding = resolveBrandingCharge(pkg, v.state, v.city);
+  const resolvedPromoterCharge = needPromoter
+    ? resolvePromoterCharge(promoterChargeMap, v.state)
     : 0;
+
+  const locationChargeErrors = [];
+  if (resolvedRto === null) locationChargeErrors.push("RTO charge is not configured for this vehicle's state/city");
+  if (resolvedBranding === null) locationChargeErrors.push("Branding cost is not configured for this vehicle's state/city");
+  if (needPromoter && resolvedPromoterCharge === null) locationChargeErrors.push("Promoter charge is not configured for this vehicle's state");
+
+  const promoterChargePerDay = resolvedPromoterCharge || 0;
+  const promoterCost = needPromoter ? promoterChargePerDay * promoterDays * promoterQuantity : 0;
+
   // RTO scales in 30-day slabs of the campaign's own duration (baseDays,
-  // not totalDays with extraDays folded in): 1-30 days = 1x the package's
-  // rtoCharges rate per vehicle, 31-60 days = 2x, 61-90 days = 3x, etc.
+  // not totalDays with extraDays folded in): 1-30 days = 1x the resolved
+  // location's RTO rate per vehicle, 31-60 days = 2x, 61-90 days = 3x, etc.
   const rtoSlabMultiplier = Math.ceil(baseDays / 30);
-  const rtoCost = (pkg.rtoCharges || 0) * rtoSlabMultiplier * quantity;
+  const rtoCost = (resolvedRto || 0) * rtoSlabMultiplier * quantity;
   // Branding Cost — only ever set on a Hybrid vehicle's package; same
   // one-time-per-vehicle-slot pattern as RTO.
-  const brandingCost = (pkg.brandingCost || 0) * quantity;
+  const brandingCost = (resolvedBranding || 0) * quantity;
   const extraKmCost = extraKm > 0 ? (pkg.perKmCharge || 0) * extraKm : 0;
   const extraHourCost = extraHours > 0 ? pkg.additionalHourCharges * extraHours : 0;
 
@@ -142,11 +169,11 @@ function calcPricingBackend(pkg, v) {
     totalDays,
     perDayRentalCost: pkg.perDayRentalCost,
     driverCharges: pkg.driverCharges,
-    // promoterChargePerDay: needPromoter ? pkg.promoterChargePerDay : 0,
-     promoterChargePerDay: needPromoter ? promoterChargePerDay : 0,
+    promoterChargePerDay: needPromoter ? promoterChargePerDay : 0,
     promoterDays,
-    rtoCharges: pkg.rtoCharges,
+    rtoCharges: resolvedRto || 0,
     brandingCost,
+    locationChargeErrors,
     additionalHourCharges: pkg.additionalHourCharges,
     dailyKmLimit: pkg.dailyKmLimit,
     dailyKmcharges: pkg.perKmCharge,
@@ -249,6 +276,7 @@ exports.createAdminOrder = async (req, res) => {
     if (!vehicles || vehicles.length === 0)
       return errorResponse(res, "At least one vehicle is required", null, 400);
 
+    const promoterChargeMap = await getPromoterChargeMap();
     const bookingItems = [];
     const availabilityFailures = [];
     const pkgCache = [];
@@ -304,7 +332,10 @@ exports.createAdminOrder = async (req, res) => {
       const v = vehicles[i];
       const pkg = pkgCache[i];
 
-      const fp = calcPricingBackend(pkg, v);
+      const fp = calcPricingBackend(pkg, v, promoterChargeMap);
+      if (fp.locationChargeErrors.length > 0) {
+        return errorResponse(res, `Vehicle ${i + 1}: ${fp.locationChargeErrors.join("; ")}`, null, 400);
+      }
 
       const additionalFields = (v.additionalCharges || []).map((c) => ({
         label: (c.label || "").trim() || "Custom charge",
@@ -585,6 +616,7 @@ exports.updateAdminOrder = async (req, res) => {
     if (!vehicles || vehicles.length === 0)
       return errorResponse(res, "At least one vehicle is required", null, 400);
 
+    const promoterChargeMap = await getPromoterChargeMap();
     const bookingItems = [];
 
     for (let i = 0; i < vehicles.length; i++) {
@@ -605,7 +637,10 @@ exports.updateAdminOrder = async (req, res) => {
       const pkg = await Package.findById(v.packageId);
       if (!pkg) return errorResponse(res, `Vehicle ${i + 1}: Package not found`, null, 404);
 
-      const fp = calcPricingBackend(pkg, v);
+      const fp = calcPricingBackend(pkg, v, promoterChargeMap);
+      if (fp.locationChargeErrors.length > 0) {
+        return errorResponse(res, `Vehicle ${i + 1}: ${fp.locationChargeErrors.join("; ")}`, null, 400);
+      }
 
       const additionalFields = (v.additionalCharges || []).map((c) => ({
         label: (c.label || "").trim() || "Custom charge",

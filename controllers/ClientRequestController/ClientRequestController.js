@@ -10,6 +10,18 @@ const Package = require("../../Models/PackageManagementModel/packagemanagement")
 const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const VehicleGroup = require("../../Models/vehicleDetails");
 const VehicleType = require("../../Models/VehicleTypeSchema");
+const Promoter = require("../../Models/Promotermodel/Promotermodel");
+const { resolveRtoCharge, resolveBrandingCharge, resolvePromoterCharge } = require("../../Utils/locationChargeResolver");
+
+/** Mirrors getPromoterChargeMap() in the admin order controller. */
+async function getPromoterChargeMap() {
+  const rows = await Promoter.find({}, "state promoterCharge").lean();
+  const map = {};
+  rows.forEach((row) => {
+    map[String(row.state || "").trim().toLowerCase()] = row.promoterCharge;
+  });
+  return map;
+}
 const {
   JOURNEY_STEPS,
   LIST_ORDER_SELECT,
@@ -209,6 +221,10 @@ const normalizeVehicleTypes = (vehicleTypes, files) => {
 
       quantity: Math.floor(quantity),
       campaignLocation: String(vehicle.campaignLocation || "").trim(),
+      // Drives Package/Promoter Management's location-wise RTO/Branding/
+      // Promoter charges (see priceBookingItemFromPackage below).
+      state: String(vehicle.state || "").trim(),
+      city: String(vehicle.city || "").trim(),
       fromDate: vehicle.fromDate,
       toDate: vehicle.toDate,
       totalDays,
@@ -481,18 +497,13 @@ const ADMIN_ORDER_GST_RATE = 0.18;
  * charges — are always zero here because the public site cannot enter them,
  * so the arithmetic reduces to rental + promoter + RTO.
  */
-const priceBookingItemFromPackage = (pkg, line) => {
+const priceBookingItemFromPackage = (pkg, line, promoterChargeMap) => {
   const totalDays = Number(line.totalDays) || 0;
   const quantity = Math.max(Number(line.quantity) || 1, 1);
   const needPromoter = Boolean(line.needPromoter);
   const promoterQuantity = needPromoter
     ? Math.max(Number(line.promoterQuantity) || 0, 0)
     : 0;
-
-  /* Same env constant, same default, as the admin controller reads */
-  const promoterChargePerDay = parseFloat(
-    process.env.DEFAULT_PROMOTER_CHARGE || "1000"
-  );
 
   const rentalCost = (pkg.perDayRentalCost || 0) * totalDays * quantity;
   const driverCost = (pkg.driverCharges || 0) * totalDays * quantity;
@@ -510,22 +521,36 @@ const priceBookingItemFromPackage = (pkg, line) => {
     }
   }
 
+  // State/city-wise charges — resolved from Package Management (RTO,
+  // Branding) and Promoter Management (promoter/day), same as the admin
+  // order controller. null means not configured for this line's state/city.
+  const resolvedRto = resolveRtoCharge(pkg, line.state, line.city);
+  const resolvedBranding = resolveBrandingCharge(pkg, line.state, line.city);
+  const resolvedPromoterCharge = needPromoter
+    ? resolvePromoterCharge(promoterChargeMap, line.state)
+    : 0;
+
+  const locationChargeErrors = [];
+  if (resolvedRto === null) locationChargeErrors.push("RTO charge is not configured for this vehicle's state/city");
+  if (resolvedBranding === null) locationChargeErrors.push("Branding cost is not configured for this vehicle's state/city");
+  if (needPromoter && resolvedPromoterCharge === null) locationChargeErrors.push("Promoter charge is not configured for this vehicle's state");
+
+  const promoterChargePerDay = resolvedPromoterCharge || 0;
   const promoterCost = needPromoter
     ? promoterChargePerDay * promoterDays * promoterQuantity
     : 0;
 
-  // RTO is duration-based for the client flow: one RTO cycle per 30
-  // campaign days, charged per vehicle. Admin's calcPricingBackend
-  // intentionally keeps the old flat rtoCharges * quantity formula for now.
+  // RTO is duration-based: one RTO cycle per 30 campaign days, charged per
+  // vehicle, at the resolved location's RTO rate.
   const { rtoCycles, rtoAmount: rtoCost } = calculateRTOCharges(
     totalDays,
     quantity,
-    pkg.rtoCharges || 0
+    resolvedRto || 0
   );
 
   // Branding Cost — only ever set on a Hybrid vehicle's package; same
   // one-time-per-vehicle-slot pattern as RTO, mirroring calcPricingBackend.
-  const brandingCost = (pkg.brandingCost || 0) * quantity;
+  const brandingCost = (resolvedBranding || 0) * quantity;
 
   const subtotal = rentalCost + promoterCost + rtoCost + brandingCost;
 
@@ -535,9 +560,10 @@ const priceBookingItemFromPackage = (pkg, line) => {
     driverCharges: pkg.driverCharges || 0,
     promoterChargePerDay: needPromoter ? promoterChargePerDay : 0,
     promoterDays,
-    rtoCharges: pkg.rtoCharges || 0,
+    rtoCharges: resolvedRto || 0,
     rtoCycles,
     brandingCost,
+    locationChargeErrors,
     additionalHourCharges: pkg.additionalHourCharges || 0,
     dailyKmLimit: pkg.dailyKmLimit || 0,
     dailyKmcharges: pkg.perKmCharge || 0,
@@ -591,6 +617,7 @@ const createOrderForClientRequest = async (clientRequest) => {
 
   if (!lines.length) return null;
 
+  const promoterChargeMap = await getPromoterChargeMap();
   const bookingItems = [];
 
   for (const line of lines) {
@@ -600,7 +627,12 @@ const createOrderForClientRequest = async (clientRequest) => {
 
     if (!pkg) return null;
 
-    const pricing = priceBookingItemFromPackage(pkg, line);
+    const pricing = priceBookingItemFromPackage(pkg, line, promoterChargeMap);
+    // Same "leave it for admin to create by hand" contract as a missing
+    // package above — an unconfigured RTO/Branding/Promoter charge for this
+    // line's state/city must never block the customer's own request from
+    // saving, it just means no Order gets auto-raised alongside it yet.
+    if (pricing.locationChargeErrors.length > 0) return null;
 
     const { campaignTypeRef, campaignTypeName } =
       await resolveCampaignTypeByName(line.campaignType);
@@ -613,8 +645,8 @@ const createOrderForClientRequest = async (clientRequest) => {
       /* No public entry point — admin fills these in */
       bookingFor: "",
       gstNumber: "",
-      state: "",
-      city: "",
+      state: line.state || "",
+      city: line.city || "",
       fromLocation: "",
       toLocation: "",
       extraKm: 0,

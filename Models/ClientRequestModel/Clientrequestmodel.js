@@ -47,6 +47,18 @@ const vehicleTypeQuantitySchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    // Drives Package/Promoter Management's location-wise RTO/Branding/
+    // Promoter charges — see Utils/locationChargeResolver.js.
+    state: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    city: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     fromDate: {
       type: Date,
       required: true,

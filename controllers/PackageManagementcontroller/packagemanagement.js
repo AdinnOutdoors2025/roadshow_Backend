@@ -2,7 +2,40 @@ const Package = require('../../Models/PackageManagementModel/packagemanagement')
 const VehicleType = require('../../Models/VehicleTypeSchema');
 const VehicleMaster = require('../../Models/vehicleDetails');
 const { successResponse, errorResponse } = require('../../Utils/response');
+const { LOCATION_BUCKETS } = require('../../Utils/locationChargeResolver');
 const mongoose = require('mongoose');
+
+const LOCATION_BUCKET_LABELS = {
+  chennai: 'Chennai',
+  rotn: 'ROTN',
+  kerala: 'Kerala',
+  andhra: 'Andhra',
+  telangana: 'Telangana',
+  karnataka: 'Karnataka',
+};
+
+// Every location bucket's RTO charge is mandatory on every package; Branding
+// Cost per location is mandatory only when the vehicle type is Hybrid
+// (mirrors the existing flat brandingCost rule). Returns an error message,
+// or null when the payload is valid.
+const validateLocationCharges = (locationCharges, isHybrid) => {
+  const charges = locationCharges || {};
+  for (const bucket of LOCATION_BUCKETS) {
+    const entry = charges[bucket] || {};
+    const label = LOCATION_BUCKET_LABELS[bucket];
+    const rto = Number(entry.rtoCharges);
+    if (!Number.isFinite(rto) || rto <= 0) {
+      return `RTO Charges for ${label} is required`;
+    }
+    if (isHybrid) {
+      const branding = Number(entry.brandingCost);
+      if (!Number.isFinite(branding) || branding <= 0) {
+        return `Branding Cost for ${label} is required for a Hybrid vehicle package`;
+      }
+    }
+  }
+  return null;
+};
 
 // Helper to convert string ID to ObjectId
 const toObjectId = (id) => {
@@ -31,8 +64,14 @@ exports.addPackage = async (req, res) => {
       return errorResponse(res, 'Invalid vehicle type ID', null, 400);
     }
 
-    if (await isHybridVehicleType(vehicleType) && !(Number(rest.brandingCost) > 0)) {
+    const isHybrid = await isHybridVehicleType(vehicleType);
+    if (isHybrid && !(Number(rest.brandingCost) > 0)) {
       return errorResponse(res, 'Branding Cost is required for a Hybrid vehicle package', null, 400);
+    }
+
+    const locationChargesError = validateLocationCharges(rest.locationCharges, isHybrid);
+    if (locationChargesError) {
+      return errorResponse(res, locationChargesError, null, 400);
     }
 
     const existingPackage = await Package.findOne({
@@ -86,8 +125,14 @@ exports.updatePackage = async (req, res) => {
       return errorResponse(res, 'Invalid vehicle type ID', null, 400);
     }
 
-    if (await isHybridVehicleType(vehicleType) && !(Number(rest.brandingCost) > 0)) {
+    const isHybrid = await isHybridVehicleType(vehicleType);
+    if (isHybrid && !(Number(rest.brandingCost) > 0)) {
       return errorResponse(res, 'Branding Cost is required for a Hybrid vehicle package', null, 400);
+    }
+
+    const locationChargesError = validateLocationCharges(rest.locationCharges, isHybrid);
+    if (locationChargesError) {
+      return errorResponse(res, locationChargesError, null, 400);
     }
 
     const pkg = await Package.findByIdAndUpdate(
