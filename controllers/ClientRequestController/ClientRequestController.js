@@ -11,7 +11,7 @@ const CampaignType = require("../../Models/CampaignTypeModel/campaigntype");
 const VehicleGroup = require("../../Models/vehicleDetails");
 const VehicleType = require("../../Models/VehicleTypeSchema");
 const Promoter = require("../../Models/Promotermodel/Promotermodel");
-const { resolveRtoCharge, resolveBrandingCharge, resolvePromoterCharge } = require("../../Utils/locationChargeResolver");
+const { resolveRtoCharge, resolveBrandingCharge, resolveBrandingIncludedInRental, resolvePromoterCharge } = require("../../Utils/locationChargeResolver");
 
 /** Mirrors getPromoterChargeMap() in the admin order controller. */
 async function getPromoterChargeMap() {
@@ -526,6 +526,7 @@ const priceBookingItemFromPackage = (pkg, line, promoterChargeMap) => {
   // order controller. null means not configured for this line's state/city.
   const resolvedRto = resolveRtoCharge(pkg, line.state, line.city);
   const resolvedBranding = resolveBrandingCharge(pkg, line.state, line.city);
+  const brandingIncludedInRental = resolveBrandingIncludedInRental(pkg, line.state, line.city);
   const resolvedPromoterCharge = needPromoter
     ? resolvePromoterCharge(promoterChargeMap, line.state)
     : 0;
@@ -548,9 +549,14 @@ const priceBookingItemFromPackage = (pkg, line, promoterChargeMap) => {
     resolvedRto || 0
   );
 
-  // Branding Cost — only ever set on a Hybrid vehicle's package; same
-  // one-time-per-vehicle-slot pattern as RTO, mirroring calcPricingBackend.
-  const brandingCost = (resolvedBranding || 0) * quantity;
+  // Branding Cost — only ever set on a Hybrid vehicle's package. Normally a
+  // one-time-per-vehicle-slot flat charge (same pattern as RTO); but when
+  // this location's "Rental Included" toggle is on, the rate is folded into
+  // the per-day rental and scales by totalDays like rentalCost does —
+  // mirrors calcPricingBackend.
+  const brandingCost = brandingIncludedInRental
+    ? (resolvedBranding || 0) * totalDays * quantity
+    : (resolvedBranding || 0) * quantity;
 
   const subtotal = rentalCost + promoterCost + rtoCost + brandingCost;
 
@@ -562,7 +568,9 @@ const priceBookingItemFromPackage = (pkg, line, promoterChargeMap) => {
     promoterDays,
     rtoCharges: resolvedRto || 0,
     rtoCycles,
+    brandingCharges: resolvedBranding || 0,
     brandingCost,
+    brandingIncludedInRental,
     locationChargeErrors,
     additionalHourCharges: pkg.additionalHourCharges || 0,
     dailyKmLimit: pkg.dailyKmLimit || 0,
@@ -695,7 +703,9 @@ const createOrderForClientRequest = async (clientRequest) => {
       promoterChargePerDay: pricing.promoterChargePerDay,
       promoterDays: pricing.promoterDays,
       rtoCharges: pricing.rtoCharges,
+      brandingCharges: pricing.brandingCharges,
       brandingCost: pricing.brandingCost,
+      brandingIncludedInRental: pricing.brandingIncludedInRental,
       additionalHourCharges: pricing.additionalHourCharges,
       dailyKmcharges: pricing.dailyKmcharges,
       dailyKmLimit: pricing.dailyKmLimit,

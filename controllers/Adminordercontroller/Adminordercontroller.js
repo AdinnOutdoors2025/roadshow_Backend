@@ -17,7 +17,7 @@ const { fetchVamosysApiKey, fetchAllVehicleLocations } = require("../../Utils/va
 const { deleteAgencyPoDocument } = require("../../Utils/agencyPoDocumentUpload");
 const { deleteManyFromSpaces, collectSpaceUrls } = require("../../Utils/deleteFromSpaces");
 const Promoter = require("../../Models/Promotermodel/Promotermodel");
-const { resolveRtoCharge, resolveBrandingCharge, resolvePromoterCharge } = require("../../Utils/locationChargeResolver");
+const { resolveRtoCharge, resolveBrandingCharge, resolveBrandingIncludedInRental, resolvePromoterCharge } = require("../../Utils/locationChargeResolver");
 
 /** Builds { "tamil nadu": 1200, "kerala": 1000, ... } (keys normalized trim+lowercase) from the Promoter location-charge rows. */
 async function getPromoterChargeMap() {
@@ -119,6 +119,7 @@ function calcPricingBackend(pkg, v, promoterChargeMap) {
   // that as a hard error, never a silent 0/hardcoded default.
   const resolvedRto = resolveRtoCharge(pkg, v.state, v.city);
   const resolvedBranding = resolveBrandingCharge(pkg, v.state, v.city);
+  const brandingIncludedInRental = resolveBrandingIncludedInRental(pkg, v.state, v.city);
   const resolvedPromoterCharge = needPromoter
     ? resolvePromoterCharge(promoterChargeMap, v.state)
     : 0;
@@ -136,9 +137,14 @@ function calcPricingBackend(pkg, v, promoterChargeMap) {
   // location's RTO rate per vehicle, 31-60 days = 2x, 61-90 days = 3x, etc.
   const rtoSlabMultiplier = Math.ceil(baseDays / 30);
   const rtoCost = (resolvedRto || 0) * rtoSlabMultiplier * quantity;
-  // Branding Cost — only ever set on a Hybrid vehicle's package; same
-  // one-time-per-vehicle-slot pattern as RTO.
-  const brandingCost = (resolvedBranding || 0) * quantity;
+  // Branding Cost — only ever set on a Hybrid vehicle's package. Normally a
+  // one-time-per-vehicle-slot flat charge (same pattern as RTO); but when
+  // this location's "Rental Included" toggle is on, the rate is folded into
+  // the per-day rental instead and so scales by totalDays like rentalCost
+  // does — an intentional business choice, not a display-only change.
+  const brandingCost = brandingIncludedInRental
+    ? (resolvedBranding || 0) * totalDays * quantity
+    : (resolvedBranding || 0) * quantity;
   const extraKmCost = extraKm > 0 ? (pkg.perKmCharge || 0) * extraKm : 0;
   const extraHourCost = extraHours > 0 ? pkg.additionalHourCharges * extraHours : 0;
 
@@ -172,7 +178,9 @@ function calcPricingBackend(pkg, v, promoterChargeMap) {
     promoterChargePerDay: needPromoter ? promoterChargePerDay : 0,
     promoterDays,
     rtoCharges: resolvedRto || 0,
+    brandingCharges: resolvedBranding || 0,
     brandingCost,
+    brandingIncludedInRental,
     locationChargeErrors,
     additionalHourCharges: pkg.additionalHourCharges,
     dailyKmLimit: pkg.dailyKmLimit,
@@ -417,7 +425,9 @@ exports.createAdminOrder = async (req, res) => {
         promoterChargePerDay: fp.promoterChargePerDay,
         promoterDays: fp.promoterDays,
         rtoCharges: fp.rtoCharges,
+        brandingCharges: fp.brandingCharges,
         brandingCost: fp.brandingCost,
+        brandingIncludedInRental: fp.brandingIncludedInRental,
         additionalHourCharges: fp.additionalHourCharges,
         dailyKmcharges: fp.dailyKmcharges,
         dailyKmLimit: fp.dailyKmLimit,
@@ -715,7 +725,9 @@ exports.updateAdminOrder = async (req, res) => {
         promoterChargePerDay: fp.promoterChargePerDay,
         promoterDays: fp.promoterDays,
         rtoCharges: fp.rtoCharges,
+        brandingCharges: fp.brandingCharges,
         brandingCost: fp.brandingCost,
+        brandingIncludedInRental: fp.brandingIncludedInRental,
         additionalHourCharges: fp.additionalHourCharges,
         dailyKmcharges: fp.dailyKmcharges,
         dailyKmLimit: fp.dailyKmLimit,

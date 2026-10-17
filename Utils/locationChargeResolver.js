@@ -70,6 +70,19 @@ const resolveBrandingCharge = (pkg, state, city) => {
 };
 
 /**
+ * Whether this location's Branding Cost should be folded into the displayed
+ * Rental amount instead of shown as its own line — a per-location display
+ * choice set in Package Management, independent of RTO and of the other 5
+ * locations. Never affects totals/GST, only how a booking line's rows are
+ * grouped on screen. Defaults to false (unresolved state/city, or unset).
+ */
+const resolveBrandingIncludedInRental = (pkg, state, city) => {
+  const bucket = resolveLocationBucket(state, city);
+  if (!bucket) return false;
+  return Boolean(pkg?.locationCharges?.[bucket]?.brandingIncludedInRental);
+};
+
+/**
  * `chargesByState` is a plain object keyed by the Promoter doc's own `state`
  * string, normalized (trim + lowercase) — built fresh from whatever rows
  * exist, no fixed key set. `state` here is the booking line's real state
@@ -90,5 +103,6 @@ module.exports = {
   resolveLocationBucket,
   resolveRtoCharge,
   resolveBrandingCharge,
+  resolveBrandingIncludedInRental,
   resolvePromoterCharge,
 };

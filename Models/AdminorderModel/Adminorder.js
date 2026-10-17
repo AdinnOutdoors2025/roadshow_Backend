@@ -81,9 +81,20 @@ const bookingItemSchema = new mongoose.Schema({
   driverCharges: { type: Number, default: 0 },
   promoterChargePerDay: { type: Number, default: 0 },
   rtoCharges: { type: Number, default: 0 },
-  // Only ever set on a Hybrid vehicle's package — a one-time flat charge
-  // per vehicle-type slot, same pattern as rtoCost below.
+  // Only ever set on a Hybrid vehicle's package. Per-vehicle rate; the total
+  // (brandingCost below) is rate × quantity normally, or rate × totalDays ×
+  // quantity when brandingIncludedInRental is true (folded into the per-day
+  // rental, same pattern as perDayRentalCost).
+  brandingCharges: { type: Number, default: 0 },
   brandingCost: { type: Number, default: 0 },
+  // Snapshot of the package's per-location display toggle at the moment
+  // this line was priced — if true, UIs fold brandingCost into the shown
+  // Rental row instead of a separate Branding row, AND brandingCost itself
+  // was computed scaled by totalDays (see brandingCharges above) — this
+  // does change the order's total/GST, it is not a display-only choice.
+  // Snapshotted (not read live from the package) so a later change to the
+  // package setting never alters how an already-placed order was priced.
+  brandingIncludedInRental: { type: Boolean, default: false },
   additionalHourCharges: { type: Number, default: 0 },
   dailyKmcharges: { type: Number, default: 0 },
   campaignImages: [String],

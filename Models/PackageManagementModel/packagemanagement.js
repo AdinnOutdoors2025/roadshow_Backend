@@ -32,12 +32,17 @@ const packageSchema = new mongoose.Schema({
   // only when the vehicle type is Hybrid), validated in the controller.
   locationCharges: {
     type: new mongoose.Schema({
-      chennai: { rtoCharges: Number, brandingCost: Number },
-      rotn: { rtoCharges: Number, brandingCost: Number },
-      kerala: { rtoCharges: Number, brandingCost: Number },
-      andhra: { rtoCharges: Number, brandingCost: Number },
-      telangana: { rtoCharges: Number, brandingCost: Number },
-      karnataka: { rtoCharges: Number, brandingCost: Number },
+      // brandingIncludedInRental: when true, this location's Branding Cost
+      // is folded into the displayed Rental amount (not shown as its own
+      // line) wherever pricing is rendered — a per-location display choice,
+      // independent of the other 5 locations. Never affects totals/GST,
+      // only how the already-identical subtotal is broken into rows.
+      chennai: { rtoCharges: Number, brandingCost: Number, brandingIncludedInRental: { type: Boolean, default: false } },
+      rotn: { rtoCharges: Number, brandingCost: Number, brandingIncludedInRental: { type: Boolean, default: false } },
+      kerala: { rtoCharges: Number, brandingCost: Number, brandingIncludedInRental: { type: Boolean, default: false } },
+      andhra: { rtoCharges: Number, brandingCost: Number, brandingIncludedInRental: { type: Boolean, default: false } },
+      telangana: { rtoCharges: Number, brandingCost: Number, brandingIncludedInRental: { type: Boolean, default: false } },
+      karnataka: { rtoCharges: Number, brandingCost: Number, brandingIncludedInRental: { type: Boolean, default: false } },
     }, { _id: false }),
     default: () => ({}),
   },
